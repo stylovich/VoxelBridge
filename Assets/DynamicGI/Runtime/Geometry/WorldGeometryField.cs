@@ -96,6 +96,19 @@ namespace DynamicGI.Geometry
 
         public static WorldGeometryField Active { get; private set; }
 
+        /// <summary>
+        /// Raised after the brick map is reset and a full geometry rebuild is queued.
+        /// Dependent fields should invalidate their complete domain, but wait until
+        /// DirtyBrickCount reaches zero before consuming occupancy.
+        /// </summary>
+        public event Action<Bounds> GeometryFieldReset;
+
+        /// <summary>
+        /// Raised after one brick has finished GPU voxelization. Consumers can expand
+        /// this region according to their own influence radius and deduplicate updates.
+        /// </summary>
+        public event Action<Bounds> GeometryRegionRebuilt;
+
         public Bounds FieldBounds => new(transform.position + fieldCenter, fieldSize);
         public float VoxelSize => voxelSize;
         public int BrickResolution => brickResolution;
@@ -153,7 +166,9 @@ namespace DynamicGI.Geometry
         private void OnValidate()
         {
             voxelSize = Mathf.Max(0.05f, voxelSize);
-            brickResolution = Mathf.Clamp(brickResolution, 4, 32);
+            // Power-of-two bricks allow the very hot GPU occupancy lookup used by
+            // every DDA step to replace integer division/modulo with bit operations.
+            brickResolution = Mathf.ClosestPowerOfTwo(Mathf.Clamp(brickResolution, 4, 32));
             maxActiveBricks = Mathf.Max(1, maxActiveBricks);
             rebuildBudgetBricksPerFrame = Mathf.Max(1, rebuildBudgetBricksPerFrame);
             recentRegionLifetimeFrames = Mathf.Max(1, recentRegionLifetimeFrames);
@@ -222,6 +237,7 @@ namespace DynamicGI.Geometry
                 InvalidateRegionInternal(sources[i].Renderer.bounds);
 
             RebuildPageTable();
+            GeometryFieldReset?.Invoke(FieldBounds);
         }
 
         /// <summary>
@@ -273,6 +289,21 @@ namespace DynamicGI.Geometry
             pendingQueryCallback = callback;
             queryPending = true;
             AsyncGPUReadback.Request(queryResultBuffer, OnOccupancyReadback);
+            return true;
+        }
+
+        /// <summary>
+        /// Binds the sparse occupancy resources and world-space layout to another
+        /// compute kernel. This is the supported bridge for occlusion/radiance fields;
+        /// callers never need access to the underlying buffers.
+        /// </summary>
+        public bool BindSamplingResources(ComputeShader targetShader, int kernel)
+        {
+            if (targetShader == null || !EnsureInitialized())
+                return false;
+
+            BindFieldData(targetShader, kernel);
+            targetShader.SetInt(FieldAvailableId, 1);
             return true;
         }
 
@@ -369,6 +400,7 @@ namespace DynamicGI.Geometry
 
         private void Initialize()
         {
+            brickResolution = Mathf.ClosestPowerOfTwo(Mathf.Clamp(brickResolution, 4, 32));
             ReleaseGpuResources();
             TryAssignDefaultComputeShader();
 
@@ -657,6 +689,7 @@ namespace DynamicGI.Geometry
             recentRegions.Add(new RecentRegion(brick.WorldBounds, Time.frameCount + recentRegionLifetimeFrames));
             if (recentRegions.Count > 256)
                 recentRegions.RemoveAt(0);
+            GeometryRegionRebuilt?.Invoke(brick.WorldBounds);
         }
 
         private bool TryGetMeshGpuData(Mesh mesh, out MeshGpuData data)

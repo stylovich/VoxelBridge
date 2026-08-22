@@ -53,16 +53,21 @@ int DynamicGIFindGeometryBrick(int3 coordinate)
     return -1;
 }
 
-uint SampleGeometryOccupancy(float3 positionWS)
+int3 DynamicGIGetGeometryVoxelResolution()
 {
-    float3 relative = positionWS - _DynamicGI_GeometryFieldOrigin;
-    if (any(relative < 0.0) || any(relative >= _DynamicGI_GeometryFieldSize))
+    return (int3)ceil(_DynamicGI_GeometryFieldSize / _DynamicGI_GeometryVoxelSize);
+}
+
+uint DynamicGIReadGeometryVoxel(int3 globalVoxel)
+{
+    int3 fieldResolution = DynamicGIGetGeometryVoxelResolution();
+    if (any(globalVoxel < 0) || any(globalVoxel >= fieldResolution))
         return 0u;
 
-    int3 globalVoxel = (int3)floor(relative / _DynamicGI_GeometryVoxelSize);
     int resolution = _DynamicGI_GeometryBrickResolution;
-    int3 brickCoordinate = globalVoxel / resolution;
-    int3 localVoxel = globalVoxel - brickCoordinate * resolution;
+    uint brickShift = firstbithigh((uint)resolution);
+    int3 brickCoordinate = globalVoxel >> brickShift;
+    int3 localVoxel = globalVoxel & (resolution - 1);
     int brickSlot = DynamicGIFindGeometryBrick(brickCoordinate);
     if (brickSlot < 0)
         return 0u;
@@ -71,6 +76,15 @@ uint SampleGeometryOccupancy(float3 positionWS)
     int wordIndex = brickSlot * _DynamicGI_GeometryWordsPerBrick + (linearIndex >> 5);
     uint bitMask = 1u << (linearIndex & 31);
     return ((_DynamicGI_BaseOccupancy[wordIndex] | _DynamicGI_DynamicOccupancy[wordIndex]) & bitMask) != 0u;
+}
+
+uint SampleGeometryOccupancy(float3 positionWS)
+{
+    float3 relative = positionWS - _DynamicGI_GeometryFieldOrigin;
+    if (any(relative < 0.0) || any(relative >= _DynamicGI_GeometryFieldSize))
+        return 0u;
+
+    return DynamicGIReadGeometryVoxel((int3)floor(relative / _DynamicGI_GeometryVoxelSize));
 }
 
 // Shader Graph Custom Function entry point.
