@@ -1,0 +1,22 @@
+# This repository intentionally tracks only the portable DynamicGI module.
+# The Polygon environment, scenes, imported packages, generated data, and Unity
+# caches belong to the local laboratory and are deliberately excluded.
+*
+
+# Repository metadata and documentation.
+!/.gitignore
+!/.gitattributes
+!/README.md
+
+# Portable Unity package content, including every required .meta file.
+!/Assets/
+/Assets/*
+!/Assets/DynamicGI.meta
+!/Assets/DynamicGI/
+!/Assets/DynamicGI/**
+
+# Record the editor version used to validate the module without carrying the
+# rest of the project-specific settings into another project.
+!/ProjectSettings/
+/ProjectSettings/*
+!/ProjectSettings/ProjectVersion.txt
