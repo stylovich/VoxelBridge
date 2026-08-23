@@ -20,7 +20,7 @@ struct DynamicGIProviderValidationResult
 
 RWStructuredBuffer<DynamicGIProviderValidationResult> _DynamicGIProviderResults;
 
-[numthreads(64, 1, 1)]
+[numthreads(8, 1, 1)]
 void QueryDynamicGI(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     uint index = dispatchThreadId.x;
@@ -30,7 +30,7 @@ void QueryDynamicGI(uint3 dispatchThreadId : SV_DispatchThreadID)
     _DynamicGISampleResults[index] = float4(value, 1.0);
 }
 
-[numthreads(64, 1, 1)]
+[numthreads(8, 1, 1)]
 void QuerySurfaceDynamicGI(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     uint index = dispatchThreadId.x;
@@ -43,7 +43,7 @@ void QuerySurfaceDynamicGI(uint3 dispatchThreadId : SV_DispatchThreadID)
     _DynamicGISampleResults[index] = float4(value, 1.0);
 }
 
-[numthreads(64, 1, 1)]
+[numthreads(1, 1, 1)]
 void QueryIndirectLightingProvider(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     uint index = dispatchThreadId.x;

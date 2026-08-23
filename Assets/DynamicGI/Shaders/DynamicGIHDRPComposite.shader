@@ -13,6 +13,7 @@ Shader "Hidden/DynamicGI/HDRPComposite"
     TEXTURE2D_X(_GBufferTexture0);
     float _DynamicGI_HDRPAlbedoWeight;
     float _DynamicGI_HDRPViewBias;
+    float _DynamicGI_ReplacementDarkeningStrength;
 
     float4 DynamicGIComposite(Varyings varyings) : SV_Target
     {
@@ -48,8 +49,34 @@ Shader "Hidden/DynamicGI/HDRPComposite"
             surfaceTint = lerp(1.0.xxx, gbufferAlbedo, saturate(_DynamicGI_HDRPAlbedoWeight));
         }
 
-        // Camera color is pre-exposed at this injection point.
-        return float4(dynamicIndirect * surfaceTint * GetCurrentExposureMultiplier(), 0.0);
+        // The prototype field is already normalized to display-linear, pre-exposed
+        // energy (for example 130 klux maps to roughly 1.3 before transport). Applying
+        // HDRP exposure again made useful values require an arbitrary 100-1000x gain.
+        return float4(dynamicIndirect * surfaceTint, 0.0);
+    }
+
+    float4 DynamicGIReplacementDarkening(Varyings varyings) : SV_Target
+    {
+        UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(varyings);
+        uint2 pixel = (uint2)varyings.positionCS.xy;
+        float depth = LoadCameraDepth(pixel);
+        if (depth == UNITY_RAW_FAR_CLIP_VALUE)
+            return 1.0;
+
+        PositionInputs positionInput = GetPositionInput(
+            pixel,
+            _ScreenSize.zw,
+            depth,
+            UNITY_MATRIX_I_VP,
+            UNITY_MATRIX_V);
+        float3 positionAWS = GetAbsolutePositionWS(positionInput.positionWS);
+        float3 cameraAWS = GetAbsolutePositionWS(GetPrimaryCameraPosition());
+        float3 toCamera = cameraAWS - positionAWS;
+        positionAWS += toCamera * rsqrt(max(dot(toCamera, toCamera), 1e-6)) * max(0.0, _DynamicGI_HDRPViewBias);
+
+        float accessibility = SampleDynamicGIAmbientAccessibility(positionAWS);
+        float factor = lerp(1.0, accessibility, saturate(_DynamicGI_ReplacementDarkeningStrength));
+        return factor.xxxx;
     }
 
     ENDHLSL
@@ -67,6 +94,20 @@ Shader "Hidden/DynamicGI/HDRPComposite"
 
             HLSLPROGRAM
             #pragma fragment DynamicGIComposite
+            ENDHLSL
+        }
+        Pass
+        {
+            Name "Dynamic GI Replacement Darkening"
+            ZWrite Off
+            ZTest Always
+            // Multiply the already-rendered camera color by the accessibility factor.
+            Blend DstColor Zero
+            ColorMask RGB
+            Cull Off
+
+            HLSLPROGRAM
+            #pragma fragment DynamicGIReplacementDarkening
             ENDHLSL
         }
     }

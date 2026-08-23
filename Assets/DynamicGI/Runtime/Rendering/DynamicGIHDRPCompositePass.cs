@@ -6,10 +6,11 @@ using UnityEngine.Rendering.HighDefinition;
 namespace DynamicGI.Rendering
 {
     /// <summary>
-    /// HDRP compatibility bridge for stock opaque materials. It adds only the
-    /// Dynamic GI term to camera color at BeforeTransparent. Custom materials should
-    /// use IndirectLightingProvider.hlsl instead, where Existing/APV can be supplied
-    /// or omitted explicitly.
+    /// HDRP compatibility bridge for stock opaque materials. ExistingPlusDynamic is
+    /// strictly additive. DynamicOnly can first apply an approximate accessibility
+    /// darkening pass, then add Dynamic GI. Custom materials remain the exact path
+    /// because they can replace only the indirect lobe without attenuating direct or
+    /// specular lighting.
     /// </summary>
     [Serializable]
     public sealed class DynamicGIHDRPCompositePass : CustomPass
@@ -57,6 +58,12 @@ namespace DynamicGI.Rendering
                 (!renderInReflectionCameras && camera.cameraType == CameraType.Reflection))
                 return;
 
+            if (controls.ProviderMode == IndirectLightingProviderMode.DynamicOnly &&
+                controls.ScreenSpaceReplacementDarkening &&
+                controls.ReplacementDarkeningStrength > 0f)
+            {
+                CoreUtils.DrawFullScreen(ctx.cmd, material, ctx.propertyBlock, shaderPassId: 1);
+            }
             CoreUtils.DrawFullScreen(ctx.cmd, material, ctx.propertyBlock, shaderPassId: 0);
         }
 

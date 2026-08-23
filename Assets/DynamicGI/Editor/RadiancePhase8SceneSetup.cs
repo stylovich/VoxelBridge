@@ -34,13 +34,6 @@ namespace DynamicGI.Editor
             Transform blocked = FindNamedTransform(scene, "Emissive Blocked Probe Marker");
             Transform occluder = FindNamedTransform(scene, "Emissive DDA Occluder");
             GIEmissiveContributor contributor = FindSingle<GIEmissiveContributor>(scene);
-            contributor.Configure(
-                ToRendererArray(contributor.Renderers),
-                TestEmission,
-                20f,
-                0.1f,
-                1,
-                true);
 
             Phase8PropagationTestGuide guide = root.AddComponent<Phase8PropagationTestGuide>();
             SerializedObject serializedGuide = new(guide);
@@ -89,7 +82,7 @@ namespace DynamicGI.Editor
 
             Debug.Log(
                 "DYNAMIC_GI_PHASE8_TESTGI_CONFIGURED | propagation=10x strength0.8 retention0.65 surfaceReflectivity0.35 | " +
-                "C0+C1 | emissiveDirectRange=0.1m | queryY=3.25 | ceilingY=4.25 | " +
+                $"C0+C1 | emissiveDirectRange={contributor.InfluenceRange:0.0}m | queryY=3.25 | ceilingY=4.25 | " +
                 "debug=PropagationDelta/-Y autoExposure");
         }
 

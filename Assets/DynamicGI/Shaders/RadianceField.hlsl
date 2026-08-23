@@ -1,6 +1,8 @@
 #ifndef DYNAMIC_GI_RADIANCE_FIELD_INCLUDED
 #define DYNAMIC_GI_RADIANCE_FIELD_INCLUDED
 
+#include "GeometryField.hlsl"
+
 // Phase 4 local field.
 Texture3D<float4> _DynamicGI_RadiancePositiveX;
 Texture3D<float4> _DynamicGI_RadianceNegativeX;
@@ -36,6 +38,8 @@ DYNAMIC_GI_DECLARE_CASCADE_TEXTURES(3)
 int _DynamicGI_RadianceClipmapAvailable;
 int _DynamicGI_RadianceCascadeCount;
 float _DynamicGI_RadianceCascadeBlendStart;
+int _DynamicGI_GeometryAwareSurfaceSampling;
+int _DynamicGI_SurfaceVisibilityMaxSteps;
 
 void DynamicGIGetCascadeLayout(int cascadeIndex, out float3 origin, out float3 size, out int3 resolution, out int3 ringOffset)
 {
@@ -103,7 +107,7 @@ float4 DynamicGILoadCascadeDirection(int cascadeIndex, int directionIndex, int3 
     return value;
 }
 
-float3 DynamicGILoadCascadeIrradiance(int cascadeIndex, int3 logicalCoordinate, int3 resolution, int3 ringOffset, float3 normalWS)
+float4 DynamicGILoadCascadeIrradianceAndValidity(int cascadeIndex, int3 logicalCoordinate, int3 resolution, int3 ringOffset, float3 normalWS)
 {
     int3 physical = (logicalCoordinate + ringOffset) & (resolution - 1);
     float3 normal = normalize(normalWS);
@@ -112,9 +116,22 @@ float3 DynamicGILoadCascadeIrradiance(int cascadeIndex, int3 logicalCoordinate, 
     int directionX = normal.x >= 0.0 ? 0 : 1;
     int directionY = normal.y >= 0.0 ? 2 : 3;
     int directionZ = normal.z >= 0.0 ? 4 : 5;
-    return DynamicGILoadCascadeDirection(cascadeIndex, directionX, physical).rgb * weights.x +
-           DynamicGILoadCascadeDirection(cascadeIndex, directionY, physical).rgb * weights.y +
-           DynamicGILoadCascadeDirection(cascadeIndex, directionZ, physical).rgb * weights.z;
+    float4 x = DynamicGILoadCascadeDirection(cascadeIndex, directionX, physical);
+    float4 y = DynamicGILoadCascadeDirection(cascadeIndex, directionY, physical);
+    float4 z = DynamicGILoadCascadeDirection(cascadeIndex, directionZ, physical);
+    return float4(
+        x.rgb * weights.x + y.rgb * weights.y + z.rgb * weights.z,
+        x.a * weights.x + y.a * weights.y + z.a * weights.z);
+}
+
+float3 DynamicGILoadCascadeIrradiance(int cascadeIndex, int3 logicalCoordinate, int3 resolution, int3 ringOffset, float3 normalWS)
+{
+    return DynamicGILoadCascadeIrradianceAndValidity(
+        cascadeIndex,
+        logicalCoordinate,
+        resolution,
+        ringOffset,
+        normalWS).rgb;
 }
 
 bool DynamicGICascadeContains(int cascadeIndex, float3 positionWS)
@@ -159,10 +176,111 @@ float3 DynamicGISampleRadianceCascade(int cascadeIndex, float3 positionWS, float
     return max(0.0, lerp(z0, z1, fraction.z));
 }
 
+float DynamicGIVisibleProbeWeight(
+    float3 samplePositionWS,
+    float3 probePositionWS,
+    float interpolationWeight,
+    float probeValidity)
+{
+    float weight = interpolationWeight * saturate(probeValidity);
+    if (weight <= 1e-6 || _DynamicGI_GeometryFieldAvailable == 0)
+        return weight;
+
+    float3 toProbe = probePositionWS - samplePositionWS;
+    float distanceToProbe = length(toProbe);
+    if (distanceToProbe <= max(1e-4, _DynamicGI_GeometryVoxelSize * 0.1))
+        return weight;
+
+    float endpointBias = min(_DynamicGI_GeometryVoxelSize * 0.35, distanceToProbe * 0.2);
+    bool blocked = DynamicGITraceGeometryDDA(
+        samplePositionWS,
+        toProbe / distanceToProbe,
+        max(0.0, distanceToProbe - endpointBias),
+        max(1, _DynamicGI_SurfaceVisibilityMaxSteps));
+    return blocked ? 0.0 : weight;
+}
+
+void DynamicGIAccumulateVisibleCascadeProbe(
+    int cascadeIndex,
+    int3 logicalCoordinate,
+    int3 resolution,
+    int3 ringOffset,
+    float3 cascadeOrigin,
+    float3 cellSize,
+    float3 samplePositionWS,
+    float3 normalWS,
+    float interpolationWeight,
+    inout float3 weightedRadiance,
+    inout float accumulatedWeight)
+{
+    float4 value = DynamicGILoadCascadeIrradianceAndValidity(
+        cascadeIndex,
+        logicalCoordinate,
+        resolution,
+        ringOffset,
+        normalWS);
+    float3 probePositionWS = cascadeOrigin + ((float3)logicalCoordinate + 0.5) * cellSize;
+    float visibleWeight = DynamicGIVisibleProbeWeight(
+        samplePositionWS,
+        probePositionWS,
+        interpolationWeight,
+        value.a);
+    weightedRadiance += value.rgb * visibleWeight;
+    accumulatedWeight += visibleWeight;
+}
+
+// Correctness-first surface lookup. Unlike raw trilinear filtering, each candidate
+// probe must have line of sight to the biased surface sample through the Geometry
+// Field. This prevents exterior probes from bleeding through walls and T-junctions.
+// It costs up to eight short DDA traversals per sampled cascade, so callers can turn
+// it off globally when using a cheaper material integration.
+float3 DynamicGISampleRadianceCascadeAtSurface(int cascadeIndex, float3 positionWS, float3 normalWS)
+{
+    float3 origin, size;
+    int3 resolution, ringOffset;
+    DynamicGIGetCascadeLayout(cascadeIndex, origin, size, resolution, ringOffset);
+    float3 cellSize = size / (float3)resolution;
+    float3 gridPosition = (positionWS - origin) / cellSize - 0.5;
+    int3 baseCoordinate = (int3)floor(gridPosition);
+    float3 fraction = frac(gridPosition);
+    int3 c0 = clamp(baseCoordinate, 0, resolution - 1);
+    int3 c1 = clamp(baseCoordinate + 1, 0, resolution - 1);
+    float3 inverseFraction = 1.0 - fraction;
+
+    float3 weightedRadiance = 0.0;
+    float accumulatedWeight = 0.0;
+    [loop]
+    for (int cornerIndex = 0; cornerIndex < 8; cornerIndex++)
+    {
+        int3 selectUpper = int3(cornerIndex & 1, (cornerIndex >> 1) & 1, (cornerIndex >> 2) & 1);
+        int3 coordinate = int3(
+            selectUpper.x != 0 ? c1.x : c0.x,
+            selectUpper.y != 0 ? c1.y : c0.y,
+            selectUpper.z != 0 ? c1.z : c0.z);
+        float3 cornerWeight = float3(
+            selectUpper.x != 0 ? fraction.x : inverseFraction.x,
+            selectUpper.y != 0 ? fraction.y : inverseFraction.y,
+            selectUpper.z != 0 ? fraction.z : inverseFraction.z);
+        DynamicGIAccumulateVisibleCascadeProbe(
+            cascadeIndex,
+            coordinate,
+            resolution,
+            ringOffset,
+            origin,
+            cellSize,
+            positionWS,
+            normalWS,
+            cornerWeight.x * cornerWeight.y * cornerWeight.z,
+            weightedRadiance,
+            accumulatedWeight);
+    }
+    return accumulatedWeight > 1e-5 ? max(0.0, weightedRadiance / accumulatedWeight) : 0.0;
+}
+
 float3 DynamicGISampleClipmap(float3 positionWS, float3 normalWS)
 {
     float3 result = 0.0;
-    [unroll]
+    [loop]
     for (int cascadeIndex = 0; cascadeIndex < 4; cascadeIndex++)
     {
         if (cascadeIndex >= _DynamicGI_RadianceCascadeCount || !DynamicGICascadeContains(cascadeIndex, positionWS))
@@ -187,6 +305,31 @@ float3 DynamicGISampleClipmap(float3 positionWS, float3 normalWS)
         break;
     }
     return result;
+}
+
+float3 DynamicGISampleClipmapAtSurface(float3 positionWS, float3 normalWS)
+{
+    [loop]
+    for (int cascadeIndex = 0; cascadeIndex < 4; cascadeIndex++)
+    {
+        if (cascadeIndex >= _DynamicGI_RadianceCascadeCount || !DynamicGICascadeContains(cascadeIndex, positionWS))
+            continue;
+
+        float3 fine = DynamicGISampleRadianceCascadeAtSurface(cascadeIndex, positionWS, normalWS);
+        int coarseIndex = cascadeIndex + 1;
+        if (coarseIndex >= _DynamicGI_RadianceCascadeCount || !DynamicGICascadeContains(coarseIndex, positionWS))
+            return fine;
+        float edge = DynamicGICascadeEdgeFactor(cascadeIndex, positionWS);
+        float blend = saturate((edge - _DynamicGI_RadianceCascadeBlendStart) /
+                               max(1e-4, 1.0 - _DynamicGI_RadianceCascadeBlendStart));
+        if (blend <= 0.0)
+            return fine;
+        return lerp(
+            fine,
+            DynamicGISampleRadianceCascadeAtSurface(coarseIndex, positionWS, normalWS),
+            blend);
+    }
+    return 0.0;
 }
 
 float3 DynamicGISampleLocalRadiance(float3 positionWS, float3 normalWS)
@@ -222,8 +365,14 @@ float3 SampleDynamicGI(float3 positionWS, float3 normalWS)
 // on the near-cascade spacing and the source project's geometry scale.
 float3 SampleDynamicGIAtSurface(float3 positionWS, float3 normalWS, float normalBias)
 {
-    float3 normal = normalize(normalWS);
-    return SampleDynamicGI(positionWS + normal * max(0.0, normalBias), normal);
+    float3 normal = normalWS * rsqrt(max(dot(normalWS, normalWS), 1e-8));
+    float3 samplePositionWS = positionWS + normal * max(0.0, normalBias);
+    float3 result = 0.0;
+    if (_DynamicGI_RadianceClipmapAvailable != 0 && _DynamicGI_GeometryAwareSurfaceSampling != 0)
+        result = DynamicGISampleClipmapAtSurface(samplePositionWS, normal);
+    else
+        result = SampleDynamicGI(samplePositionWS, normal);
+    return max(0.0, result);
 }
 
 void SampleDynamicGI_float(float3 PositionWS, float3 NormalWS, out float3 DynamicGI)

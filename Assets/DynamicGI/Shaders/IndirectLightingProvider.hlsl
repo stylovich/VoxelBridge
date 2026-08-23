@@ -53,9 +53,9 @@ float3 SampleIndirectLightingProvider(float3 positionWS, float3 normalWS, float3
     return max(0.0, existingIndirect) + dynamicIndirect;
 }
 
-// The stock-material HDRP bridge is additive by construction. DynamicOnly still adds
-// Dynamic GI, but cannot remove APV already evaluated by HDRP; use the provider above
-// inside the material when a true replacement is required.
+// This function is the additive lobe of the stock-material HDRP bridge. In DynamicOnly
+// the Custom Pass may first apply an approximate screen-space accessibility multiply;
+// use the provider above inside the material for an exact indirect-lobe replacement.
 float3 SampleDynamicGIForAdditiveBridge(float3 positionWS, float3 normalWS)
 {
     if (_DynamicGI_ScreenSpaceBridgeEnabled == 0 ||

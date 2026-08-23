@@ -1,7 +1,9 @@
-# Dynamic GI prototype — Phases 1–8 Geometry, Visibility, Clipmaps, Sources, and Propagation
+# Dynamic GI prototype — Phases 1–10 Geometry, Visibility, Radiance, and Rendering
 
-This folder contains the portable runtime GI prototype. It does not replace or modify
-HDRP APV, HTrace SSGI, or HTrace AO.
+This folder contains the portable runtime GI prototype. It coexists additively with
+HDRP APV, HTrace SSGI, or HTrace AO by default. Phase 10 also provides an explicit
+`DynamicOnly` laboratory preview; exact APV-free replacement remains a per-material
+integration through the provider include.
 Phase 3 consumes the Geometry Field but remains an independent ambient-accessibility
 signal; no existing indirect-lighting result is modified automatically.
 
@@ -374,11 +376,12 @@ and the resulting GPU memory estimate.
 
 ### TestGI Phase-8 ceiling bounce
 
-Run **Tools > Dynamic GI > Phase 8 > Configure TestGI Diffuse Propagation**. The neon's
-direct range becomes `0.1 m`; a violet marker at the ceiling is therefore outside direct
-injection but reachable in three C0 neighbor steps. The debug direction becomes `-Y`,
-matching the underside of the ceiling. The existing red marker remains behind the
-voxelized divider.
+Run **Tools > Dynamic GI > Phase 8 > Configure TestGI Diffuse Propagation**. Normal
+scene setup preserves the Phase-7 neon values (`intensity 2.5`, `range 4 m`) so the
+visual test does not contain an artificial contact hotspot. The automated validator
+temporarily switches to `intensity 20`, `range 0.1 m` to isolate propagation from direct
+injection, then restores the contributor. A violet marker at the ceiling is used for
+the propagated `-Y` lobe. The existing red marker remains behind the voxelized divider.
 
 `RadianceClipmapDebug` exposes three non-destructive value sources: `Resolved` is the
 field consumed by shaders, `Direct` is the immutable Sun/sky/emissive injection, and
@@ -494,26 +497,44 @@ _DynamicGI_OcclusionStrength
 _DynamicGI_IndirectSaturation
 _DynamicGI_IndirectIntensity
 _DynamicGI_SurfaceNormalBias
+_DynamicGI_GeometryAwareSurfaceSampling
+_DynamicGI_SurfaceVisibilityMaxSteps
 _DynamicGI_IndirectProviderMode
+_DynamicGI_ReplacementDarkeningStrength
 ```
 
 Material-facing controlled samples move the world position along the visible normal
 before trilinear lookup. This prevents a floor, wall, or ceiling pixel from blending
-valid probes on the opposite side of a thin shell. The HDRP stock-material bridge has
-an additional camera-facing `HDRP View Bias` for T-junction pixels where a single
-surface normal cannot describe the intersecting wall. In TestGI the values are 0.625 m
-and 0.4 m respectively, derived from C0's 0.5 m spacing and 0.25 m geometry voxels;
-they remain configurable for projects with a different scale.
+valid probes on the opposite side of a thin shell. When geometry-aware sampling is
+enabled, every one of the eight trilinear probe candidates must also have a clear short
+Geometry Field DDA path to the biased surface point. Blocked or invalid candidates are
+discarded and the surviving weights are renormalized. This closes wall/floor/ceiling
+junction leaks, at the cost of up to eight DDA traces for every sampled cascade. The
+maximum step count and the feature itself are configurable.
+
+The HDRP stock-material bridge has an additional camera-facing `HDRP View Bias` for
+T-junction pixels where a single surface normal cannot describe the intersecting wall.
+In TestGI the normal and view values are 0.625 m and 0.4 m respectively, derived from
+C0's 0.5 m spacing and 0.25 m geometry voxels; they remain configurable for projects
+with a different scale.
 
 HDRP stock Lit materials cannot call a custom include without being modified, so the
 portable module also provides `DynamicGIHDRPCompositePass`. It reconstructs absolute
-world position and normal from HDRP depth/normal buffers and adds only Dynamic GI to
-opaque camera color at `BeforeTransparent`. This gives immediate APV coexistence in
-the laboratory without replacing materials. It is intentionally a compatibility
-bridge: it does not affect transparents, cannot remove APV in `DynamicOnly`, and does
-not know the exact material diffuse BRDF. Use the material provider for final-quality
-integration. Optional GBuffer albedo weighting is disabled by default so forward
-opaque materials remain valid.
+world position and normal from HDRP depth/normal buffers. In `ExistingPlusDynamic` it
+is strictly additive, leaving APV and existing ambient untouched. In `DynamicOnly` an
+optional replacement preview first multiplies opaque camera color by sky accessibility,
+then adds Dynamic GI. The multiply is intentionally never used in coexistence mode.
+
+This remains a compatibility bridge: screen space cannot separate ambient from direct
+and specular lighting, so replacement darkening also attenuates those lobes. It does
+not affect transparents and does not know the exact material diffuse BRDF. Use the
+material provider for final-quality APV replacement. Optional GBuffer albedo weighting
+is disabled by default so forward opaque materials remain valid.
+
+Radiance values use a normalized display-linear/pre-exposed convention: the default
+Sun mapping produces values near one rather than HDRP lux. The bridge therefore does
+not apply HDRP's exposure multiplier a second time. `strength=1` and `intensity=1` are
+the calibrated TestGI defaults; large 100–1000 multipliers are no longer expected.
 
 Run **Tools > Dynamic GI > Phase 10 > Configure TestGI Material Sampling**, then use
 **Validate TestGI Material Sampling**, or run headlessly:
@@ -526,12 +547,16 @@ unity run . -- -force-d3d12 -executeMethod DynamicGI.Editor.RadiancePhase10Scene
 The GPU validation samples the resolved clipmap through the same HLSL include used by
 materials, verifies all four provider modes, confirms the exact
 `existing + controlledDynamic` equation, checks ambient accessibility bounds, and
-inspects the serialized HDRP pass/shader wiring.
+inspects the serialized HDRP pass/shader wiring. TestGI setup selects the explicit
+`DynamicOnly` stock-material preview with geometry-aware sampling and replacement
+darkening; switch back to `ExistingPlusDynamic` for APV coexistence.
 
 Two additional Phase-10 diagnostics reproduce the original low-energy/leak regression:
-the surface diagnostic compares exact, inward-biased, exterior, and ceiling/wall-edge
-samples under east Sun, while the bridge-scale diagnostic renders the camera twice and
-measures the linear Custom Pass delta at `strength=1`, `intensity=1`.
+the surface diagnostic compares raw, bias-only, geometry-aware, exterior, and
+ceiling/wall-edge samples under east Sun. The bridge-scale diagnostic renders the
+camera with the bridge disabled, additive-only, and replacement-preview states; it
+measures both the linear GI delta at `strength=1`, `intensity=1` and the accessibility
+darkening.
 
 ## Data layout
 
@@ -587,10 +612,15 @@ For Shader Graph, use a File-mode Custom Function node pointing to
   use surface normals/albedo, diagonal transport, or adaptive convergence. Small update
   tiles can produce many compute dispatches; their exact
   counts are exposed for profiling and future batching work.
-- The Phase-10 HDRP compatibility bridge is an opaque screen-space additive pass. It
-  does not affect transparent/forward-only albedo correctly and cannot subtract APV.
-  Per-material integration through `IndirectLightingProvider.hlsl` is the authoritative
-  path for an APV-free renderer and accurate diffuse albedo/BRDF response.
+- The Phase-10 HDRP compatibility bridge affects opaque camera color only. Its
+  `ExistingPlusDynamic` path is additive and APV-safe; its `DynamicOnly` replacement
+  preview uses an approximate full-color accessibility multiply and therefore also
+  attenuates direct/specular lighting. It does not handle transparent/forward-only
+  albedo accurately. Per-material integration through `IndirectLightingProvider.hlsl`
+  is the authoritative APV-free path for accurate diffuse albedo/BRDF response.
+- Geometry-aware surface filtering prioritizes correctness and can execute up to eight
+  short Geometry Field DDA traversals per cascade and pixel. Profile it before shipping;
+  a lower-cost visibility representation remains future work.
 
 ## Mod/runtime registration contract
 

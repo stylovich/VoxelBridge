@@ -47,15 +47,19 @@ namespace DynamicGI.Editor
             SceneManager.MoveGameObjectToScene(root, scene);
             DynamicGIShaderGlobals controls = root.AddComponent<DynamicGIShaderGlobals>();
             controls.Configure(
-                IndirectLightingProviderMode.ExistingPlusDynamic,
-                0.35f,
-                0.5f,
+                IndirectLightingProviderMode.DynamicOnly,
+                1f,
+                1f,
                 1f,
                 1f,
                 0.625f,
                 0.4f,
                 true,
-                0f);
+                0f,
+                true,
+                24,
+                true,
+                1f);
 
             CustomPassVolume volume = root.AddComponent<CustomPassVolume>();
             volume.isGlobal = true;
@@ -66,7 +70,7 @@ namespace DynamicGI.Editor
 
             DynamicGIHDRPCompositePass pass = new()
             {
-                name = "Dynamic GI diffuse additive bridge",
+                name = "Dynamic GI stock-material replacement preview",
                 enabled = true,
                 targetColorBuffer = CustomPass.TargetBuffer.Camera,
                 targetDepthBuffer = CustomPass.TargetBuffer.None,
@@ -83,9 +87,9 @@ namespace DynamicGI.Editor
                 throw new InvalidOperationException($"Could not save {ScenePath}.");
 
             Debug.Log(
-                "DYNAMIC_GI_PHASE10_TESTGI_CONFIGURED | provider=Existing+Dynamic | strength=0.35 | " +
-                "occlusion=separate ambient accessibility | HDRP bridge=BeforeTransparent/opaque/additive | " +
-                "APV=untouched");
+                "DYNAMIC_GI_PHASE10_TESTGI_CONFIGURED | provider=DynamicOnly preview | strength=1 intensity=1 | " +
+                "surfaceSampling=geometry-aware/24 DDA steps | HDRP bridge=accessibility darkening then additive | " +
+                "note=stock-material darkening is approximate; material provider remains exact");
         }
 
         [MenuItem("Tools/Dynamic GI/Phase 10/Validate TestGI Material Sampling")]
@@ -97,7 +101,10 @@ namespace DynamicGI.Editor
             WorldRadianceClipmap clipmap = FindSingle<WorldRadianceClipmap>(scene);
             DynamicGIShaderGlobals controls = FindSingle<DynamicGIShaderGlobals>(scene);
             CustomPassVolume volume = FindSingle<CustomPassVolume>(scene, RenderingRootName);
-            Transform sampleMarker = FindNamedTransform(scene, "Emissive Visible Probe Marker");
+            // Use a free-space propagation marker. The Phase-7 visible marker is only
+            // 0.7 m from the neon; the configured 0.625 m surface bias intentionally
+            // lands inside the emitter's occupancy shell and is not a material sample.
+            Transform sampleMarker = FindNamedTransform(scene, "Propagation Mid Probe Marker");
 
             ValidateBridge(volume, controls);
             geometry.RebuildAll();
@@ -112,11 +119,15 @@ namespace DynamicGI.Editor
             if (samplingShader == null)
                 throw new InvalidOperationException($"Missing Phase 10 validation shader at {SamplingShaderPath}.");
             int kernel = samplingShader.FindKernel("QueryIndirectLightingProvider");
-            if (!clipmap.BindSamplingResources(samplingShader, kernel) || !sky.BindSamplingResources(samplingShader, kernel))
-                throw new InvalidOperationException("Could not bind radiance/sky resources to the Phase 10 provider validation.");
+            if (!clipmap.BindSamplingResources(samplingShader, kernel) ||
+                !sky.BindSamplingResources(samplingShader, kernel) ||
+                !geometry.BindSamplingResources(samplingShader, kernel))
+            {
+                throw new InvalidOperationException("Could not bind radiance/sky/geometry resources to the Phase 10 provider validation.");
+            }
 
             Vector3[] positions = { sampleMarker.position };
-            Vector3[] normals = { Vector3.back };
+            Vector3[] normals = { Vector3.up };
             Vector3[] existing = { ExistingIndirect };
             using GraphicsBuffer positionBuffer = new(GraphicsBuffer.Target.Structured, 1, sizeof(float) * 3);
             using GraphicsBuffer normalBuffer = new(GraphicsBuffer.Target.Structured, 1, sizeof(float) * 3);
@@ -136,6 +147,8 @@ namespace DynamicGI.Editor
             samplingShader.SetFloat("_DynamicGI_IndirectIntensity", controls.IndirectIntensity);
             samplingShader.SetFloat("_DynamicGI_SurfaceNormalBias", controls.SurfaceNormalBias);
             samplingShader.SetInt("_DynamicGI_ScreenSpaceBridgeEnabled", 1);
+            samplingShader.SetInt("_DynamicGI_GeometryAwareSurfaceSampling", controls.GeometryAwareSurfaceSampling ? 1 : 0);
+            samplingShader.SetInt("_DynamicGI_SurfaceVisibilityMaxSteps", controls.SurfaceVisibilityMaxSteps);
 
             ProviderGpuResult combined = DispatchProvider(
                 samplingShader, kernel, resultBuffer, IndirectLightingProviderMode.ExistingPlusDynamic);
@@ -228,8 +241,12 @@ namespace DynamicGI.Editor
                     Vector3.down,
                     Vector3.down,
                 };
-                Vector4[] samples = QueryRawDynamicGI(clipmap, positions, normals, "QueryDynamicGI", 0f);
-                Vector4[] surfaceSamples = QueryRawDynamicGI(clipmap, positions, normals, "QuerySurfaceDynamicGI", 0.625f);
+                Vector4[] samples = QueryRawDynamicGI(
+                    geometry, clipmap, positions, normals, "QueryDynamicGI", 0f, false);
+                Vector4[] biasedOnlySamples = QueryRawDynamicGI(
+                    geometry, clipmap, positions, normals, "QuerySurfaceDynamicGI", 0.625f, false);
+                Vector4[] surfaceSamples = QueryRawDynamicGI(
+                    geometry, clipmap, positions, normals, "QuerySurfaceDynamicGI", 0.625f, true);
                 Vector3[] bridgePositions = (Vector3[])positions.Clone();
                 for (int i = 0; i < bridgePositions.Length; i++)
                 {
@@ -237,14 +254,17 @@ namespace DynamicGI.Editor
                     bridgePositions[i] += toCamera.sqrMagnitude > 0f ? toCamera.normalized * 0.4f : Vector3.zero;
                 }
                 Vector4[] bridgeSamples = QueryRawDynamicGI(
+                    geometry,
                     clipmap,
                     bridgePositions,
                     normals,
                     "QuerySurfaceDynamicGI",
-                    0.625f);
+                    0.625f,
+                    true);
                 float rawCeiling = Luminance(samples[0]);
                 float biasedCeiling = Luminance(surfaceSamples[0]);
                 float rawEdge = Luminance(samples[6]);
+                float biasedOnlyEdge = Luminance(biasedOnlySamples[6]);
                 float bridgeEdge = Luminance(bridgeSamples[6]);
                 float bridgeCeiling = Luminance(bridgeSamples[0]);
                 if (biasedCeiling > rawCeiling * 0.35f)
@@ -256,6 +276,11 @@ namespace DynamicGI.Editor
                 {
                     throw new InvalidOperationException(
                         $"HDRP view bias still leaks at the ceiling/wall junction: raw={rawEdge:0.000000}, bridge={bridgeEdge:0.000000}.");
+                }
+                if (bridgeEdge > biasedOnlyEdge + 0.002f)
+                {
+                    throw new InvalidOperationException(
+                        $"Geometry-aware filtering increased the junction leak: biasedOnly={biasedOnlyEdge:0.000000}, visible={bridgeEdge:0.000000}.");
                 }
                 if (bridgeCeiling < 0.02f)
                 {
@@ -275,6 +300,7 @@ namespace DynamicGI.Editor
                     $"biasedCeiling={Format(surfaceSamples[0])} L={Luminance(surfaceSamples[0]):0.000000} | " +
                     $"biasedFloor={Format(surfaceSamples[3])} L={Luminance(surfaceSamples[3]):0.000000} | " +
                     $"biasedEdge={Format(surfaceSamples[6])} L={Luminance(surfaceSamples[6]):0.000000} | " +
+                    $"biasOnlyEdge={Format(biasedOnlySamples[6])} L={biasedOnlyEdge:0.000000} | " +
                     $"bridgeCeiling={Format(bridgeSamples[0])} L={Luminance(bridgeSamples[0]):0.000000} | " +
                     $"bridgeFloor={Format(bridgeSamples[3])} L={Luminance(bridgeSamples[3]):0.000000} | " +
                     $"bridgeEdge={Format(bridgeSamples[6])} L={Luminance(bridgeSamples[6]):0.000000}");
@@ -316,6 +342,10 @@ namespace DynamicGI.Editor
             float originalViewBias = controls.HdrpViewBias;
             bool originalBridge = controls.ScreenSpaceBridgeEnabled;
             float originalAlbedoWeight = controls.HdrpAlbedoWeight;
+            bool originalGeometryAware = controls.GeometryAwareSurfaceSampling;
+            int originalVisibilitySteps = controls.SurfaceVisibilityMaxSteps;
+            bool originalReplacementDarkening = controls.ScreenSpaceReplacementDarkening;
+            float originalDarkeningStrength = controls.ReplacementDarkeningStrength;
 
             try
             {
@@ -335,6 +365,10 @@ namespace DynamicGI.Editor
                     0.625f,
                     0.4f,
                     false,
+                    0f,
+                    true,
+                    24,
+                    false,
                     0f);
                 Color[] withoutBridge = CaptureLinearCamera(camera);
 
@@ -347,12 +381,35 @@ namespace DynamicGI.Editor
                     0.625f,
                     0.4f,
                     true,
+                    0f,
+                    true,
+                    24,
+                    false,
                     0f);
                 Color[] withBridge = CaptureLinearCamera(camera);
+
+                controls.Configure(
+                    IndirectLightingProviderMode.DynamicOnly,
+                    1f,
+                    1f,
+                    1f,
+                    1f,
+                    0.625f,
+                    0.4f,
+                    true,
+                    0f,
+                    true,
+                    24,
+                    true,
+                    1f);
+                Color[] replacementPreview = CaptureLinearCamera(camera);
 
                 float maximum = 0f;
                 double sum = 0.0;
                 int positivePixels = 0;
+                float maximumDarkening = 0f;
+                double darkeningSum = 0.0;
+                int darkenedPixels = 0;
                 for (int i = 0; i < withBridge.Length; i++)
                 {
                     Vector3 delta = new(
@@ -364,16 +421,32 @@ namespace DynamicGI.Editor
                     sum += luminance;
                     if (luminance > 0.0001f)
                         positivePixels++;
+
+                    float darkening = Mathf.Max(
+                        0f,
+                        LuminanceColor(withBridge[i]) - LuminanceColor(replacementPreview[i]));
+                    maximumDarkening = Mathf.Max(maximumDarkening, darkening);
+                    darkeningSum += darkening;
+                    if (darkening > 0.0001f)
+                        darkenedPixels++;
                 }
 
                 Debug.Log(
                     $"DYNAMIC_GI_PHASE10_BRIDGE_DIAGNOSTIC | strength=1 intensity=1 | " +
                     $"maxDeltaL={maximum:0.000000} | meanDeltaL={(sum / withBridge.Length):0.000000} | " +
-                    $"positivePixels={positivePixels}/{withBridge.Length}");
+                    $"positivePixels={positivePixels}/{withBridge.Length} | " +
+                    $"replacementMaxDarkening={maximumDarkening:0.000000} | " +
+                    $"replacementMeanDarkening={(darkeningSum / withBridge.Length):0.000000} | " +
+                    $"darkenedPixels={darkenedPixels}/{withBridge.Length}");
                 if (maximum < 0.02f || positivePixels < 1000)
                 {
                     throw new InvalidOperationException(
                         $"Default HDRP bridge output is still too weak: max={maximum:0.000000}, positive={positivePixels}/{withBridge.Length}.");
+                }
+                if (maximumDarkening < 0.02f || darkenedPixels < 1000)
+                {
+                    throw new InvalidOperationException(
+                        $"DynamicOnly replacement preview did not suppress stock ambient lighting: max={maximumDarkening:0.000000}, darkened={darkenedPixels}/{withBridge.Length}.");
                 }
             }
             finally
@@ -387,7 +460,11 @@ namespace DynamicGI.Editor
                     originalNormalBias,
                     originalViewBias,
                     originalBridge,
-                    originalAlbedoWeight);
+                    originalAlbedoWeight,
+                    originalGeometryAware,
+                    originalVisibilitySteps,
+                    originalReplacementDarkening,
+                    originalDarkeningStrength);
             }
         }
 
@@ -422,18 +499,20 @@ namespace DynamicGI.Editor
         }
 
         private static Vector4[] QueryRawDynamicGI(
+            WorldGeometryField geometry,
             WorldRadianceClipmap clipmap,
             Vector3[] positions,
             Vector3[] normals,
             string kernelName,
-            float surfaceNormalBias)
+            float surfaceNormalBias,
+            bool geometryAware)
         {
             ComputeShader shader = AssetDatabase.LoadAssetAtPath<ComputeShader>(SamplingShaderPath);
             if (shader == null)
                 throw new InvalidOperationException($"Missing sampling diagnostic shader at {SamplingShaderPath}.");
             int kernel = shader.FindKernel(kernelName);
-            if (!clipmap.BindSamplingResources(shader, kernel))
-                throw new InvalidOperationException("Could not bind the radiance clipmap to the surface diagnostic.");
+            if (!clipmap.BindSamplingResources(shader, kernel) || !geometry.BindSamplingResources(shader, kernel))
+                throw new InvalidOperationException("Could not bind the radiance/geometry fields to the surface diagnostic.");
 
             using GraphicsBuffer positionBuffer = new(GraphicsBuffer.Target.Structured, positions.Length, sizeof(float) * 3);
             using GraphicsBuffer normalBuffer = new(GraphicsBuffer.Target.Structured, normals.Length, sizeof(float) * 3);
@@ -445,7 +524,9 @@ namespace DynamicGI.Editor
             shader.SetBuffer(kernel, "_DynamicGISampleResults", resultBuffer);
             shader.SetInt("_DynamicGISampleCount", positions.Length);
             shader.SetFloat("_DynamicGI_SurfaceNormalBias", surfaceNormalBias);
-            shader.Dispatch(kernel, Mathf.CeilToInt(positions.Length / 64f), 1, 1);
+            shader.SetInt("_DynamicGI_GeometryAwareSurfaceSampling", geometryAware ? 1 : 0);
+            shader.SetInt("_DynamicGI_SurfaceVisibilityMaxSteps", 24);
+            shader.Dispatch(kernel, Mathf.CeilToInt(positions.Length / 8f), 1, 1);
 
             AsyncGPUReadbackRequest request = AsyncGPUReadback.Request(resultBuffer);
             AsyncGPUReadback.WaitAllRequests();
@@ -499,6 +580,7 @@ namespace DynamicGI.Editor
         }
 
         private static float Luminance(Vector3 value) => Vector3.Dot(value, new Vector3(0.2126f, 0.7152f, 0.0722f));
+        private static float LuminanceColor(Color value) => value.r * 0.2126f + value.g * 0.7152f + value.b * 0.0722f;
         private static string Format(Vector3 value) => $"({value.x:0.0000},{value.y:0.0000},{value.z:0.0000})";
         private static string Format(Vector4 value) => Format((Vector3)value);
 
