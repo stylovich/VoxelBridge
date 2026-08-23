@@ -73,7 +73,11 @@ namespace DynamicGI.Radiance
         private Queue<Vector3Int> dirtyQueue = new();
         private Queue<Vector3Int> queueScratch = new();
         private readonly RenderTexture[] textures = new RenderTexture[6];
+        private readonly RenderTexture[] directTextures = new RenderTexture[6];
+        private readonly RenderTexture[] propagationScratchTexturesA = new RenderTexture[6];
+        private readonly RenderTexture[] propagationScratchTexturesB = new RenderTexture[6];
         private readonly GraphicsFormat textureFormat;
+        private readonly bool hasPropagationTextures;
 
         private Vector3Int originGlobalTile;
         private Vector3Int ringOffset;
@@ -100,8 +104,17 @@ namespace DynamicGI.Radiance
         public int LastExposedProbes { get; private set; }
         public int LastRecycledProbes { get; private set; }
         public IReadOnlyList<RenderTexture> Textures => textures;
+        public IReadOnlyList<RenderTexture> DirectTextures => directTextures;
+        public IReadOnlyList<RenderTexture> PropagationScratchTexturesA => propagationScratchTexturesA;
+        public IReadOnlyList<RenderTexture> PropagationScratchTexturesB => propagationScratchTexturesB;
+        public bool HasPropagationTextures => hasPropagationTextures;
 
-        public RadianceCascade(int index, RadianceCascadeSettings settings, GraphicsFormat format, Vector3 targetPosition)
+        public RadianceCascade(
+            int index,
+            RadianceCascadeSettings settings,
+            GraphicsFormat format,
+            Vector3 targetPosition,
+            bool allocatePropagationTextures)
         {
             settings.Sanitize();
             Index = index;
@@ -119,9 +132,22 @@ namespace DynamicGI.Radiance
                 Resolution.y / TileResolution,
                 Resolution.z / TileResolution);
             textureFormat = format;
+            hasPropagationTextures = allocatePropagationTextures;
 
             for (int i = 0; i < textures.Length; i++)
-                textures[i] = CreateTexture(i);
+            {
+                textures[i] = CreateTexture(i, "Resolved");
+                if (hasPropagationTextures)
+                {
+                    directTextures[i] = CreateTexture(i, "Direct");
+                    propagationScratchTexturesA[i] = CreateTexture(i, "Propagation Scratch A");
+                    propagationScratchTexturesB[i] = CreateTexture(i, "Propagation Scratch B");
+                }
+                else
+                {
+                    directTextures[i] = textures[i];
+                }
+            }
             ResetToTarget(targetPosition);
         }
 
@@ -257,7 +283,8 @@ namespace DynamicGI.Radiance
         public long EstimateGpuBytes()
         {
             long bytesPerTexel = textureFormat == GraphicsFormat.R16G16B16A16_SFloat ? 8L : 16L;
-            return (long)ProbeCount * bytesPerTexel * textures.Length;
+            int textureCount = textures.Length * (hasPropagationTextures ? 4 : 1);
+            return (long)ProbeCount * bytesPerTexel * textureCount;
         }
 
         public void Dispose()
@@ -265,21 +292,16 @@ namespace DynamicGI.Radiance
             dirtyQueue.Clear();
             queueScratch.Clear();
             dirtySet.Clear();
-            for (int i = 0; i < textures.Length; i++)
+            ReleaseTextures(textures);
+            if (hasPropagationTextures)
             {
-                RenderTexture texture = textures[i];
-                if (texture == null)
-                    continue;
-                texture.Release();
-                if (Application.isPlaying)
-                    UnityEngine.Object.Destroy(texture);
-                else
-                    UnityEngine.Object.DestroyImmediate(texture);
-                textures[i] = null;
+                ReleaseTextures(directTextures);
+                ReleaseTextures(propagationScratchTexturesA);
+                ReleaseTextures(propagationScratchTexturesB);
             }
         }
 
-        private RenderTexture CreateTexture(int directionIndex)
+        private RenderTexture CreateTexture(int directionIndex, string role)
         {
             RenderTextureDescriptor descriptor = new(Resolution.x, Resolution.y)
             {
@@ -295,7 +317,7 @@ namespace DynamicGI.Radiance
             };
             RenderTexture texture = new(descriptor)
             {
-                name = $"Dynamic GI {Name} {DirectionName(directionIndex)} {Resolution.x}x{Resolution.y}x{Resolution.z}",
+                name = $"Dynamic GI {Name} {role} {DirectionName(directionIndex)} {Resolution.x}x{Resolution.y}x{Resolution.z}",
                 filterMode = FilterMode.Point,
                 wrapMode = TextureWrapMode.Repeat,
                 hideFlags = HideFlags.HideAndDontSave
@@ -303,6 +325,22 @@ namespace DynamicGI.Radiance
             if (!texture.Create())
                 throw new InvalidOperationException($"Could not create radiance cascade texture {texture.name}.");
             return texture;
+        }
+
+        private static void ReleaseTextures(RenderTexture[] values)
+        {
+            for (int i = 0; i < values.Length; i++)
+            {
+                RenderTexture texture = values[i];
+                if (texture == null)
+                    continue;
+                texture.Release();
+                if (Application.isPlaying)
+                    UnityEngine.Object.Destroy(texture);
+                else
+                    UnityEngine.Object.DestroyImmediate(texture);
+                values[i] = null;
+            }
         }
 
         private Vector3Int CalculateOriginGlobalTile(Vector3 targetPosition)

@@ -446,6 +446,8 @@ namespace DynamicGI.Debugging
                 $"updated {total.UpdatedProbesThisFrame} | moves {total.OriginMovesThisFrame}\n" +
                 $"sun rev {total.SunRevision} | horizon {radianceClipmap.CurrentSunHorizonFactor:0.00} | refresh {total.LightingRefreshesThisFrame}\n" +
                 $"emissives {total.ActiveEmissiveContributors} | rev {total.EmissiveRevision} | changes {total.EmissiveChangesThisFrame}\n" +
+                $"propagation {(total.PropagationEnabled ? $"{total.PropagationIterations}x @ {radianceClipmap.PropagationStrength:0.00}" : "off")} | " +
+                $"dispatch {total.PropagationDispatchesThisFrame} | writes {total.PropagatedProbesThisFrame}\n" +
                 $"slices Q/G/C {querySliceSampleCount}/{groundSliceSampleCount}/{ceilingSliceSampleCount}\n" +
                 $"GPU {FormatBytes(total.EstimatedGpuBytes)} | CPU {total.UpdateCpuMilliseconds:0.###} ms",
                 detailStyle);

@@ -238,8 +238,11 @@ namespace DynamicGI.Contributors
 
         private static Bounds ExpandBounds(Bounds source, float range)
         {
-            source.Expand(Mathf.Max(0.1f, range) * 2f);
-            return source;
+            // The GPU approximates the renderer AABB as a circumscribed sphere.
+            // Invalidation must cover that same conservative source radius or a
+            // corner contribution could remain stale after disabling the source.
+            float radius = source.extents.magnitude + Mathf.Max(0.1f, range);
+            return new Bounds(source.center, Vector3.one * (radius * 2f));
         }
 
         private static bool BoundsApproximatelyEqual(Bounds a, Bounds b) =>

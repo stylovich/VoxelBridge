@@ -23,6 +23,7 @@ namespace DynamicGI.Radiance
     {
         public const int MaximumCascadeCount = 4;
         private const string DefaultComputePath = "Assets/DynamicGI/Shaders/RadianceInject.compute";
+        private const string DefaultPropagationComputePath = "Assets/DynamicGI/Shaders/RadiancePropagate.compute";
         private static readonly ProfilerMarker UpdateMarker = new("DynamicGI.RadianceClipmap.Update");
 
         private static readonly int PositiveXId = Shader.PropertyToID("_DynamicGI_RadiancePositiveX");
@@ -41,6 +42,8 @@ namespace DynamicGI.Radiance
         private static readonly int RadianceCascadeIndexId = Shader.PropertyToID("_RadianceCascadeIndex");
         private static readonly int ClipmapAvailableId = Shader.PropertyToID("_DynamicGI_RadianceClipmapAvailable");
         private static readonly int CascadeCountId = Shader.PropertyToID("_DynamicGI_RadianceCascadeCount");
+        private static readonly int[] PropagationDirectTextureIds = CreateDirectionalPropertyIds("_PropagationDirect");
+        private static readonly int[] PropagationInputTextureIds = CreateDirectionalPropertyIds("_PropagationInput");
 
         private static readonly int[][] CascadeTextureIds =
         {
@@ -87,11 +90,22 @@ namespace DynamicGI.Radiance
         [Header("Emissive injection")]
         [SerializeField, Range(1, 256)] private int maximumEmissiveContributors = 64;
 
+        [Header("Diffuse propagation")]
+        [SerializeField] private bool enableDiffusePropagation = true;
+        [SerializeField, Range(1, 4)] private int propagationIterations = 3;
+        [SerializeField, Range(0f, 0.95f)] private float propagationStrength = 0.55f;
+        [SerializeField, Range(0f, 1f)] private float propagationDirectionalRetention = 0.35f;
+        [SerializeField, Range(0f, 1f)] private float propagationDistanceAttenuation = 0.9f;
+        [SerializeField, Min(0.1f)] private float maximumPropagatedRadiance = 8f;
+        [SerializeField, Range(0, 3)] private int maximumPropagationCascadeIndex = 1;
+
         [Header("Compute")]
         [SerializeField] private ComputeShader radianceShader;
+        [SerializeField] private ComputeShader propagationShader;
 
         private readonly List<RadianceCascade> cascades = new(MaximumCascadeCount);
         private readonly List<RecentRegion> recentRegions = new();
+        private readonly List<ProcessedTile> processedTiles = new(1024);
         private readonly Vector3[] singleQueryPosition = new Vector3[1];
         private WorldGeometryField subscribedGeometryField;
         private WorldSkyVisibilityField subscribedSkyField;
@@ -104,6 +118,7 @@ namespace DynamicGI.Radiance
         private int injectKernel = -1;
         private int queryKernel = -1;
         private int debugKernel = -1;
+        private int propagationKernel = -1;
         private bool initialized;
         private bool configurationDirty;
         private bool queryPending;
@@ -128,6 +143,8 @@ namespace DynamicGI.Radiance
         private float maximumEmissiveRange;
         private bool emissiveUploadDirty = true;
         private bool emissiveOverflowWarningIssued;
+        private int propagationDispatchesThisFrame;
+        private int propagatedProbesThisFrame;
         private double updateCpuMilliseconds;
         private int lastDebugProbeCount;
         private int lastDebugProbeStride;
@@ -147,6 +164,11 @@ namespace DynamicGI.Radiance
         public float CurrentSunHorizonFactor => GetSunHorizonFactor(GetSunDirection());
         public int ActiveEmissiveContributorCount => activeEmissiveContributors;
         public int EmissiveRevision => emissiveRevision;
+        public bool DiffusePropagationEnabled =>
+            enableDiffusePropagation && propagationStrength > 0f && propagationShader != null;
+        public int PropagationIterations => propagationIterations;
+        public float PropagationStrength => propagationStrength;
+        public int MaximumPropagationCascadeIndex => maximumPropagationCascadeIndex;
         public int LastDebugProbeCount => lastDebugProbeCount;
         public int LastDebugProbeStride => lastDebugProbeStride;
 
@@ -179,6 +201,10 @@ namespace DynamicGI.Radiance
                     activeEmissiveContributors,
                     emissiveRevision,
                     emissiveChangesThisFrame,
+                    DiffusePropagationEnabled,
+                    propagationIterations,
+                    propagationDispatchesThisFrame,
+                    propagatedProbesThisFrame,
                     memory,
                     updateCpuMilliseconds);
             }
@@ -232,6 +258,12 @@ namespace DynamicGI.Radiance
             minimumSkyRadianceChange = Mathf.Max(0f, minimumSkyRadianceChange);
             sunHorizonFadeDegrees = Mathf.Clamp(sunHorizonFadeDegrees, 0.1f, 15f);
             maximumEmissiveContributors = Mathf.Clamp(maximumEmissiveContributors, 1, 256);
+            propagationIterations = Mathf.Clamp(propagationIterations, 1, 4);
+            propagationStrength = Mathf.Clamp(propagationStrength, 0f, 0.95f);
+            propagationDirectionalRetention = Mathf.Clamp01(propagationDirectionalRetention);
+            propagationDistanceAttenuation = Mathf.Clamp01(propagationDistanceAttenuation);
+            maximumPropagatedRadiance = Mathf.Max(0.1f, maximumPropagatedRadiance);
+            maximumPropagationCascadeIndex = Mathf.Clamp(maximumPropagationCascadeIndex, 0, 3);
             if (cascadeSettings == null)
                 cascadeSettings = Array.Empty<RadianceCascadeSettings>();
             for (int i = 0; i < cascadeSettings.Length; i++)
@@ -339,7 +371,22 @@ namespace DynamicGI.Radiance
             if (!EnsureInitialized())
                 return;
             for (int i = 0; i < cascades.Count; i++)
-                cascades[i].InvalidateWorldBounds(worldBounds);
+                cascades[i].InvalidateWorldBounds(ExpandForPropagation(worldBounds, cascades[i]));
+        }
+
+        /// <summary>
+        /// Runtime quality hook used by scalability controllers and validation. A
+        /// change invalidates the clipmap because resolved textures contain the old
+        /// propagation equilibrium.
+        /// </summary>
+        public void SetPropagationStrength(float value)
+        {
+            value = Mathf.Clamp(value, 0f, 0.95f);
+            if (Mathf.Approximately(propagationStrength, value))
+                return;
+            propagationStrength = value;
+            if (initialized)
+                InvalidateAllCascades();
         }
 
         public bool TryGetCascade(int index, out RadianceCascade cascade)
@@ -519,6 +566,9 @@ namespace DynamicGI.Radiance
                 injectKernel = radianceShader.FindKernel("InjectRadiance");
                 queryKernel = radianceShader.FindKernel("QueryRadiance");
                 debugKernel = radianceShader.FindKernel("BuildRadianceDebug");
+                propagationKernel = enableDiffusePropagation && propagationShader != null
+                    ? propagationShader.FindKernel("PropagateRadiance")
+                    : -1;
                 textureFormat = ChooseTextureFormat();
                 Vector3 target = ResolveTrackingPosition();
                 int settingsCount = Mathf.Min(MaximumCascadeCount, cascadeSettings?.Length ?? 0);
@@ -527,7 +577,15 @@ namespace DynamicGI.Radiance
                     RadianceCascadeSettings settings = cascadeSettings[i];
                     if (settings == null || !settings.Enabled)
                         continue;
-                    RadianceCascade cascade = new(cascades.Count, settings, textureFormat, target);
+                    int cascadeIndex = cascades.Count;
+                    bool allocatePropagation = propagationKernel >= 0 &&
+                                                cascadeIndex <= maximumPropagationCascadeIndex;
+                    RadianceCascade cascade = new(
+                        cascadeIndex,
+                        settings,
+                        textureFormat,
+                        target,
+                        allocatePropagation);
                     cascades.Add(cascade);
                     ClearCascade(cascade);
                 }
@@ -557,25 +615,40 @@ namespace DynamicGI.Radiance
 
         private void ProcessCascade(RadianceCascade cascade, int budget)
         {
+            processedTiles.Clear();
             int processed = 0;
             while (processed < budget && cascade.TryDequeueDirty(out Vector3Int globalTile, out Vector3Int localTile))
             {
-                DispatchTile(cascade, localTile);
-                Bounds updatedBounds = cascade.GetGlobalTileBounds(globalTile);
+                DispatchInjectionTile(cascade, localTile);
+                processedTiles.Add(new ProcessedTile(globalTile, localTile));
+                processed++;
+            }
+
+            bool propagate = ShouldPropagate(cascade);
+            for (int i = 0; i < processedTiles.Count; i++)
+            {
+                ProcessedTile tile = processedTiles[i];
+                if (propagate)
+                    DispatchPropagationTile(cascade, tile.LocalTile);
+                Bounds updatedBounds = cascade.GetGlobalTileBounds(tile.GlobalTile);
+                if (propagate)
+                    updatedBounds = ExpandForPropagation(updatedBounds, cascade);
                 recentRegions.Add(new RecentRegion(cascade.Index, updatedBounds, Time.frameCount + 180));
                 if (recentRegions.Count > 512) recentRegions.RemoveAt(0);
-                processed++;
             }
         }
 
-        private void DispatchTile(RadianceCascade cascade, Vector3Int localTile)
+        private void DispatchInjectionTile(RadianceCascade cascade, Vector3Int localTile)
         {
             if (!geometryField.BindSamplingResources(radianceShader, injectKernel))
                 return;
             if (skyVisibilityField == null || !skyVisibilityField.BindSamplingResources(radianceShader, injectKernel))
                 radianceShader.SetInt("_DynamicGI_SkyVisibilityAvailable", 0);
 
-            BindWriteTextures(cascade, injectKernel);
+            IReadOnlyList<RenderTexture> injectionTarget = ShouldPropagate(cascade)
+                ? cascade.DirectTextures
+                : cascade.Textures;
+            BindWriteTextures(radianceShader, injectKernel, injectionTarget);
             BindCascadeLayout(cascade);
             Vector3 toSun = GetSunDirection();
             Vector3 sun = GetSunRadiance();
@@ -605,9 +678,66 @@ namespace DynamicGI.Radiance
             computeDispatchesThisFrame++;
         }
 
+        private void DispatchPropagationTile(RadianceCascade cascade, Vector3Int localTile)
+        {
+            if (!geometryField.BindSamplingResources(propagationShader, propagationKernel))
+                return;
+
+            BindCascadeLayout(propagationShader, cascade);
+            BindPropagationDirectTextures(cascade.DirectTextures);
+            propagationShader.SetFloat("_PropagationStrength", propagationStrength);
+            propagationShader.SetFloat("_PropagationDirectionalRetention", propagationDirectionalRetention);
+            propagationShader.SetFloat("_PropagationDistanceAttenuation", propagationDistanceAttenuation);
+            propagationShader.SetFloat("_PropagationMaximumRadiance", maximumPropagatedRadiance);
+            float bias = Mathf.Max(rayOriginBias, geometryField.VoxelSize * 0.1f);
+            propagationShader.SetFloat("_RadianceRayOriginBias", bias);
+            int ddaSteps = Mathf.Clamp(
+                Mathf.CeilToInt(cascade.ProbeSpacing / geometryField.VoxelSize * 1.8f) + 4,
+                4,
+                64);
+            propagationShader.SetInt("_RadianceMaxDdaSteps", ddaSteps);
+
+            IReadOnlyList<RenderTexture> previousOutput = cascade.DirectTextures;
+            for (int iteration = 0; iteration < propagationIterations; iteration++)
+            {
+                bool finalIteration = iteration == propagationIterations - 1;
+                IReadOnlyList<RenderTexture> output = finalIteration
+                    ? cascade.Textures
+                    : (iteration & 1) == 0
+                        ? cascade.PropagationScratchTexturesA
+                        : cascade.PropagationScratchTexturesB;
+                BindPropagationInputTextures(previousOutput);
+                BindWriteTextures(propagationShader, propagationKernel, output);
+
+                int halo = propagationIterations - iteration - 1;
+                CalculatePropagationRegion(cascade, localTile, halo, out Vector3Int offset, out Vector3Int size);
+                propagationShader.SetInts("_PropagationUpdateOffset", offset.x, offset.y, offset.z);
+                propagationShader.SetInts("_PropagationUpdateSize", size.x, size.y, size.z);
+                propagationShader.Dispatch(
+                    propagationKernel,
+                    Mathf.CeilToInt(size.x / 4f),
+                    Mathf.CeilToInt(size.y / 4f),
+                    Mathf.CeilToInt(size.z / 4f));
+                previousOutput = output;
+                propagationDispatchesThisFrame++;
+                propagatedProbesThisFrame += size.x * size.y * size.z;
+                computeDispatchesThisFrame++;
+            }
+        }
+
         private void ClearCascade(RadianceCascade cascade)
         {
-            BindWriteTextures(cascade, clearKernel);
+            ClearTextureSet(cascade, cascade.Textures);
+            if (!cascade.HasPropagationTextures)
+                return;
+            ClearTextureSet(cascade, cascade.DirectTextures);
+            ClearTextureSet(cascade, cascade.PropagationScratchTexturesA);
+            ClearTextureSet(cascade, cascade.PropagationScratchTexturesB);
+        }
+
+        private void ClearTextureSet(RadianceCascade cascade, IReadOnlyList<RenderTexture> textures)
+        {
+            BindWriteTextures(radianceShader, clearKernel, textures);
             BindCascadeLayout(cascade);
             radianceShader.Dispatch(clearKernel,
                 Mathf.CeilToInt(cascade.Resolution.x / 4f),
@@ -618,24 +748,32 @@ namespace DynamicGI.Radiance
 
         private void BindCascadeLayout(RadianceCascade cascade)
         {
-            Vector3Int resolution = cascade.Resolution;
-            Vector3Int ring = cascade.RingOffset;
-            radianceShader.SetVector(OriginId, cascade.OriginWS);
-            radianceShader.SetVector(SizeId, cascade.SizeWS);
-            radianceShader.SetInts(ResolutionId, resolution.x, resolution.y, resolution.z);
-            radianceShader.SetInts(RingOffsetId, ring.x, ring.y, ring.z);
-            radianceShader.SetInt("_RadianceToroidal", 1);
-            radianceShader.SetInt(AvailableId, 1);
+            BindCascadeLayout(radianceShader, cascade);
         }
 
-        private void BindWriteTextures(RadianceCascade cascade, int kernel)
+        private static void BindCascadeLayout(ComputeShader shader, RadianceCascade cascade)
         {
-            radianceShader.SetTexture(kernel, PositiveXId, cascade.Textures[0]);
-            radianceShader.SetTexture(kernel, NegativeXId, cascade.Textures[1]);
-            radianceShader.SetTexture(kernel, PositiveYId, cascade.Textures[2]);
-            radianceShader.SetTexture(kernel, NegativeYId, cascade.Textures[3]);
-            radianceShader.SetTexture(kernel, PositiveZId, cascade.Textures[4]);
-            radianceShader.SetTexture(kernel, NegativeZId, cascade.Textures[5]);
+            Vector3Int resolution = cascade.Resolution;
+            Vector3Int ring = cascade.RingOffset;
+            shader.SetVector(OriginId, cascade.OriginWS);
+            shader.SetVector(SizeId, cascade.SizeWS);
+            shader.SetInts(ResolutionId, resolution.x, resolution.y, resolution.z);
+            shader.SetInts(RingOffsetId, ring.x, ring.y, ring.z);
+            shader.SetInt("_RadianceToroidal", 1);
+            shader.SetInt(AvailableId, 1);
+        }
+
+        private static void BindWriteTextures(
+            ComputeShader shader,
+            int kernel,
+            IReadOnlyList<RenderTexture> textures)
+        {
+            shader.SetTexture(kernel, PositiveXId, textures[0]);
+            shader.SetTexture(kernel, NegativeXId, textures[1]);
+            shader.SetTexture(kernel, PositiveYId, textures[2]);
+            shader.SetTexture(kernel, NegativeYId, textures[3]);
+            shader.SetTexture(kernel, PositiveZId, textures[4]);
+            shader.SetTexture(kernel, NegativeZId, textures[5]);
         }
 
         private void BindReadTextures(RadianceCascade cascade, int kernel)
@@ -646,6 +784,38 @@ namespace DynamicGI.Radiance
             radianceShader.SetTexture(kernel, "_RadianceReadNegativeY", cascade.Textures[3]);
             radianceShader.SetTexture(kernel, "_RadianceReadPositiveZ", cascade.Textures[4]);
             radianceShader.SetTexture(kernel, "_RadianceReadNegativeZ", cascade.Textures[5]);
+        }
+
+        private void BindPropagationDirectTextures(IReadOnlyList<RenderTexture> textures)
+        {
+            for (int i = 0; i < 6; i++)
+                propagationShader.SetTexture(propagationKernel, PropagationDirectTextureIds[i], textures[i]);
+        }
+
+        private void BindPropagationInputTextures(IReadOnlyList<RenderTexture> textures)
+        {
+            for (int i = 0; i < 6; i++)
+                propagationShader.SetTexture(propagationKernel, PropagationInputTextureIds[i], textures[i]);
+        }
+
+        private bool ShouldPropagate(RadianceCascade cascade) =>
+            enableDiffusePropagation && propagationStrength > 0f && propagationKernel >= 0 &&
+            cascade.HasPropagationTextures && cascade.Index <= maximumPropagationCascadeIndex;
+
+        private void CalculatePropagationRegion(
+            RadianceCascade cascade,
+            Vector3Int localTile,
+            int halo,
+            out Vector3Int offset,
+            out Vector3Int size)
+        {
+            Vector3Int coreOffset = localTile * cascade.TileResolution;
+            Vector3Int expansion = Vector3Int.one * Mathf.Max(0, halo);
+            offset = Vector3Int.Max(Vector3Int.zero, coreOffset - expansion);
+            Vector3Int maximum = Vector3Int.Min(
+                cascade.Resolution,
+                coreOffset + Vector3Int.one * cascade.TileResolution + expansion);
+            size = maximum - offset;
         }
 
         private void PublishShaderGlobals()
@@ -750,7 +920,7 @@ namespace DynamicGI.Radiance
 
             int lastCascade = Mathf.Min(change.MaximumCascadeIndex, cascades.Count - 1);
             for (int i = 0; i <= lastCascade; i++)
-                cascades[i].InvalidateWorldBounds(change.InfluenceBounds);
+                cascades[i].InvalidateWorldBounds(ExpandForPropagation(change.InfluenceBounds, cascades[i]));
         }
 
         private void UploadEmissiveContributorsIfNeeded()
@@ -805,6 +975,14 @@ namespace DynamicGI.Radiance
             influence.Encapsulate(new Bounds(changedBounds.center - GetSunDirection() * sunTraceDistance, changedBounds.size));
             influence.Expand(Vector3.one * 2f);
             return influence;
+        }
+
+        private Bounds ExpandForPropagation(Bounds bounds, RadianceCascade cascade)
+        {
+            if (!ShouldPropagate(cascade))
+                return bounds;
+            bounds.Expand(Vector3.one * (propagationIterations * cascade.ProbeSpacing * 2f));
+            return bounds;
         }
 
         private void RefreshSubscriptions()
@@ -906,6 +1084,8 @@ namespace DynamicGI.Radiance
             recycledProbesThisFrame = 0;
             originMovesThisFrame = 0;
             computeDispatchesThisFrame = 0;
+            propagationDispatchesThisFrame = 0;
+            propagatedProbesThisFrame = 0;
             lightingRefreshesThisFrame = 0;
             emissiveChangesThisFrame = pendingEmissiveChanges;
             pendingEmissiveChanges = 0;
@@ -923,6 +1103,7 @@ namespace DynamicGI.Radiance
             queryPending = false;
             pendingQueryCallback = null;
             recentRegions.Clear();
+            processedTiles.Clear();
             for (int i = 0; i < cascades.Count; i++) cascades[i].Dispose();
             cascades.Clear();
             queryPositionBuffer?.Dispose();
@@ -935,6 +1116,7 @@ namespace DynamicGI.Radiance
             activeEmissiveContributors = 0;
             maximumEmissiveRange = 0f;
             emissiveUploadDirty = true;
+            propagationKernel = -1;
             lastDebugProbeCount = 0;
             lastDebugProbeStride = 0;
         }
@@ -957,13 +1139,37 @@ namespace DynamicGI.Radiance
             Shader.PropertyToID($"_DynamicGI_RadianceCascade3{suffix}")
         };
 
+        private static int[] CreateDirectionalPropertyIds(string prefix) => new[]
+        {
+            Shader.PropertyToID($"{prefix}PositiveX"),
+            Shader.PropertyToID($"{prefix}NegativeX"),
+            Shader.PropertyToID($"{prefix}PositiveY"),
+            Shader.PropertyToID($"{prefix}NegativeY"),
+            Shader.PropertyToID($"{prefix}PositiveZ"),
+            Shader.PropertyToID($"{prefix}NegativeZ")
+        };
+
         [System.Diagnostics.Conditional("UNITY_EDITOR")]
         private void TryAssignDefaultComputeShader()
         {
 #if UNITY_EDITOR
             if (radianceShader == null)
                 radianceShader = UnityEditor.AssetDatabase.LoadAssetAtPath<ComputeShader>(DefaultComputePath);
+            if (propagationShader == null)
+                propagationShader = UnityEditor.AssetDatabase.LoadAssetAtPath<ComputeShader>(DefaultPropagationComputePath);
 #endif
+        }
+
+        private readonly struct ProcessedTile
+        {
+            public readonly Vector3Int GlobalTile;
+            public readonly Vector3Int LocalTile;
+
+            public ProcessedTile(Vector3Int globalTile, Vector3Int localTile)
+            {
+                GlobalTile = globalTile;
+                LocalTile = localTile;
+            }
         }
 
         private readonly struct RecentRegion

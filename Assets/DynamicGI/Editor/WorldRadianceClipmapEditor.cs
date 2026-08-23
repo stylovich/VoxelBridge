@@ -15,7 +15,7 @@ namespace DynamicGI.Editor
             EditorGUILayout.Space();
             EditorGUILayout.HelpBox(
                 "Origins snap to whole update tiles. Probe textures are toroidal: moving the target rotates a ring offset and only exposes new slabs. " +
-                "Large teleports invalidate a full cascade.",
+                "Large teleports invalidate a full cascade. Nearby propagation cascades keep direct, resolved, and scratch textures so neighbor transport never feeds back into source injection.",
                 MessageType.Info);
             using (new EditorGUILayout.HorizontalScope())
             {
@@ -37,6 +37,11 @@ namespace DynamicGI.Editor
             EditorGUILayout.LabelField("Sun horizon factor", clipmap.CurrentSunHorizonFactor.ToString("0.000"));
             EditorGUILayout.LabelField("Emissives / revision", $"{stats.ActiveEmissiveContributors} / {stats.EmissiveRevision}");
             EditorGUILayout.LabelField("Emissive changes", stats.EmissiveChangesThisFrame.ToString());
+            EditorGUILayout.LabelField("Propagation", stats.PropagationEnabled
+                ? $"{stats.PropagationIterations} iterations @ {clipmap.PropagationStrength:0.00}"
+                : "Disabled");
+            EditorGUILayout.LabelField("Propagation dispatches", stats.PropagationDispatchesThisFrame.ToString());
+            EditorGUILayout.LabelField("Propagated probe writes", stats.PropagatedProbesThisFrame.ToString());
             EditorGUILayout.LabelField("Compute dispatches", stats.ComputeDispatchesThisFrame.ToString());
             EditorGUILayout.LabelField("Estimated GPU memory", EditorUtility.FormatBytes(stats.EstimatedGpuBytes));
             EditorGUILayout.LabelField("Scheduling CPU time", $"{stats.UpdateCpuMilliseconds:0.###} ms");

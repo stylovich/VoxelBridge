@@ -1,4 +1,4 @@
-# Dynamic GI prototype — Phases 1–7 Geometry, Visibility, Clipmaps, Sun, and Emissives
+# Dynamic GI prototype — Phases 1–8 Geometry, Visibility, Clipmaps, Sources, and Propagation
 
 This folder contains the portable runtime GI prototype. It does not replace or modify
 HDRP APV, HTrace SSGI, or HTrace AO.
@@ -137,9 +137,9 @@ of clearing the pending queue every frame. Camera following is available with sn
 origins, but the Phase-4 reference field performs a full local reset when its origin
 moves. `WorldRadianceClipmap` is the scalable Phase-5 replacement for that mode.
 
-This is direct source injection into a radiance representation, not final multi-bounce
-GI. Neighbor propagation, surface albedo feedback, and reconvergence are intentionally
-reserved for Phase 8.
+The Phase-4 reference field remains direct source injection rather than multi-bounce
+GI. Phase 8 adds neighbor propagation to the scalable clipmap; surface-albedo feedback
+still awaits Geometry Field material data.
 
 ### Radiance debug and numeric values
 
@@ -331,9 +331,60 @@ unity run . -- -force-d3d12 -executeMethod DynamicGI.Editor.RadiancePhase7SceneS
 unity run . -- -force-d3d12 -executeMethod DynamicGI.Editor.RadiancePhase7SceneSetup.ValidateTestGI -logFile -
 ```
 
-This first version deliberately treats a source as isotropic and uses its renderer AABB
-as a conservative source radius. It injects emitted light into probes but does not yet
-propagate that energy between probes or apply it to scene materials automatically.
+This first version deliberately treats a source as isotropic and uses the circumscribed
+sphere of its renderer AABB as a conservative source radius. Phase 8 propagates that
+injected energy; applying the result to scene materials remains Phase 10 work.
+
+## Phase 8 bounded diffuse propagation
+
+`WorldRadianceClipmap` can now run 1–4 neighbor-propagation iterations after direct
+Sun/sky/emissive injection. Each propagated cascade owns four six-direction texture
+sets: immutable direct injection, two ping-pong scratch sets, and the resolved field
+sampled by shaders. Intermediate passes never overwrite resolved probes, preventing a
+later tile halo from destroying an earlier tile's converged result.
+
+For every output probe, `RadiancePropagate.compute` visits the six axis neighbors and
+runs a short Geometry Field DDA between probe centers. Occupied probes remain zero and
+a crossed wall rejects that transport edge. Visible neighbor energy is split between
+an isotropic diffuse term and configurable directional retention, then evaluated with
+the bounded recurrence:
+
+```text
+resolved(next) = direct + propagationStrength * attenuatedNeighbors(previous)
+```
+
+Strength is clamped below one and output radiance has a configurable ceiling. Each pass
+uses a shrinking halo around the dirty tile, so three iterations can move energy three
+probe spacings without rebuilding the complete cascade. Geometry, sky, and emissive
+invalidation bounds expand by the same propagation radius. `SetPropagationStrength()`
+provides a runtime quality hook and invalidates existing resolved data safely.
+
+Propagation is enabled only through a configurable maximum cascade (C1 by default).
+Distant cascades retain a single direct/resolved texture set, avoiding the fourfold
+storage and compute cost where fine local bounce is least useful. Inspector and Scene
+view statistics expose propagation iterations, dispatches, propagated probe writes,
+and the resulting GPU memory estimate.
+
+### TestGI Phase-8 ceiling bounce
+
+Run **Tools > Dynamic GI > Phase 8 > Configure TestGI Diffuse Propagation**. The neon's
+direct range becomes `0.1 m`; a violet marker at the ceiling is therefore outside direct
+injection but reachable in three C0 neighbor steps. The debug direction becomes `-Y`,
+matching the underside of the ceiling. The existing red marker remains behind the
+voxelized divider.
+
+The GPU validation compares propagation with the source enabled and disabled. It checks
+the three successive probe values, a colored third-step ceiling bounce, zero emissive
+delta behind the wall, and nonzero propagation profiling counters:
+
+```powershell
+unity run . -- -force-d3d12 -executeMethod DynamicGI.Editor.RadiancePhase8SceneSetup.ConfigureTestGI -logFile -
+unity run . -- -force-d3d12 -executeMethod DynamicGI.Editor.RadiancePhase8SceneSetup.ValidateTestGI -logFile -
+```
+
+The current neutral transport has no surface albedo because Phase 1 stores occupancy
+only. Once albedo is added to the Geometry Field, it can modulate the neighbor term
+without changing the ping-pong or invalidation architecture.
 
 ## Data layout
 
@@ -377,8 +428,8 @@ For Shader Graph, use a File-mode Custom Function node pointing to
   hemisphere. This makes Phase 3 an ambient/sky field, not a complete AO solution.
 - The sky volume is fixed to the Geometry Field bounds. Radiance cascades may extend
   outside it, where sky accessibility uses its open-sky fallback.
-- Phase 3 stores no radiance or color. Phase 4 stores source radiance but performs no
-  neighbor propagation or diffuse bounce yet.
+- The Phase-4 fixed local compatibility field remains direct-only. Phase-8 propagation
+  is implemented on the scalable `WorldRadianceClipmap` path.
 - Phase 5 reuses injected probes spatially but does not yet temporally blend new values;
   temporal accumulation is Phase 9 work.
 - During a Sun revision, tiles can temporarily contain different accepted Sun states
@@ -388,6 +439,10 @@ For Shader Graph, use a File-mode Custom Function node pointing to
   spot cones, source-area integration, and GPU spatial binning are future refinements.
 - Emissive injection is capped by `Maximum Emissive Contributors` (64 by default); the
   manager warns and ignores overflow instead of allocating during a frame.
+- Phase-8 propagation uses six axis neighbors and neutral reflectance. It does not yet
+  use surface normals/albedo, diagonal transport, adaptive convergence, or temporal
+  accumulation. Small update tiles can produce many compute dispatches; their exact
+  counts are exposed for profiling and future batching work.
 
 ## Mod/runtime registration contract
 

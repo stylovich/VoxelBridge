@@ -30,6 +30,10 @@ namespace DynamicGI.Radiance
         public readonly int ActiveEmissiveContributors;
         public readonly int EmissiveRevision;
         public readonly int EmissiveChangesThisFrame;
+        public readonly bool PropagationEnabled;
+        public readonly int PropagationIterations;
+        public readonly int PropagationDispatchesThisFrame;
+        public readonly int PropagatedProbesThisFrame;
         public readonly long EstimatedGpuBytes;
         public readonly double UpdateCpuMilliseconds;
 
@@ -48,6 +52,10 @@ namespace DynamicGI.Radiance
             int activeEmissiveContributors,
             int emissiveRevision,
             int emissiveChangesThisFrame,
+            bool propagationEnabled,
+            int propagationIterations,
+            int propagationDispatchesThisFrame,
+            int propagatedProbesThisFrame,
             long estimatedGpuBytes,
             double updateCpuMilliseconds)
         {
@@ -65,6 +73,10 @@ namespace DynamicGI.Radiance
             ActiveEmissiveContributors = activeEmissiveContributors;
             EmissiveRevision = emissiveRevision;
             EmissiveChangesThisFrame = emissiveChangesThisFrame;
+            PropagationEnabled = propagationEnabled;
+            PropagationIterations = propagationIterations;
+            PropagationDispatchesThisFrame = propagationDispatchesThisFrame;
+            PropagatedProbesThisFrame = propagatedProbesThisFrame;
             EstimatedGpuBytes = estimatedGpuBytes;
             UpdateCpuMilliseconds = updateCpuMilliseconds;
         }
