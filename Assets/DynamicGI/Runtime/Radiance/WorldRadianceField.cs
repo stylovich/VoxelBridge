@@ -533,6 +533,8 @@ namespace DynamicGI.Radiance
             shader.SetVector(SizeId, fieldSize);
             shader.SetInts(ResolutionId, resolution.x, resolution.y, resolution.z);
             shader.SetInt(AvailableId, initialized ? 1 : 0);
+            shader.SetInts("_RadianceRingOffset", 0, 0, 0);
+            shader.SetInt("_RadianceToroidal", 0);
         }
 
         private void PublishShaderGlobals()

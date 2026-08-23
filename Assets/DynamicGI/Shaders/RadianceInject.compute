@@ -26,6 +26,8 @@ float3 _DynamicGI_RadianceOrigin;
 float3 _DynamicGI_RadianceSize;
 int3 _DynamicGI_RadianceResolution;
 int _DynamicGI_RadianceAvailable;
+int3 _RadianceRingOffset;
+int _RadianceToroidal;
 
 int3 _RadianceUpdateOffset;
 int3 _RadianceUpdateSize;
@@ -77,6 +79,15 @@ float3 RadianceProbePosition(int3 coordinate)
     return _DynamicGI_RadianceOrigin + ((float3)coordinate + 0.5) * RadianceCellSize();
 }
 
+int3 RadiancePhysicalCoordinate(int3 logicalCoordinate)
+{
+    // Toroidal cascade resolutions are normalized to powers of two on the CPU.
+    // The non-toroidal Phase-4 field bypasses this mask.
+    return _RadianceToroidal != 0
+        ? (logicalCoordinate + _RadianceRingOffset) & (_DynamicGI_RadianceResolution - 1)
+        : logicalCoordinate;
+}
+
 float4 InjectAxis(float3 axis, float skyVisibility, float sunVisibility)
 {
     // Uniform upper-hemisphere irradiance is strongest for +Y, half strength on
@@ -90,6 +101,7 @@ float4 InjectAxis(float3 axis, float skyVisibility, float sunVisibility)
 
 RadianceProbeData ReadRadianceLoad(int3 coordinate)
 {
+    coordinate = RadiancePhysicalCoordinate(coordinate);
     RadianceProbeData result;
     result.PositiveX = _RadianceReadPositiveX.Load(int4(coordinate, 0));
     result.NegativeX = _RadianceReadNegativeX.Load(int4(coordinate, 0));
@@ -98,6 +110,45 @@ RadianceProbeData ReadRadianceLoad(int3 coordinate)
     result.PositiveZ = _RadianceReadPositiveZ.Load(int4(coordinate, 0));
     result.NegativeZ = _RadianceReadNegativeZ.Load(int4(coordinate, 0));
     return result;
+}
+
+RadianceProbeData LerpRadiance(RadianceProbeData from, RadianceProbeData to, float weight)
+{
+    RadianceProbeData result;
+    result.PositiveX = lerp(from.PositiveX, to.PositiveX, weight);
+    result.NegativeX = lerp(from.NegativeX, to.NegativeX, weight);
+    result.PositiveY = lerp(from.PositiveY, to.PositiveY, weight);
+    result.NegativeY = lerp(from.NegativeY, to.NegativeY, weight);
+    result.PositiveZ = lerp(from.PositiveZ, to.PositiveZ, weight);
+    result.NegativeZ = lerp(from.NegativeZ, to.NegativeZ, weight);
+    return result;
+}
+
+RadianceProbeData SampleToroidalRadiance(float3 relative)
+{
+    float3 gridPosition = relative / RadianceCellSize() - 0.5;
+    int3 baseCoordinate = (int3)floor(gridPosition);
+    float3 weight = frac(gridPosition);
+    int3 c0 = clamp(baseCoordinate, 0, _DynamicGI_RadianceResolution - 1);
+    int3 c1 = clamp(baseCoordinate + 1, 0, _DynamicGI_RadianceResolution - 1);
+
+    RadianceProbeData v000 = ReadRadianceLoad(int3(c0.x, c0.y, c0.z));
+    RadianceProbeData v100 = ReadRadianceLoad(int3(c1.x, c0.y, c0.z));
+    RadianceProbeData v010 = ReadRadianceLoad(int3(c0.x, c1.y, c0.z));
+    RadianceProbeData v110 = ReadRadianceLoad(int3(c1.x, c1.y, c0.z));
+    RadianceProbeData v001 = ReadRadianceLoad(int3(c0.x, c0.y, c1.z));
+    RadianceProbeData v101 = ReadRadianceLoad(int3(c1.x, c0.y, c1.z));
+    RadianceProbeData v011 = ReadRadianceLoad(int3(c0.x, c1.y, c1.z));
+    RadianceProbeData v111 = ReadRadianceLoad(int3(c1.x, c1.y, c1.z));
+    RadianceProbeData z0 = LerpRadiance(
+        LerpRadiance(v000, v100, weight.x),
+        LerpRadiance(v010, v110, weight.x),
+        weight.y);
+    RadianceProbeData z1 = LerpRadiance(
+        LerpRadiance(v001, v101, weight.x),
+        LerpRadiance(v011, v111, weight.x),
+        weight.y);
+    return LerpRadiance(z0, z1, weight.z);
 }
 
 float3 SelectDebugRadiance(RadianceProbeData value, int direction)
@@ -146,15 +197,16 @@ void InjectRadiance(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
 
     float3 positionWS = RadianceProbePosition(coordinate);
+    int3 physicalCoordinate = RadiancePhysicalCoordinate(coordinate);
     if (SampleGeometryOccupancy(positionWS) != 0u)
     {
         float4 zero = 0.0;
-        _DynamicGI_RadiancePositiveX[coordinate] = zero;
-        _DynamicGI_RadianceNegativeX[coordinate] = zero;
-        _DynamicGI_RadiancePositiveY[coordinate] = zero;
-        _DynamicGI_RadianceNegativeY[coordinate] = zero;
-        _DynamicGI_RadiancePositiveZ[coordinate] = zero;
-        _DynamicGI_RadianceNegativeZ[coordinate] = zero;
+        _DynamicGI_RadiancePositiveX[physicalCoordinate] = zero;
+        _DynamicGI_RadianceNegativeX[physicalCoordinate] = zero;
+        _DynamicGI_RadiancePositiveY[physicalCoordinate] = zero;
+        _DynamicGI_RadianceNegativeY[physicalCoordinate] = zero;
+        _DynamicGI_RadiancePositiveZ[physicalCoordinate] = zero;
+        _DynamicGI_RadianceNegativeZ[physicalCoordinate] = zero;
         return;
     }
 
@@ -171,12 +223,12 @@ void InjectRadiance(uint3 dispatchThreadId : SV_DispatchThreadID)
         sunVisibility = blocked ? 0.0 : 1.0;
     }
 
-    _DynamicGI_RadiancePositiveX[coordinate] = InjectAxis(float3(1.0, 0.0, 0.0), skyVisibility, sunVisibility);
-    _DynamicGI_RadianceNegativeX[coordinate] = InjectAxis(float3(-1.0, 0.0, 0.0), skyVisibility, sunVisibility);
-    _DynamicGI_RadiancePositiveY[coordinate] = InjectAxis(float3(0.0, 1.0, 0.0), skyVisibility, sunVisibility);
-    _DynamicGI_RadianceNegativeY[coordinate] = InjectAxis(float3(0.0, -1.0, 0.0), skyVisibility, sunVisibility);
-    _DynamicGI_RadiancePositiveZ[coordinate] = InjectAxis(float3(0.0, 0.0, 1.0), skyVisibility, sunVisibility);
-    _DynamicGI_RadianceNegativeZ[coordinate] = InjectAxis(float3(0.0, 0.0, -1.0), skyVisibility, sunVisibility);
+    _DynamicGI_RadiancePositiveX[physicalCoordinate] = InjectAxis(float3(1.0, 0.0, 0.0), skyVisibility, sunVisibility);
+    _DynamicGI_RadianceNegativeX[physicalCoordinate] = InjectAxis(float3(-1.0, 0.0, 0.0), skyVisibility, sunVisibility);
+    _DynamicGI_RadiancePositiveY[physicalCoordinate] = InjectAxis(float3(0.0, 1.0, 0.0), skyVisibility, sunVisibility);
+    _DynamicGI_RadianceNegativeY[physicalCoordinate] = InjectAxis(float3(0.0, -1.0, 0.0), skyVisibility, sunVisibility);
+    _DynamicGI_RadiancePositiveZ[physicalCoordinate] = InjectAxis(float3(0.0, 0.0, 1.0), skyVisibility, sunVisibility);
+    _DynamicGI_RadianceNegativeZ[physicalCoordinate] = InjectAxis(float3(0.0, 0.0, -1.0), skyVisibility, sunVisibility);
 }
 
 [numthreads(64, 1, 1)]
@@ -196,13 +248,22 @@ void QueryRadiance(uint3 dispatchThreadId : SV_DispatchThreadID)
     float3 relative = _RadianceQueryPositions[index] - _DynamicGI_RadianceOrigin;
     if (_DynamicGI_RadianceAvailable != 0 && all(relative >= 0.0) && all(relative < _DynamicGI_RadianceSize))
     {
-        float3 uvw = saturate(relative / _DynamicGI_RadianceSize);
-        result.PositiveX = _RadianceReadPositiveX.SampleLevel(sampler_RadianceReadPositiveX, uvw, 0.0);
-        result.NegativeX = _RadianceReadNegativeX.SampleLevel(sampler_RadianceReadPositiveX, uvw, 0.0);
-        result.PositiveY = _RadianceReadPositiveY.SampleLevel(sampler_RadianceReadPositiveX, uvw, 0.0);
-        result.NegativeY = _RadianceReadNegativeY.SampleLevel(sampler_RadianceReadPositiveX, uvw, 0.0);
-        result.PositiveZ = _RadianceReadPositiveZ.SampleLevel(sampler_RadianceReadPositiveX, uvw, 0.0);
-        result.NegativeZ = _RadianceReadNegativeZ.SampleLevel(sampler_RadianceReadPositiveX, uvw, 0.0);
+        if (_RadianceToroidal != 0)
+        {
+            // Clamp in logical space before applying the ring. Hardware repeat filtering
+            // would interpolate the two opposite world-space field boundaries together.
+            result = SampleToroidalRadiance(relative);
+        }
+        else
+        {
+            float3 uvw = saturate(relative / _DynamicGI_RadianceSize);
+            result.PositiveX = _RadianceReadPositiveX.SampleLevel(sampler_RadianceReadPositiveX, uvw, 0.0);
+            result.NegativeX = _RadianceReadNegativeX.SampleLevel(sampler_RadianceReadPositiveX, uvw, 0.0);
+            result.PositiveY = _RadianceReadPositiveY.SampleLevel(sampler_RadianceReadPositiveX, uvw, 0.0);
+            result.NegativeY = _RadianceReadNegativeY.SampleLevel(sampler_RadianceReadPositiveX, uvw, 0.0);
+            result.PositiveZ = _RadianceReadPositiveZ.SampleLevel(sampler_RadianceReadPositiveX, uvw, 0.0);
+            result.NegativeZ = _RadianceReadNegativeZ.SampleLevel(sampler_RadianceReadPositiveX, uvw, 0.0);
+        }
     }
     _RadianceQueryResults[index] = result;
 }

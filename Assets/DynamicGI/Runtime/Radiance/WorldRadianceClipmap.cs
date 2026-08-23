@@ -1,0 +1,819 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using DynamicGI.Geometry;
+using DynamicGI.Occlusion;
+using Unity.Profiling;
+using UnityEngine;
+using UnityEngine.Experimental.Rendering;
+using UnityEngine.Rendering;
+
+namespace DynamicGI.Radiance
+{
+    /// <summary>
+    /// Camera/player-centred radiance clipmap. Cascades share a resolution pattern but
+    /// increase spacing. Tile-snapped origins and toroidal offsets recycle unchanged
+    /// probes without texture copies when the target moves.
+    /// </summary>
+    [ExecuteAlways]
+    [DefaultExecutionOrder(-290)]
+    [DisallowMultipleComponent]
+    public sealed class WorldRadianceClipmap : MonoBehaviour
+    {
+        public const int MaximumCascadeCount = 4;
+        private const string DefaultComputePath = "Assets/DynamicGI/Shaders/RadianceInject.compute";
+        private static readonly ProfilerMarker UpdateMarker = new("DynamicGI.RadianceClipmap.Update");
+
+        private static readonly int PositiveXId = Shader.PropertyToID("_DynamicGI_RadiancePositiveX");
+        private static readonly int NegativeXId = Shader.PropertyToID("_DynamicGI_RadianceNegativeX");
+        private static readonly int PositiveYId = Shader.PropertyToID("_DynamicGI_RadiancePositiveY");
+        private static readonly int NegativeYId = Shader.PropertyToID("_DynamicGI_RadianceNegativeY");
+        private static readonly int PositiveZId = Shader.PropertyToID("_DynamicGI_RadiancePositiveZ");
+        private static readonly int NegativeZId = Shader.PropertyToID("_DynamicGI_RadianceNegativeZ");
+        private static readonly int OriginId = Shader.PropertyToID("_DynamicGI_RadianceOrigin");
+        private static readonly int SizeId = Shader.PropertyToID("_DynamicGI_RadianceSize");
+        private static readonly int ResolutionId = Shader.PropertyToID("_DynamicGI_RadianceResolution");
+        private static readonly int AvailableId = Shader.PropertyToID("_DynamicGI_RadianceAvailable");
+        private static readonly int RingOffsetId = Shader.PropertyToID("_RadianceRingOffset");
+        private static readonly int ClipmapAvailableId = Shader.PropertyToID("_DynamicGI_RadianceClipmapAvailable");
+        private static readonly int CascadeCountId = Shader.PropertyToID("_DynamicGI_RadianceCascadeCount");
+
+        private static readonly int[][] CascadeTextureIds =
+        {
+            CreateCascadeTextureIds(0),
+            CreateCascadeTextureIds(1),
+            CreateCascadeTextureIds(2),
+            CreateCascadeTextureIds(3)
+        };
+        private static readonly int[] CascadeOriginIds = CreateCascadePropertyIds("Origin");
+        private static readonly int[] CascadeSizeIds = CreateCascadePropertyIds("Size");
+        private static readonly int[] CascadeResolutionIds = CreateCascadePropertyIds("Resolution");
+        private static readonly int[] CascadeRingOffsetIds = CreateCascadePropertyIds("RingOffset");
+        private static readonly int[] CascadeAvailableIds = CreateCascadePropertyIds("Available");
+
+        [Header("Sources")]
+        [SerializeField] private WorldGeometryField geometryField;
+        [SerializeField] private WorldSkyVisibilityField skyVisibilityField;
+        [SerializeField] private Light sunLight;
+        [SerializeField] private Transform trackingTarget;
+
+        [Header("Cascades (maximum 4)")]
+        [SerializeField] private RadianceCascadeSettings[] cascadeSettings =
+        {
+            new("Cascade 0", 16, 8, 0.5f, 2, 1, 16),
+            new("Cascade 1", 16, 8, 1f, 2, 2, 8),
+            new("Cascade 2", 16, 8, 2f, 2, 4, 4)
+        };
+        [SerializeField, Range(0.4f, 0.9f)] private float cascadeBlendStart = 0.7f;
+
+        [Header("Injection")]
+        [SerializeField] private Color skyColor = new(0.22f, 0.38f, 0.65f, 1f);
+        [SerializeField, Min(0f)] private float skyIntensity = 0.2f;
+        [SerializeField, Min(0f)] private float sunIntensityScale = 0.00001f;
+        [SerializeField, Min(1f)] private float sunTraceDistance = 64f;
+        [SerializeField, Min(0f)] private float rayOriginBias = 0.08f;
+
+        [Header("Compute")]
+        [SerializeField] private ComputeShader radianceShader;
+
+        private readonly List<RadianceCascade> cascades = new(MaximumCascadeCount);
+        private readonly List<RecentRegion> recentRegions = new();
+        private readonly Vector3[] singleQueryPosition = new Vector3[1];
+        private WorldGeometryField subscribedGeometryField;
+        private WorldSkyVisibilityField subscribedSkyField;
+        private GraphicsBuffer queryPositionBuffer;
+        private GraphicsBuffer queryResultBuffer;
+        private GraphicsFormat textureFormat;
+        private int clearKernel = -1;
+        private int injectKernel = -1;
+        private int queryKernel = -1;
+        private int debugKernel = -1;
+        private bool initialized;
+        private bool configurationDirty;
+        private bool queryPending;
+        private int pendingQueryCascade;
+        private Vector3 pendingQueryPosition;
+        private Action<RadianceClipmapProbeResult> pendingQueryCallback;
+        private Vector3 lastSunDirection;
+        private Vector3 lastSunRadiance;
+        private Vector3 lastSkyRadiance;
+        private int updatedTilesThisFrame;
+        private int updatedProbesThisFrame;
+        private int exposedProbesThisFrame;
+        private int recycledProbesThisFrame;
+        private int originMovesThisFrame;
+        private int computeDispatchesThisFrame;
+        private double updateCpuMilliseconds;
+        private int lastDebugProbeCount;
+        private int lastDebugProbeStride;
+
+        public static WorldRadianceClipmap Active { get; private set; }
+
+        public WorldGeometryField GeometryField => geometryField;
+        public WorldSkyVisibilityField SkyVisibilityField => skyVisibilityField;
+        public Light SunLight => sunLight;
+        public Transform TrackingTarget => trackingTarget;
+        public int CascadeCount => cascades.Count;
+        public bool IsInitialized => initialized;
+        public float CascadeBlendStart => cascadeBlendStart;
+        public int LastDebugProbeCount => lastDebugProbeCount;
+        public int LastDebugProbeStride => lastDebugProbeStride;
+
+        public RadianceClipmapStats Stats
+        {
+            get
+            {
+                int probes = 0;
+                int dirty = 0;
+                long memory = RadianceProbeGpuData.Stride + sizeof(float) * 3L;
+                for (int i = 0; i < cascades.Count; i++)
+                {
+                    probes += cascades[i].ProbeCount;
+                    dirty += cascades[i].DirtyTileCount;
+                    memory += cascades[i].EstimateGpuBytes();
+                }
+                return new RadianceClipmapStats(
+                    cascades.Count,
+                    probes,
+                    dirty,
+                    updatedTilesThisFrame,
+                    updatedProbesThisFrame,
+                    exposedProbesThisFrame,
+                    recycledProbesThisFrame,
+                    originMovesThisFrame,
+                    computeDispatchesThisFrame,
+                    memory,
+                    updateCpuMilliseconds);
+            }
+        }
+
+        private void Reset()
+        {
+            geometryField = GetComponent<WorldGeometryField>();
+            skyVisibilityField = GetComponent<WorldSkyVisibilityField>();
+            TryAssignDefaultComputeShader();
+        }
+
+        private void OnEnable()
+        {
+            geometryField ??= GetComponent<WorldGeometryField>();
+            skyVisibilityField ??= GetComponent<WorldSkyVisibilityField>();
+            geometryField ??= WorldGeometryField.Active;
+            skyVisibilityField ??= WorldSkyVisibilityField.Active;
+            TryAssignDefaultComputeShader();
+            RefreshSubscriptions();
+            if (Active != null && Active != this)
+                UnityEngine.Debug.LogWarning("Multiple WorldRadianceClipmap instances are enabled. Shader globals use the latest one.", this);
+            Active = this;
+            Initialize();
+        }
+
+        private void OnDisable()
+        {
+            UnsubscribeSources();
+            ReleaseResources();
+            if (Active == this)
+            {
+                Active = null;
+                Shader.SetGlobalInt(ClipmapAvailableId, 0);
+                Shader.SetGlobalInt(CascadeCountId, 0);
+            }
+        }
+
+        private void OnValidate()
+        {
+            cascadeBlendStart = Mathf.Clamp(cascadeBlendStart, 0.4f, 0.9f);
+            skyIntensity = Mathf.Max(0f, skyIntensity);
+            sunIntensityScale = Mathf.Max(0f, sunIntensityScale);
+            sunTraceDistance = Mathf.Max(1f, sunTraceDistance);
+            rayOriginBias = Mathf.Max(0f, rayOriginBias);
+            if (cascadeSettings == null)
+                cascadeSettings = Array.Empty<RadianceCascadeSettings>();
+            for (int i = 0; i < cascadeSettings.Length; i++)
+                cascadeSettings[i]?.Sanitize();
+            TryAssignDefaultComputeShader();
+            if (isActiveAndEnabled)
+                configurationDirty = true;
+        }
+
+        private void Update()
+        {
+            RefreshSubscriptions();
+            if (configurationDirty)
+                Initialize();
+
+            ResetFrameStats();
+            if (!initialized || geometryField == null || !geometryField.IsInitialized)
+            {
+                Shader.SetGlobalInt(ClipmapAvailableId, 0);
+                return;
+            }
+
+            Vector3 targetPosition = ResolveTrackingPosition();
+            for (int i = 0; i < cascades.Count; i++)
+            {
+                RadianceCascade cascade = cascades[i];
+                if (!cascade.UpdateOrigin(targetPosition))
+                    continue;
+                originMovesThisFrame++;
+                exposedProbesThisFrame += cascade.LastExposedProbes;
+                recycledProbesThisFrame += cascade.LastRecycledProbes;
+            }
+
+            DetectLightingChanges();
+            PublishShaderGlobals();
+            bool skyReady = skyVisibilityField == null ||
+                            (skyVisibilityField.IsInitialized && skyVisibilityField.DirtyTileCount == 0);
+            if (geometryField.DirtyBrickCount == 0 && skyReady)
+            {
+                long startTimestamp = Stopwatch.GetTimestamp();
+                using (UpdateMarker.Auto())
+                {
+                    int frame = Time.frameCount;
+                    for (int i = 0; i < cascades.Count; i++)
+                    {
+                        RadianceCascade cascade = cascades[i];
+                        if (frame % cascade.UpdateIntervalFrames == 0)
+                            ProcessCascade(cascade, cascade.UpdateBudgetTiles);
+                    }
+                }
+                updateCpuMilliseconds = (Stopwatch.GetTimestamp() - startTimestamp) * 1000.0 / Stopwatch.Frequency;
+            }
+
+            int currentFrame = Time.frameCount;
+            for (int i = recentRegions.Count - 1; i >= 0; i--)
+                if (recentRegions[i].ExpiryFrame < currentFrame) recentRegions.RemoveAt(i);
+        }
+
+        [ContextMenu("Rebuild All Radiance Cascades")]
+        public void RebuildAll()
+        {
+            if (!EnsureInitialized())
+                return;
+            recentRegions.Clear();
+            for (int i = 0; i < cascades.Count; i++)
+                cascades[i].InvalidateAll();
+        }
+
+        [ContextMenu("Process All Dirty Cascade Tiles")]
+        public void ProcessAllDirtyNow()
+        {
+            if (!EnsureInitialized())
+                return;
+            if (geometryField == null || !geometryField.IsInitialized || geometryField.DirtyBrickCount > 0 ||
+                (skyVisibilityField != null &&
+                 (!skyVisibilityField.IsInitialized || skyVisibilityField.DirtyTileCount > 0)))
+            {
+                UnityEngine.Debug.LogWarning("Radiance Clipmap is waiting for Geometry/Sky Visibility updates.", this);
+                return;
+            }
+            for (int i = 0; i < cascades.Count; i++)
+                while (cascades[i].DirtyTileCount > 0) ProcessCascade(cascades[i], cascades[i].DirtyTileCount);
+            PublishShaderGlobals();
+        }
+
+        public void InvalidateRegion(Bounds worldBounds)
+        {
+            if (!EnsureInitialized())
+                return;
+            for (int i = 0; i < cascades.Count; i++)
+                cascades[i].InvalidateWorldBounds(worldBounds);
+        }
+
+        public bool TryGetCascade(int index, out RadianceCascade cascade)
+        {
+            if (index >= 0 && index < cascades.Count)
+            {
+                cascade = cascades[index];
+                return true;
+            }
+            cascade = null;
+            return false;
+        }
+
+        public void GetCascadeStats(List<RadianceCascadeRuntimeStats> destination)
+        {
+            if (destination == null)
+                return;
+            destination.Clear();
+            for (int i = 0; i < cascades.Count; i++)
+                destination.Add(new RadianceCascadeRuntimeStats(cascades[i]));
+        }
+
+        public void GetDirtyTileBounds(int cascadeIndex, List<Bounds> destination)
+        {
+            if (TryGetCascade(cascadeIndex, out RadianceCascade cascade))
+                cascade.GetDirtyTileBounds(destination);
+            else
+                destination?.Clear();
+        }
+
+        public void GetRecentUpdatedRegions(int cascadeIndex, List<Bounds> destination)
+        {
+            if (destination == null)
+                return;
+            destination.Clear();
+            for (int i = 0; i < recentRegions.Count; i++)
+                if (recentRegions[i].CascadeIndex == cascadeIndex) destination.Add(recentRegions[i].Bounds);
+        }
+
+        /// <summary>
+        /// Explicitly binds the clipmap to a compute kernel. Unity material shaders can
+        /// consume the published globals directly, but compute shaders do not reliably
+        /// inherit global Texture3D resources on every graphics backend.
+        /// </summary>
+        public bool BindSamplingResources(ComputeShader shader, int kernel)
+        {
+            if (!EnsureInitialized() || shader == null)
+                return false;
+
+            shader.SetInt("_DynamicGI_RadianceClipmapAvailable", 1);
+            shader.SetInt("_DynamicGI_RadianceCascadeCount", cascades.Count);
+            shader.SetFloat("_DynamicGI_RadianceCascadeBlendStart", cascadeBlendStart);
+            RadianceCascade fallback = cascades[0];
+
+            // RadianceField.hlsl also declares the Phase-4 fallback. A compute kernel
+            // requires every referenced texture slot to be bound even when the runtime
+            // branch selects the clipmap path.
+            shader.SetInt("_DynamicGI_RadianceAvailable", 0);
+            shader.SetTexture(kernel, "_DynamicGI_RadiancePositiveX", fallback.Textures[0]);
+            shader.SetTexture(kernel, "_DynamicGI_RadianceNegativeX", fallback.Textures[1]);
+            shader.SetTexture(kernel, "_DynamicGI_RadiancePositiveY", fallback.Textures[2]);
+            shader.SetTexture(kernel, "_DynamicGI_RadianceNegativeY", fallback.Textures[3]);
+            shader.SetTexture(kernel, "_DynamicGI_RadiancePositiveZ", fallback.Textures[4]);
+            shader.SetTexture(kernel, "_DynamicGI_RadianceNegativeZ", fallback.Textures[5]);
+            for (int i = 0; i < MaximumCascadeCount; i++)
+            {
+                bool available = i < cascades.Count;
+                shader.SetInt(CascadeAvailableIds[i], available ? 1 : 0);
+                RadianceCascade cascade = available ? cascades[i] : fallback;
+                for (int direction = 0; direction < 6; direction++)
+                    shader.SetTexture(kernel, CascadeTextureIds[i][direction], cascade.Textures[direction]);
+                shader.SetVector(CascadeOriginIds[i], cascade.OriginWS);
+                shader.SetVector(CascadeSizeIds[i], cascade.SizeWS);
+                shader.SetVector(CascadeResolutionIds[i], (Vector3)cascade.Resolution);
+                shader.SetVector(CascadeRingOffsetIds[i], (Vector3)cascade.RingOffset);
+            }
+            return true;
+        }
+
+        public bool RequestProbe(Vector3 worldPosition, Action<RadianceClipmapProbeResult> callback)
+        {
+            if (!EnsureInitialized() || queryPending || queryPositionBuffer == null || queryResultBuffer == null)
+                return false;
+            int cascadeIndex = FindFinestContainingCascade(worldPosition);
+            if (cascadeIndex < 0)
+                return false;
+            RadianceCascade cascade = cascades[cascadeIndex];
+            singleQueryPosition[0] = worldPosition;
+            queryPositionBuffer.SetData(singleQueryPosition);
+            BindReadTextures(cascade, queryKernel);
+            BindCascadeLayout(cascade);
+            radianceShader.SetBuffer(queryKernel, "_RadianceQueryPositions", queryPositionBuffer);
+            radianceShader.SetBuffer(queryKernel, "_RadianceQueryResults", queryResultBuffer);
+            radianceShader.SetInt("_RadianceQueryCount", 1);
+            radianceShader.Dispatch(queryKernel, 1, 1, 1);
+            computeDispatchesThisFrame++;
+
+            pendingQueryCascade = cascadeIndex;
+            pendingQueryPosition = worldPosition;
+            pendingQueryCallback = callback;
+            queryPending = true;
+            AsyncGPUReadback.Request(queryResultBuffer, OnProbeReadback);
+            return true;
+        }
+
+        public bool BuildDebugSamples(
+            int cascadeIndex,
+            GraphicsBuffer sampleBuffer,
+            int maximumSamples,
+            Vector3 center,
+            float radius,
+            RadianceDebugDirection direction,
+            out int sampleCount)
+        {
+            sampleCount = 0;
+            lastDebugProbeCount = 0;
+            lastDebugProbeStride = 0;
+            if (!initialized || sampleBuffer == null || maximumSamples <= 0 ||
+                !TryGetCascade(cascadeIndex, out RadianceCascade cascade))
+            {
+                return false;
+            }
+
+            Bounds bounds = cascade.WorldBounds;
+            if (radius > 0f && !bounds.Intersects(new Bounds(center, Vector3.one * radius * 2f)))
+                return false;
+            Vector3 cell = Vector3.one * cascade.ProbeSpacing;
+            Vector3 radiusVector = Vector3.one * Mathf.Max(0f, radius);
+            Vector3 minWorld = radius > 0f ? center - radiusVector : bounds.min;
+            Vector3 maxWorld = radius > 0f ? center + radiusVector : bounds.max;
+            Vector3Int minimum = ClampProbe(WorldToProbeFloor(Vector3.Max(minWorld, bounds.min), cascade), cascade.Resolution);
+            Vector3Int maximum = ClampProbe(WorldToProbeFloor(Vector3.Min(maxWorld, bounds.max - cell * 0.0001f), cascade), cascade.Resolution);
+            Vector3Int size = maximum - minimum + Vector3Int.one;
+            if (size.x <= 0 || size.y <= 0 || size.z <= 0)
+                return false;
+
+            long candidates = (long)size.x * size.y * size.z;
+            int stride = Mathf.Max(1, (int)Math.Ceiling(candidates / (double)maximumSamples));
+            sampleCount = Mathf.Min(maximumSamples, (int)Math.Ceiling(candidates / (double)stride));
+            if (sampleCount <= 0)
+                return false;
+
+            lastDebugProbeCount = sampleCount;
+            lastDebugProbeStride = stride;
+            BindReadTextures(cascade, debugKernel);
+            BindCascadeLayout(cascade);
+            radianceShader.SetBuffer(debugKernel, "_RadianceDebugSamples", sampleBuffer);
+            radianceShader.SetInts("_RadianceDebugOffset", minimum.x, minimum.y, minimum.z);
+            radianceShader.SetInts("_RadianceDebugSize", size.x, size.y, size.z);
+            radianceShader.SetInt("_RadianceDebugSampleCount", sampleCount);
+            radianceShader.SetInt("_RadianceDebugSampleStride", stride);
+            radianceShader.SetInt("_RadianceDebugDirection", (int)direction);
+            radianceShader.SetVector("_RadianceDebugCenter", center);
+            radianceShader.SetFloat("_RadianceDebugRadius", Mathf.Max(0f, radius));
+            radianceShader.Dispatch(debugKernel, Mathf.CeilToInt(sampleCount / 64f), 1, 1);
+            computeDispatchesThisFrame++;
+            return true;
+        }
+
+        private bool EnsureInitialized()
+        {
+            if (!initialized)
+                Initialize();
+            return initialized;
+        }
+
+        private void Initialize()
+        {
+            configurationDirty = false;
+            ReleaseResources();
+            TryAssignDefaultComputeShader();
+            if (geometryField == null || radianceShader == null || !SystemInfo.supportsComputeShaders)
+                return;
+            try
+            {
+                clearKernel = radianceShader.FindKernel("ClearRadiance");
+                injectKernel = radianceShader.FindKernel("InjectRadiance");
+                queryKernel = radianceShader.FindKernel("QueryRadiance");
+                debugKernel = radianceShader.FindKernel("BuildRadianceDebug");
+                textureFormat = ChooseTextureFormat();
+                Vector3 target = ResolveTrackingPosition();
+                int settingsCount = Mathf.Min(MaximumCascadeCount, cascadeSettings?.Length ?? 0);
+                for (int i = 0; i < settingsCount; i++)
+                {
+                    RadianceCascadeSettings settings = cascadeSettings[i];
+                    if (settings == null || !settings.Enabled)
+                        continue;
+                    RadianceCascade cascade = new(cascades.Count, settings, textureFormat, target);
+                    cascades.Add(cascade);
+                    ClearCascade(cascade);
+                }
+                if (cascades.Count == 0)
+                    throw new InvalidOperationException("At least one enabled Radiance Cascade is required.");
+                queryPositionBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, sizeof(float) * 3);
+                queryResultBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, RadianceProbeGpuData.Stride);
+            }
+            catch (Exception exception)
+            {
+                UnityEngine.Debug.LogError($"Could not initialize Radiance Clipmap: {exception.Message}", this);
+                ReleaseResources();
+                return;
+            }
+
+            initialized = true;
+            CaptureLightingState();
+            PublishShaderGlobals();
+        }
+
+        private void ProcessCascade(RadianceCascade cascade, int budget)
+        {
+            int processed = 0;
+            while (processed < budget && cascade.TryDequeueDirty(out Vector3Int globalTile, out Vector3Int localTile))
+            {
+                DispatchTile(cascade, localTile);
+                Bounds updatedBounds = cascade.GetGlobalTileBounds(globalTile);
+                recentRegions.Add(new RecentRegion(cascade.Index, updatedBounds, Time.frameCount + 180));
+                if (recentRegions.Count > 512) recentRegions.RemoveAt(0);
+                processed++;
+            }
+        }
+
+        private void DispatchTile(RadianceCascade cascade, Vector3Int localTile)
+        {
+            if (!geometryField.BindSamplingResources(radianceShader, injectKernel))
+                return;
+            if (skyVisibilityField == null || !skyVisibilityField.BindSamplingResources(radianceShader, injectKernel))
+                radianceShader.SetInt("_DynamicGI_SkyVisibilityAvailable", 0);
+
+            BindWriteTextures(cascade, injectKernel);
+            BindCascadeLayout(cascade);
+            Vector3 toSun = GetSunDirection();
+            Vector3 sun = GetSunRadiance();
+            Color sky = skyColor.linear;
+            Vector3Int offset = localTile * cascade.TileResolution;
+            radianceShader.SetInts("_RadianceUpdateOffset", offset.x, offset.y, offset.z);
+            radianceShader.SetInts("_RadianceUpdateSize", cascade.TileResolution, cascade.TileResolution, cascade.TileResolution);
+            radianceShader.SetVector("_RadianceSkyColor", new Vector4(sky.r, sky.g, sky.b, 0f));
+            radianceShader.SetFloat("_RadianceSkyIntensity", skyIntensity);
+            radianceShader.SetVector("_RadianceSunDirection", toSun);
+            radianceShader.SetVector("_RadianceSunColor", sun);
+            radianceShader.SetInt("_RadianceSunEnabled", sunLight != null && sunLight.enabled && sunLight.gameObject.activeInHierarchy ? 1 : 0);
+            radianceShader.SetFloat("_RadianceSunTraceDistance", sunTraceDistance);
+            radianceShader.SetFloat("_RadianceRayOriginBias", Mathf.Max(rayOriginBias, geometryField.VoxelSize * 0.1f));
+            int ddaSteps = Mathf.Clamp(Mathf.CeilToInt(sunTraceDistance / geometryField.VoxelSize * 1.8f) + 4, 8, 4096);
+            radianceShader.SetInt("_RadianceMaxDdaSteps", ddaSteps);
+            radianceShader.Dispatch(injectKernel,
+                Mathf.CeilToInt(cascade.TileResolution / 4f),
+                Mathf.CeilToInt(cascade.TileResolution / 4f),
+                Mathf.CeilToInt(cascade.TileResolution / 4f));
+            updatedTilesThisFrame++;
+            updatedProbesThisFrame += cascade.TileResolution * cascade.TileResolution * cascade.TileResolution;
+            computeDispatchesThisFrame++;
+        }
+
+        private void ClearCascade(RadianceCascade cascade)
+        {
+            BindWriteTextures(cascade, clearKernel);
+            BindCascadeLayout(cascade);
+            radianceShader.Dispatch(clearKernel,
+                Mathf.CeilToInt(cascade.Resolution.x / 4f),
+                Mathf.CeilToInt(cascade.Resolution.y / 4f),
+                Mathf.CeilToInt(cascade.Resolution.z / 4f));
+            computeDispatchesThisFrame++;
+        }
+
+        private void BindCascadeLayout(RadianceCascade cascade)
+        {
+            Vector3Int resolution = cascade.Resolution;
+            Vector3Int ring = cascade.RingOffset;
+            radianceShader.SetVector(OriginId, cascade.OriginWS);
+            radianceShader.SetVector(SizeId, cascade.SizeWS);
+            radianceShader.SetInts(ResolutionId, resolution.x, resolution.y, resolution.z);
+            radianceShader.SetInts(RingOffsetId, ring.x, ring.y, ring.z);
+            radianceShader.SetInt("_RadianceToroidal", 1);
+            radianceShader.SetInt(AvailableId, 1);
+        }
+
+        private void BindWriteTextures(RadianceCascade cascade, int kernel)
+        {
+            radianceShader.SetTexture(kernel, PositiveXId, cascade.Textures[0]);
+            radianceShader.SetTexture(kernel, NegativeXId, cascade.Textures[1]);
+            radianceShader.SetTexture(kernel, PositiveYId, cascade.Textures[2]);
+            radianceShader.SetTexture(kernel, NegativeYId, cascade.Textures[3]);
+            radianceShader.SetTexture(kernel, PositiveZId, cascade.Textures[4]);
+            radianceShader.SetTexture(kernel, NegativeZId, cascade.Textures[5]);
+        }
+
+        private void BindReadTextures(RadianceCascade cascade, int kernel)
+        {
+            radianceShader.SetTexture(kernel, "_RadianceReadPositiveX", cascade.Textures[0]);
+            radianceShader.SetTexture(kernel, "_RadianceReadNegativeX", cascade.Textures[1]);
+            radianceShader.SetTexture(kernel, "_RadianceReadPositiveY", cascade.Textures[2]);
+            radianceShader.SetTexture(kernel, "_RadianceReadNegativeY", cascade.Textures[3]);
+            radianceShader.SetTexture(kernel, "_RadianceReadPositiveZ", cascade.Textures[4]);
+            radianceShader.SetTexture(kernel, "_RadianceReadNegativeZ", cascade.Textures[5]);
+        }
+
+        private void PublishShaderGlobals()
+        {
+            if (!initialized)
+                return;
+            Shader.SetGlobalInt(ClipmapAvailableId, 1);
+            Shader.SetGlobalInt(CascadeCountId, cascades.Count);
+            Shader.SetGlobalFloat("_DynamicGI_RadianceCascadeBlendStart", cascadeBlendStart);
+            for (int i = 0; i < MaximumCascadeCount; i++)
+            {
+                bool available = i < cascades.Count;
+                Shader.SetGlobalInt(CascadeAvailableIds[i], available ? 1 : 0);
+                if (!available)
+                    continue;
+                RadianceCascade cascade = cascades[i];
+                for (int direction = 0; direction < 6; direction++)
+                    Shader.SetGlobalTexture(CascadeTextureIds[i][direction], cascade.Textures[direction]);
+                Shader.SetGlobalVector(CascadeOriginIds[i], cascade.OriginWS);
+                Shader.SetGlobalVector(CascadeSizeIds[i], cascade.SizeWS);
+                Shader.SetGlobalVector(CascadeResolutionIds[i], (Vector3)cascade.Resolution);
+                Shader.SetGlobalVector(CascadeRingOffsetIds[i], (Vector3)cascade.RingOffset);
+            }
+        }
+
+        private void DetectLightingChanges()
+        {
+            Vector3 direction = GetSunDirection();
+            Vector3 sun = GetSunRadiance();
+            Color linearSky = skyColor.linear;
+            Vector3 sky = new(linearSky.r * skyIntensity, linearSky.g * skyIntensity, linearSky.b * skyIntensity);
+            if ((direction - lastSunDirection).sqrMagnitude <= 0.000001f &&
+                (sun - lastSunRadiance).sqrMagnitude <= 0.000001f &&
+                (sky - lastSkyRadiance).sqrMagnitude <= 0.000001f)
+            {
+                return;
+            }
+            lastSunDirection = direction;
+            lastSunRadiance = sun;
+            lastSkyRadiance = sky;
+            for (int i = 0; i < cascades.Count; i++) cascades[i].InvalidateAll();
+        }
+
+        private void CaptureLightingState()
+        {
+            lastSunDirection = GetSunDirection();
+            lastSunRadiance = GetSunRadiance();
+            Color linearSky = skyColor.linear;
+            lastSkyRadiance = new Vector3(linearSky.r, linearSky.g, linearSky.b) * skyIntensity;
+        }
+
+        private Vector3 ResolveTrackingPosition()
+        {
+            if (trackingTarget != null)
+                return trackingTarget.position;
+            if (Camera.main != null)
+                return Camera.main.transform.position;
+            return transform.position;
+        }
+
+        private Vector3 GetSunDirection() => sunLight != null ? -sunLight.transform.forward.normalized : Vector3.up;
+
+        private Vector3 GetSunRadiance()
+        {
+            if (sunLight == null || !sunLight.enabled || !sunLight.gameObject.activeInHierarchy)
+                return Vector3.zero;
+            Color color = sunLight.color.linear;
+            float intensity = sunLight.intensity * sunIntensityScale;
+            return new Vector3(color.r * intensity, color.g * intensity, color.b * intensity);
+        }
+
+        private Bounds CalculateSunInfluence(Bounds changedBounds)
+        {
+            Bounds influence = changedBounds;
+            influence.Encapsulate(new Bounds(changedBounds.center - GetSunDirection() * sunTraceDistance, changedBounds.size));
+            influence.Expand(Vector3.one * 2f);
+            return influence;
+        }
+
+        private void RefreshSubscriptions()
+        {
+            if (subscribedGeometryField != geometryField)
+            {
+                if (subscribedGeometryField != null)
+                {
+                    subscribedGeometryField.GeometryFieldReset -= OnGeometryReset;
+                    subscribedGeometryField.GeometryRegionRebuilt -= OnGeometryRegionRebuilt;
+                }
+                subscribedGeometryField = geometryField;
+                if (subscribedGeometryField != null)
+                {
+                    subscribedGeometryField.GeometryFieldReset += OnGeometryReset;
+                    subscribedGeometryField.GeometryRegionRebuilt += OnGeometryRegionRebuilt;
+                }
+                configurationDirty = true;
+            }
+            if (subscribedSkyField != skyVisibilityField)
+            {
+                if (subscribedSkyField != null)
+                {
+                    subscribedSkyField.VisibilityFieldReset -= OnSkyReset;
+                    subscribedSkyField.VisibilityRegionUpdated -= OnSkyRegionUpdated;
+                }
+                subscribedSkyField = skyVisibilityField;
+                if (subscribedSkyField != null)
+                {
+                    subscribedSkyField.VisibilityFieldReset += OnSkyReset;
+                    subscribedSkyField.VisibilityRegionUpdated += OnSkyRegionUpdated;
+                }
+                configurationDirty = true;
+            }
+        }
+
+        private void UnsubscribeSources()
+        {
+            if (subscribedGeometryField != null)
+            {
+                subscribedGeometryField.GeometryFieldReset -= OnGeometryReset;
+                subscribedGeometryField.GeometryRegionRebuilt -= OnGeometryRegionRebuilt;
+            }
+            if (subscribedSkyField != null)
+            {
+                subscribedSkyField.VisibilityFieldReset -= OnSkyReset;
+                subscribedSkyField.VisibilityRegionUpdated -= OnSkyRegionUpdated;
+            }
+            subscribedGeometryField = null;
+            subscribedSkyField = null;
+        }
+
+        private void OnGeometryReset(Bounds _) { for (int i = 0; i < cascades.Count; i++) cascades[i].InvalidateAll(); }
+        private void OnGeometryRegionRebuilt(Bounds bounds) => InvalidateRegion(CalculateSunInfluence(bounds));
+        private void OnSkyReset(Bounds _) { for (int i = 0; i < cascades.Count; i++) cascades[i].InvalidateAll(); }
+        private void OnSkyRegionUpdated(Bounds bounds) => InvalidateRegion(bounds);
+
+        private void OnProbeReadback(AsyncGPUReadbackRequest request)
+        {
+            bool error = request.hasError;
+            RadianceProbeGpuData value = default;
+            if (!error)
+            {
+                var data = request.GetData<RadianceProbeGpuData>();
+                error = data.Length == 0;
+                if (!error) value = data[0];
+            }
+            Action<RadianceClipmapProbeResult> callback = pendingQueryCallback;
+            RadianceProbeResult probe = new(pendingQueryPosition, value, error);
+            int cascade = pendingQueryCascade;
+            pendingQueryCallback = null;
+            queryPending = false;
+            callback?.Invoke(new RadianceClipmapProbeResult(cascade, probe));
+        }
+
+        private int FindFinestContainingCascade(Vector3 position)
+        {
+            for (int i = 0; i < cascades.Count; i++)
+                if (cascades[i].WorldBounds.Contains(position)) return i;
+            return -1;
+        }
+
+        private static Vector3Int WorldToProbeFloor(Vector3 position, RadianceCascade cascade)
+        {
+            Vector3 relative = (position - cascade.OriginWS) / cascade.ProbeSpacing;
+            return new Vector3Int(Mathf.FloorToInt(relative.x), Mathf.FloorToInt(relative.y), Mathf.FloorToInt(relative.z));
+        }
+
+        private static Vector3Int ClampProbe(Vector3Int value, Vector3Int resolution) => new(
+            Mathf.Clamp(value.x, 0, resolution.x - 1),
+            Mathf.Clamp(value.y, 0, resolution.y - 1),
+            Mathf.Clamp(value.z, 0, resolution.z - 1));
+
+        private void ResetFrameStats()
+        {
+            updatedTilesThisFrame = 0;
+            updatedProbesThisFrame = 0;
+            exposedProbesThisFrame = 0;
+            recycledProbesThisFrame = 0;
+            originMovesThisFrame = 0;
+            computeDispatchesThisFrame = 0;
+            updateCpuMilliseconds = 0.0;
+        }
+
+        private static GraphicsFormat ChooseTextureFormat() =>
+            SystemInfo.IsFormatSupported(GraphicsFormat.R16G16B16A16_SFloat, FormatUsage.LoadStore)
+                ? GraphicsFormat.R16G16B16A16_SFloat
+                : GraphicsFormat.R32G32B32A32_SFloat;
+
+        private void ReleaseResources()
+        {
+            initialized = false;
+            queryPending = false;
+            pendingQueryCallback = null;
+            recentRegions.Clear();
+            for (int i = 0; i < cascades.Count; i++) cascades[i].Dispose();
+            cascades.Clear();
+            queryPositionBuffer?.Dispose();
+            queryResultBuffer?.Dispose();
+            queryPositionBuffer = null;
+            queryResultBuffer = null;
+            lastDebugProbeCount = 0;
+            lastDebugProbeStride = 0;
+        }
+
+        private static int[] CreateCascadeTextureIds(int index) => new[]
+        {
+            Shader.PropertyToID($"_DynamicGI_RadianceCascade{index}PositiveX"),
+            Shader.PropertyToID($"_DynamicGI_RadianceCascade{index}NegativeX"),
+            Shader.PropertyToID($"_DynamicGI_RadianceCascade{index}PositiveY"),
+            Shader.PropertyToID($"_DynamicGI_RadianceCascade{index}NegativeY"),
+            Shader.PropertyToID($"_DynamicGI_RadianceCascade{index}PositiveZ"),
+            Shader.PropertyToID($"_DynamicGI_RadianceCascade{index}NegativeZ")
+        };
+
+        private static int[] CreateCascadePropertyIds(string suffix) => new[]
+        {
+            Shader.PropertyToID($"_DynamicGI_RadianceCascade0{suffix}"),
+            Shader.PropertyToID($"_DynamicGI_RadianceCascade1{suffix}"),
+            Shader.PropertyToID($"_DynamicGI_RadianceCascade2{suffix}"),
+            Shader.PropertyToID($"_DynamicGI_RadianceCascade3{suffix}")
+        };
+
+        [System.Diagnostics.Conditional("UNITY_EDITOR")]
+        private void TryAssignDefaultComputeShader()
+        {
+#if UNITY_EDITOR
+            if (radianceShader == null)
+                radianceShader = UnityEditor.AssetDatabase.LoadAssetAtPath<ComputeShader>(DefaultComputePath);
+#endif
+        }
+
+        private readonly struct RecentRegion
+        {
+            public readonly int CascadeIndex;
+            public readonly Bounds Bounds;
+            public readonly int ExpiryFrame;
+
+            public RecentRegion(int cascadeIndex, Bounds bounds, int expiryFrame)
+            {
+                CascadeIndex = cascadeIndex;
+                Bounds = bounds;
+                ExpiryFrame = expiryFrame;
+            }
+        }
+    }
+}

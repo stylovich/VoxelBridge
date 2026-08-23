@@ -1,4 +1,4 @@
-# Dynamic GI prototype — Phases 1–4 Geometry, Sky Visibility, and Local Radiance
+# Dynamic GI prototype — Phases 1–5 Geometry, Visibility, and Radiance Clipmaps
 
 This folder contains the first, deliberately isolated layer of the runtime GI
 prototype. It does not replace or modify HDRP APV, HTrace SSGI, or HTrace AO.
@@ -134,8 +134,8 @@ The six volumes use trilinear `RGBA16F` 3D textures (`RGBA32F` fallback), update
 deduplicated tiles, and only recalculate after lighting/source changes or dependent
 geometry/sky regions change. A continuously moving Sun requeues tiles fairly instead
 of clearing the pending queue every frame. Camera following is available with snapped
-origins, but Phase 4 performs a full local reset when the origin moves; probe recycling
-and true clipmap cascades remain Phase 5 work.
+origins, but the Phase-4 reference field performs a full local reset when its origin
+moves. `WorldRadianceClipmap` is the scalable Phase-5 replacement for that mode.
 
 This is direct source injection into a radiance representation, not final multi-bounce
 GI. Neighbor propagation, surface albedo feedback, and reconvergence are intentionally
@@ -185,9 +185,61 @@ float3 dynamicDiffuse = SampleDynamicGI(positionWS, normalWS);
 ```
 
 The function trilinearly samples all relevant directional volumes and blends the three
-signed axes selected by the world-space normal. Outside the local volume it returns
-zero. It is not wired into HDRP/APV materials automatically in Phase 4; that explicit
-provider/compositing integration belongs to Phase 10.
+signed axes selected by the world-space normal. It automatically prefers the active
+Phase-5 clipmap and falls back to the Phase-4 local volume. Outside every available
+volume it returns zero. It is not wired into HDRP/APV materials automatically yet; that
+explicit provider/compositing integration belongs to Phase 10.
+
+## Phase 5 radiance clipmap / cascades
+
+`WorldRadianceClipmap` owns up to four camera/player-centred `RadianceCascade` levels.
+Each level keeps the same six-direction RGB representation as Phase 4, but has its own
+configurable resolution, spacing, tile size, update interval, and tile budget. Default
+spacings are `0.5 m`, `1 m`, and `2 m`; they are laboratory values, not fixed city-scale
+recommendations.
+
+Origins snap to whole update tiles. Crossing a boundary rotates a three-dimensional
+toroidal ring offset instead of copying textures: probes still inside the new window
+keep their physical texels, and only the entering slabs become dirty. Pending work uses
+global tile coordinates, so scrolling drops only tiles that actually left the window.
+A teleport larger than a cascade resets that level completely. Geometry and sky events
+continue to invalidate only intersecting cascade tiles.
+
+The shader include performs manual trilinear loads because hardware filtering cannot
+cross a wrapped toroidal seam correctly. It selects the finest cascade containing the
+sample and blends toward the next level near its outer bounds. Cascade resolutions and
+tile resolutions are normalized to powers of two, allowing wrapped coordinates to use
+a bit mask.
+
+`RadianceClipmapDebug` provides:
+
+- independently colored bounds for all cascades;
+- dirty and recently updated tiles for the selected cascade;
+- GPU-instanced directional/average probe values;
+- a horizontal slice of numeric luminance labels and a six-direction detailed query;
+- ring offsets, exposed/recycled probes, update counts, estimated memory, and CPU time.
+
+For compute passes that include `RadianceField.hlsl`, call
+`WorldRadianceClipmap.BindSamplingResources(shader, kernel)` before dispatch. Material
+shaders receive the same resources as globals and call `SampleDynamicGI` directly.
+
+### TestGI Phase-5 laboratory
+
+Run **Tools > Dynamic GI > Phase 5 > Configure TestGI Radiance Clipmap**. It recreates
+the east-window room, disables the Phase-4 local field without removing it, follows the
+Main Camera, and configures three `16 x 8 x 16` cascades at `0.5/1/2 m`. The selected
+debug view is Cascade 0, `+X`, with numeric labels. The portable validation checks
+snapping, partial slab invalidation, toroidal recycling, large teleports, manual shader
+sampling, fine/coarse blending, and debug readback:
+
+```powershell
+unity run . -- -executeMethod DynamicGI.Editor.RadiancePhase5Validation.Run -logFile -
+unity run . -- -executeMethod DynamicGI.Editor.RadiancePhase5SceneSetup.ValidateTestGI -logFile -
+```
+
+The generated validation moves C0 by one 1 m tile: 256 of 2048 probes are exposed and
+1792 are recycled. In TestGI, the east-window probe must remain lit while the probe
+behind the solid wall stays dark.
 
 ## Data layout
 
@@ -229,10 +281,12 @@ For Shader Graph, use a File-mode Custom Function node pointing to
   that cap. This affects visualization only, never occupancy data.
 - Sky directions currently use the world-up hemisphere rather than a surface-normal
   hemisphere. This makes Phase 3 an ambient/sky field, not a complete AO solution.
-- The sky volume is fixed to the Geometry Field bounds. Camera-following radiance
-  probes and clipmap cascades belong to later phases.
+- The sky volume is fixed to the Geometry Field bounds. Radiance cascades may extend
+  outside it, where sky accessibility uses its open-sky fallback.
 - Phase 3 stores no radiance or color. Phase 4 stores source radiance but performs no
   neighbor propagation or diffuse bounce yet.
+- Phase 5 reuses injected probes spatially but does not yet temporally blend new values;
+  temporal accumulation is Phase 9 work.
 - Phase 4 supports one directional Sun source. Point/spot emissives are Phase 7 work.
 
 ## Mod/runtime registration contract
