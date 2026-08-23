@@ -17,7 +17,7 @@ namespace DynamicGI.Editor
                 "Occlusion Strength is exposed as ambient/sky accessibility. It is not multiplied over APV or the complete Dynamic GI result.",
                 MessageType.Info);
             EditorGUILayout.HelpBox(
-                "Geometry-aware surface sampling rejects probes hidden behind voxel geometry. Surface Normal Bias and HDRP View Bias establish the visible-side ray origin; keep them near the C0 probe spacing and validate them against your smallest rooms.",
+                "Geometry-aware surface sampling rejects probes hidden behind voxel geometry. Surface Normal Bias establishes a stable world-space ray origin. Visibility Weight Floor prevents a single surviving probe from being amplified into a full-energy block near walls.",
                 MessageType.Info);
             if (controls.ScreenSpaceBridgeEnabled &&
                 controls.ProviderMode == IndirectLightingProviderMode.ExistingPlusDynamic)

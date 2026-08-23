@@ -116,6 +116,13 @@ namespace DynamicGI.Editor
                 Vector4 finalValue = Query(clipmap, directMarker.position).Probe.Radiance.NegativeZ;
                 Vector4 expectedFirst = Vector4.Lerp(baseline, finalValue, 0.25f);
                 float firstError = MaximumRgbError(firstTemporal, expectedFirst);
+                float expectedMagnitude = Mathf.Max(
+                    Mathf.Abs(expectedFirst.x),
+                    Mathf.Max(Mathf.Abs(expectedFirst.y), Mathf.Abs(expectedFirst.z)));
+                // Cascades use RGBA16F when supported. Its quantization error grows
+                // with magnitude, so validate the lerp against half-float relative
+                // precision instead of a fixed threshold calibrated near value one.
+                float lerpTolerance = Mathf.Max(0.0025f, expectedMagnitude * 0.001f);
                 float transitionMagnitude = MaximumRgbError(baseline, finalValue);
 
                 if (transitionMagnitude <= 0.02f)
@@ -124,12 +131,13 @@ namespace DynamicGI.Editor
                         $"Phase 9 temporal test source did not produce a measurable transition: " +
                         $"before={FormatRgb(baseline)}, after={FormatRgb(finalValue)}.");
                 }
-                if (firstError > 0.0025f)
+                if (firstError > lerpTolerance)
                 {
                     throw new InvalidOperationException(
                         $"First temporal result does not match lerp(previous, candidate, 0.25): " +
                         $"before={FormatRgb(baseline)}, first={FormatRgb(firstTemporal)}, " +
-                        $"candidate={FormatRgb(finalValue)}, expected={FormatRgb(expectedFirst)}, error={firstError:0.000000}.");
+                        $"candidate={FormatRgb(finalValue)}, expected={FormatRgb(expectedFirst)}, " +
+                        $"error={firstError:0.000000}, tolerance={lerpTolerance:0.000000}.");
                 }
                 if (convergedStats.PendingTemporalTiles != 0 ||
                     MaximumRgbError(finalValue, firstTemporal) <= 0.005f)
@@ -169,7 +177,7 @@ namespace DynamicGI.Editor
                 Debug.Log(
                     $"DYNAMIC_GI_PHASE9_VALIDATION_PASSED | alpha=0.25 | " +
                     $"before={FormatRgb(baseline)} | first={FormatRgb(firstTemporal)} | " +
-                    $"final={FormatRgb(finalValue)} | lerpError={firstError:0.000000} | " +
+                    $"final={FormatRgb(finalValue)} | lerpError/tolerance={firstError:0.000000}/{lerpTolerance:0.000000} | " +
                     $"pendingFirst={firstStats.PendingTemporalTiles} | pendingFinal={convergedStats.PendingTemporalTiles} | " +
                     $"temporalDispatches={convergedStats.TemporalDispatchesThisFrame} | " +
                     $"temporalWrites={convergedStats.TemporalProbesThisFrame} | " +

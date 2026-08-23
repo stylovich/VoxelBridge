@@ -40,6 +40,7 @@ int _DynamicGI_RadianceCascadeCount;
 float _DynamicGI_RadianceCascadeBlendStart;
 int _DynamicGI_GeometryAwareSurfaceSampling;
 int _DynamicGI_SurfaceVisibilityMaxSteps;
+float _DynamicGI_SurfaceVisibilityWeightFloor;
 
 void DynamicGIGetCascadeLayout(int cascadeIndex, out float3 origin, out float3 size, out int3 resolution, out int3 ringOffset)
 {
@@ -211,7 +212,9 @@ void DynamicGIAccumulateVisibleCascadeProbe(
     float3 normalWS,
     float interpolationWeight,
     inout float3 weightedRadiance,
-    inout float accumulatedWeight)
+    inout float accumulatedWeight,
+    inout float3 unresolvedRadiance,
+    inout float unresolvedWeight)
 {
     float4 value = DynamicGILoadCascadeIrradianceAndValidity(
         cascadeIndex,
@@ -219,6 +222,9 @@ void DynamicGIAccumulateVisibleCascadeProbe(
         resolution,
         ringOffset,
         normalWS);
+    float candidateWeight = interpolationWeight * saturate(value.a);
+    unresolvedRadiance += value.rgb * candidateWeight;
+    unresolvedWeight += candidateWeight;
     float3 probePositionWS = cascadeOrigin + ((float3)logicalCoordinate + 0.5) * cellSize;
     float visibleWeight = DynamicGIVisibleProbeWeight(
         samplePositionWS,
@@ -249,6 +255,8 @@ float3 DynamicGISampleRadianceCascadeAtSurface(int cascadeIndex, float3 position
 
     float3 weightedRadiance = 0.0;
     float accumulatedWeight = 0.0;
+    float3 unresolvedRadiance = 0.0;
+    float unresolvedWeight = 0.0;
     [loop]
     for (int cornerIndex = 0; cornerIndex < 8; cornerIndex++)
     {
@@ -272,9 +280,27 @@ float3 DynamicGISampleRadianceCascadeAtSurface(int cascadeIndex, float3 position
             normalWS,
             cornerWeight.x * cornerWeight.y * cornerWeight.z,
             weightedRadiance,
-            accumulatedWeight);
+            accumulatedWeight,
+            unresolvedRadiance,
+            unresolvedWeight);
     }
-    return accumulatedWeight > 1e-5 ? max(0.0, weightedRadiance / accumulatedWeight) : 0.0;
+    // Do not promote a tiny surviving interpolation corner to full energy. That
+    // produces bright plateaus followed by black seams whenever binary DDA visibility
+    // changes at a wall. A configurable denominator floor keeps fully visible samples
+    // unchanged while turning low-confidence visibility into conservative darkening.
+    float normalizationWeight = max(accumulatedWeight, saturate(_DynamicGI_SurfaceVisibilityWeightFloor));
+    if (accumulatedWeight > 1e-5)
+        return max(0.0, weightedRadiance / max(normalizationWeight, 1e-5));
+
+    // At a perpendicular T-junction the normal-biased sample can still lie in the
+    // adjacent wall's surface voxel. DDA then has no unambiguous visible corner. A
+    // conservative, validity-weighted trilinear fallback avoids a view-dependent black
+    // seam without changing the normal path used by ordinary wall/floor samples.
+    float unresolvedNormalization = max(unresolvedWeight, saturate(_DynamicGI_SurfaceVisibilityWeightFloor));
+    const float unresolvedJunctionConfidence = 0.5;
+    return unresolvedWeight > 1e-5
+        ? max(0.0, unresolvedRadiance / max(unresolvedNormalization, 1e-5)) * unresolvedJunctionConfidence
+        : 0.0;
 }
 
 float3 DynamicGISampleClipmap(float3 positionWS, float3 normalWS)

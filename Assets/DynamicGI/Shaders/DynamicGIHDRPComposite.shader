@@ -12,7 +12,6 @@ Shader "Hidden/DynamicGI/HDRPComposite"
 
     TEXTURE2D_X(_GBufferTexture0);
     float _DynamicGI_HDRPAlbedoWeight;
-    float _DynamicGI_HDRPViewBias;
     float _DynamicGI_ReplacementDarkeningStrength;
 
     float4 DynamicGIComposite(Varyings varyings) : SV_Target
@@ -35,9 +34,6 @@ Shader "Hidden/DynamicGI/HDRPComposite"
         // HDRP may reconstruct camera-relative positions. The fields are explicitly
         // world-space, so convert before sampling to avoid a camera-anchored result.
         float3 positionAWS = GetAbsolutePositionWS(positionInput.positionWS);
-        float3 cameraAWS = GetAbsolutePositionWS(GetPrimaryCameraPosition());
-        float3 toCamera = cameraAWS - positionAWS;
-        positionAWS += toCamera * rsqrt(max(dot(toCamera, toCamera), 1e-6)) * max(0.0, _DynamicGI_HDRPViewBias);
         float3 dynamicIndirect = SampleDynamicGIForAdditiveBridge(positionAWS, normalData.normalWS);
 
         // GBuffer0 is optional weighting for deferred Lit. Keep its default at zero
@@ -71,9 +67,6 @@ Shader "Hidden/DynamicGI/HDRPComposite"
             UNITY_MATRIX_I_VP,
             UNITY_MATRIX_V);
         float3 positionAWS = GetAbsolutePositionWS(positionInput.positionWS);
-        float3 cameraAWS = GetAbsolutePositionWS(GetPrimaryCameraPosition());
-        float3 toCamera = cameraAWS - positionAWS;
-        positionAWS += toCamera * rsqrt(max(dot(toCamera, toCamera), 1e-6)) * max(0.0, _DynamicGI_HDRPViewBias);
 
         float accessibility = SampleDynamicGIAmbientAccessibility(positionAWS);
         float factor = lerp(1.0, accessibility, saturate(_DynamicGI_ReplacementDarkeningStrength));

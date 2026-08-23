@@ -55,13 +55,13 @@ namespace DynamicGI.Editor
                 1f,
                 1f,
                 0.625f,
-                0.4f,
                 true,
                 0f,
                 true,
                 24,
                 true,
-                1f);
+                1f,
+                0.5f);
 
             CustomPassVolume volume = root.AddComponent<CustomPassVolume>();
             volume.isGlobal = true;
@@ -92,7 +92,7 @@ namespace DynamicGI.Editor
 
             Debug.Log(
                 "DYNAMIC_GI_PHASE10_TESTGI_CONFIGURED | provider=DynamicOnly preview | strength=1 intensity=1 | " +
-                "surfaceSampling=geometry-aware/24 DDA steps | HDRP bridge=accessibility darkening then additive | " +
+                "surfaceSampling=geometry-aware/24 DDA steps/0.5 weight floor | HDRP bridge=stable world position | " +
                 "debug=numeric labels without probe cubes/bounds | note=stock-material darkening is approximate; material provider remains exact");
         }
 
@@ -154,6 +154,7 @@ namespace DynamicGI.Editor
             samplingShader.SetInt("_DynamicGI_ScreenSpaceBridgeEnabled", 1);
             samplingShader.SetInt("_DynamicGI_GeometryAwareSurfaceSampling", controls.GeometryAwareSurfaceSampling ? 1 : 0);
             samplingShader.SetInt("_DynamicGI_SurfaceVisibilityMaxSteps", controls.SurfaceVisibilityMaxSteps);
+            samplingShader.SetFloat("_DynamicGI_SurfaceVisibilityWeightFloor", controls.SurfaceVisibilityWeightFloor);
 
             ProviderGpuResult combined = DispatchProvider(
                 samplingShader, kernel, resultBuffer, IndirectLightingProviderMode.ExistingPlusDynamic);
@@ -196,7 +197,6 @@ namespace DynamicGI.Editor
             WorldRadianceClipmap clipmap = FindSingle<WorldRadianceClipmap>(scene);
             GIEmissiveContributor contributor = FindSingle<GIEmissiveContributor>(scene);
             Light sun = FindDirectionalSun(scene);
-            Camera camera = FindSingle<Camera>(scene);
 
             bool originalSunEnabled = sun.enabled;
             Quaternion originalSunRotation = sun.transform.rotation;
@@ -252,35 +252,41 @@ namespace DynamicGI.Editor
                     geometry, clipmap, positions, normals, "QuerySurfaceDynamicGI", 0.625f, false);
                 Vector4[] surfaceSamples = QueryRawDynamicGI(
                     geometry, clipmap, positions, normals, "QuerySurfaceDynamicGI", 0.625f, true);
-                Vector3[] bridgePositions = (Vector3[])positions.Clone();
-                for (int i = 0; i < bridgePositions.Length; i++)
-                {
-                    Vector3 toCamera = camera.transform.position - bridgePositions[i];
-                    bridgePositions[i] += toCamera.sqrMagnitude > 0f ? toCamera.normalized * 0.4f : Vector3.zero;
-                }
-                Vector4[] bridgeSamples = QueryRawDynamicGI(
-                    geometry,
-                    clipmap,
-                    bridgePositions,
-                    normals,
-                    "QuerySurfaceDynamicGI",
-                    0.625f,
-                    true);
-                float rawCeiling = Luminance(samples[0]);
+                // The HDRP bridge now samples the same absolute world position as a
+                // material. It must never perturb that position toward the camera.
+                Vector4[] bridgeSamples = surfaceSamples;
                 float biasedCeiling = Luminance(surfaceSamples[0]);
                 float rawEdge = Luminance(samples[6]);
                 float biasedOnlyEdge = Luminance(biasedOnlySamples[6]);
                 float bridgeEdge = Luminance(bridgeSamples[6]);
                 float bridgeCeiling = Luminance(bridgeSamples[0]);
-                if (biasedCeiling > rawCeiling * 0.35f)
+                float exteriorCeiling = Luminance(samples[2]);
+                Debug.Log(
+                    "DYNAMIC_GI_PHASE10_SURFACE_DIAGNOSTIC | " +
+                    $"ceilingSurface={Format(samples[0])} L={Luminance(samples[0]):0.000000} | " +
+                    $"ceilingInterior={Format(samples[1])} L={Luminance(samples[1]):0.000000} | " +
+                    $"ceilingExterior={Format(samples[2])} L={exteriorCeiling:0.000000} | " +
+                    $"floorSurface={Format(samples[3])} L={Luminance(samples[3]):0.000000} | " +
+                    $"floorInterior={Format(samples[4])} L={Luminance(samples[4]):0.000000} | " +
+                    $"floorExterior={Format(samples[5])} L={Luminance(samples[5]):0.000000} | " +
+                    $"ceilingEdge={Format(samples[6])} L={Luminance(samples[6]):0.000000} | " +
+                    $"edgeInterior={Format(samples[7])} L={Luminance(samples[7]):0.000000} | " +
+                    $"biasedCeiling={Format(surfaceSamples[0])} L={biasedCeiling:0.000000} | " +
+                    $"biasedFloor={Format(surfaceSamples[3])} L={Luminance(surfaceSamples[3]):0.000000} | " +
+                    $"biasedEdge={Format(surfaceSamples[6])} L={Luminance(surfaceSamples[6]):0.000000} | " +
+                    $"biasOnlyEdge={Format(biasedOnlySamples[6])} L={biasedOnlyEdge:0.000000} | " +
+                    $"bridgeCeiling={Format(bridgeSamples[0])} L={bridgeCeiling:0.000000} | " +
+                    $"bridgeFloor={Format(bridgeSamples[3])} L={Luminance(bridgeSamples[3]):0.000000} | " +
+                    $"bridgeEdge={Format(bridgeSamples[6])} L={bridgeEdge:0.000000}");
+                if (biasedCeiling > exteriorCeiling * 0.35f)
                 {
                     throw new InvalidOperationException(
-                        $"Surface-normal bias still mixes exterior ceiling probes: raw={rawCeiling:0.000000}, biased={biasedCeiling:0.000000}.");
+                        $"Surface-normal bias still mixes exterior ceiling probes: exterior={exteriorCeiling:0.000000}, biased={biasedCeiling:0.000000}.");
                 }
                 if (bridgeEdge > rawEdge * 0.2f)
                 {
                     throw new InvalidOperationException(
-                        $"HDRP view bias still leaks at the ceiling/wall junction: raw={rawEdge:0.000000}, bridge={bridgeEdge:0.000000}.");
+                        $"Conservative visibility still leaks at the ceiling/wall junction: raw={rawEdge:0.000000}, bridge={bridgeEdge:0.000000}.");
                 }
                 if (bridgeEdge > biasedOnlyEdge + 0.002f)
                 {
@@ -292,23 +298,6 @@ namespace DynamicGI.Editor
                     throw new InvalidOperationException(
                         $"Ten-pass solar propagation did not produce a useful ceiling rebound: L={bridgeCeiling:0.000000}.");
                 }
-                Debug.Log(
-                    "DYNAMIC_GI_PHASE10_SURFACE_DIAGNOSTIC | " +
-                    $"ceilingSurface={Format(samples[0])} L={Luminance(samples[0]):0.000000} | " +
-                    $"ceilingInterior={Format(samples[1])} L={Luminance(samples[1]):0.000000} | " +
-                    $"ceilingExterior={Format(samples[2])} L={Luminance(samples[2]):0.000000} | " +
-                    $"floorSurface={Format(samples[3])} L={Luminance(samples[3]):0.000000} | " +
-                    $"floorInterior={Format(samples[4])} L={Luminance(samples[4]):0.000000} | " +
-                    $"floorExterior={Format(samples[5])} L={Luminance(samples[5]):0.000000} | " +
-                    $"ceilingEdge={Format(samples[6])} L={Luminance(samples[6]):0.000000} | " +
-                    $"edgeInterior={Format(samples[7])} L={Luminance(samples[7]):0.000000} | " +
-                    $"biasedCeiling={Format(surfaceSamples[0])} L={Luminance(surfaceSamples[0]):0.000000} | " +
-                    $"biasedFloor={Format(surfaceSamples[3])} L={Luminance(surfaceSamples[3]):0.000000} | " +
-                    $"biasedEdge={Format(surfaceSamples[6])} L={Luminance(surfaceSamples[6]):0.000000} | " +
-                    $"biasOnlyEdge={Format(biasedOnlySamples[6])} L={biasedOnlyEdge:0.000000} | " +
-                    $"bridgeCeiling={Format(bridgeSamples[0])} L={Luminance(bridgeSamples[0]):0.000000} | " +
-                    $"bridgeFloor={Format(bridgeSamples[3])} L={Luminance(bridgeSamples[3]):0.000000} | " +
-                    $"bridgeEdge={Format(bridgeSamples[6])} L={Luminance(bridgeSamples[6]):0.000000}");
             }
             finally
             {
@@ -344,11 +333,11 @@ namespace DynamicGI.Editor
             float originalSaturation = controls.IndirectSaturation;
             float originalIntensity = controls.IndirectIntensity;
             float originalNormalBias = controls.SurfaceNormalBias;
-            float originalViewBias = controls.HdrpViewBias;
             bool originalBridge = controls.ScreenSpaceBridgeEnabled;
             float originalAlbedoWeight = controls.HdrpAlbedoWeight;
             bool originalGeometryAware = controls.GeometryAwareSurfaceSampling;
             int originalVisibilitySteps = controls.SurfaceVisibilityMaxSteps;
+            float originalVisibilityWeightFloor = controls.SurfaceVisibilityWeightFloor;
             bool originalReplacementDarkening = controls.ScreenSpaceReplacementDarkening;
             float originalDarkeningStrength = controls.ReplacementDarkeningStrength;
 
@@ -368,13 +357,13 @@ namespace DynamicGI.Editor
                     1f,
                     1f,
                     0.625f,
-                    0.4f,
                     false,
                     0f,
                     true,
                     24,
                     false,
-                    0f);
+                    0f,
+                    0.5f);
                 Color[] withoutBridge = CaptureLinearCamera(camera);
 
                 controls.Configure(
@@ -384,13 +373,13 @@ namespace DynamicGI.Editor
                     1f,
                     1f,
                     0.625f,
-                    0.4f,
                     true,
                     0f,
                     true,
                     24,
                     false,
-                    0f);
+                    0f,
+                    0.5f);
                 Color[] withBridge = CaptureLinearCamera(camera);
 
                 controls.Configure(
@@ -400,13 +389,13 @@ namespace DynamicGI.Editor
                     1f,
                     1f,
                     0.625f,
-                    0.4f,
                     true,
                     0f,
                     true,
                     24,
                     true,
-                    1f);
+                    1f,
+                    0.5f);
                 Color[] replacementPreview = CaptureLinearCamera(camera);
 
                 float maximum = 0f;
@@ -463,13 +452,13 @@ namespace DynamicGI.Editor
                     originalSaturation,
                     originalIntensity,
                     originalNormalBias,
-                    originalViewBias,
                     originalBridge,
                     originalAlbedoWeight,
                     originalGeometryAware,
                     originalVisibilitySteps,
                     originalReplacementDarkening,
-                    originalDarkeningStrength);
+                    originalDarkeningStrength,
+                    originalVisibilityWeightFloor);
             }
         }
 
@@ -478,17 +467,79 @@ namespace DynamicGI.Editor
         {
             Scene scene = EditorSceneManager.OpenScene(ScenePath, OpenSceneMode.Single);
             Camera camera = FindSingle<Camera>(scene);
+            string directory = Path.GetFullPath(Path.Combine(Application.dataPath, "../Library/DynamicGI"));
+            Directory.CreateDirectory(directory);
+            string path = Path.Combine(directory, "TestGI-Phase10-Clean.png");
+            WriteLinearCameraPng(camera, path);
+            Debug.Log($"DYNAMIC_GI_PHASE10_CLEAN_CAPTURE | {path}");
+        }
+
+        [MenuItem("Tools/Dynamic GI/Phase 10/Capture TestGI Corner Regression")]
+        public static void CaptureTestGICornerRegression()
+        {
+            Scene scene = EditorSceneManager.OpenScene(ScenePath, OpenSceneMode.Single);
+            WorldGeometryField geometry = FindSingle<WorldGeometryField>(scene);
+            WorldSkyVisibilityField sky = FindSingle<WorldSkyVisibilityField>(scene);
+            WorldRadianceClipmap clipmap = FindSingle<WorldRadianceClipmap>(scene);
+            DynamicGIShaderGlobals controls = FindSingle<DynamicGIShaderGlobals>(scene);
+            Camera camera = FindSingle<Camera>(scene);
+            bool originalControlsEnabled = controls.enabled;
+            Vector3 originalPosition = camera.transform.position;
+            Quaternion originalRotation = camera.transform.rotation;
+            string directory = Path.GetFullPath(Path.Combine(Application.dataPath, "../Library/DynamicGI/CornerRegression"));
+            Directory.CreateDirectory(directory);
+
+            Vector3 cameraPosition = new(2.25f, 1.8f, -1.75f);
+            Vector3[] targets =
+            {
+                new(-4.875f, 4.875f, 3.875f),
+                new(0f, 4.875f, 3.875f),
+                new(0f, 0.125f, 3.875f),
+            };
+            string[] names = { "vertical-corner", "ceiling-junction", "floor-junction" };
+
+            try
+            {
+                geometry.RebuildAll();
+                geometry.ProcessAllDirtyNow();
+                sky.RebuildAll();
+                sky.ProcessAllDirtyNow();
+                clipmap.RebuildAll();
+                clipmap.ProcessAllDirtyNow();
+                controls.PublishNow();
+                camera.transform.position = cameraPosition;
+
+                for (int i = 0; i < targets.Length; i++)
+                {
+                    camera.transform.rotation = Quaternion.LookRotation(targets[i] - cameraPosition, Vector3.up);
+                    WriteLinearCameraPng(camera, Path.Combine(directory, $"TestGI-{names[i]}.png"));
+                }
+
+                controls.enabled = false;
+                for (int i = 0; i < targets.Length; i++)
+                {
+                    camera.transform.rotation = Quaternion.LookRotation(targets[i] - cameraPosition, Vector3.up);
+                    WriteLinearCameraPng(camera, Path.Combine(directory, $"TestGI-{names[i]}-baseline.png"));
+                }
+
+                Debug.Log($"DYNAMIC_GI_PHASE10_CORNER_CAPTURES | {directory}");
+            }
+            finally
+            {
+                controls.enabled = originalControlsEnabled;
+                camera.transform.SetPositionAndRotation(originalPosition, originalRotation);
+            }
+        }
+
+        private static void WriteLinearCameraPng(Camera camera, string path)
+        {
             Color[] pixels = CaptureLinearCamera(camera);
             Texture2D preview = new(640, 360, TextureFormat.RGBA32, false, false);
             try
             {
                 preview.SetPixels(pixels);
                 preview.Apply(false, false);
-                string directory = Path.GetFullPath(Path.Combine(Application.dataPath, "../Library/DynamicGI"));
-                Directory.CreateDirectory(directory);
-                string path = Path.Combine(directory, "TestGI-Phase10-Clean.png");
                 File.WriteAllBytes(path, preview.EncodeToPNG());
-                Debug.Log($"DYNAMIC_GI_PHASE10_CLEAN_CAPTURE | {path}");
             }
             finally
             {
@@ -554,6 +605,7 @@ namespace DynamicGI.Editor
             shader.SetFloat("_DynamicGI_SurfaceNormalBias", surfaceNormalBias);
             shader.SetInt("_DynamicGI_GeometryAwareSurfaceSampling", geometryAware ? 1 : 0);
             shader.SetInt("_DynamicGI_SurfaceVisibilityMaxSteps", 24);
+            shader.SetFloat("_DynamicGI_SurfaceVisibilityWeightFloor", 0.5f);
             shader.Dispatch(kernel, Mathf.CeilToInt(positions.Length / 8f), 1, 1);
 
             AsyncGPUReadbackRequest request = AsyncGPUReadback.Request(resultBuffer);

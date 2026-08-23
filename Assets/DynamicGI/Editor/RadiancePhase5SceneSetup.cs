@@ -58,8 +58,8 @@ namespace DynamicGI.Editor
 
             Debug.Log(
                 "DYNAMIC_GI_PHASE5_TESTGI_CONFIGURED | tracking=Main Camera | " +
-                "C0=16x16x16@0.5m | C1=16x8x16@1m | C2=16x8x16@2m | " +
-                "tile=2 probes | debug=C0/+X/query+ground+ceiling slices");
+                "C0=32x32x32@0.25m | C1=16x8x16@1m | C2=16x8x16@2m | " +
+                "C0tile=4 probes/1m | debug=C0/+X/query+ground+ceiling slices");
         }
 
         [MenuItem("Tools/Dynamic GI/Phase 5/Validate TestGI Radiance Clipmap")]
@@ -132,7 +132,11 @@ namespace DynamicGI.Editor
 
             SerializedProperty settings = value.FindProperty("cascadeSettings");
             settings.arraySize = 3;
-            ConfigureCascade(settings.GetArrayElementAtIndex(0), "Near", 16, 16, 0.5f, 2, 1, 16);
+            // High-quality laboratory near field: eight times the probes of the old
+            // 16^3/0.5 m grid, but the same 8 m coverage. Four-probe tiles remain 1 m
+            // wide in world space, preserving the previous invalidation granularity
+            // without multiplying the number of overlapping propagation dispatches.
+            ConfigureCascade(settings.GetArrayElementAtIndex(0), "Near", 32, 32, 0.25f, 4, 1, 4);
             ConfigureCascade(settings.GetArrayElementAtIndex(1), "Middle", 16, 8, 1f, 2, 2, 8);
             ConfigureCascade(settings.GetArrayElementAtIndex(2), "Far", 16, 8, 2f, 2, 4, 4);
             value.ApplyModifiedPropertiesWithoutUndo();

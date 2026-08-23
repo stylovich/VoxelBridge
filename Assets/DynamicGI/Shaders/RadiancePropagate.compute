@@ -34,6 +34,7 @@ int3 _PropagationUpdateSize;
 float _PropagationStrength;
 float _PropagationDirectionalRetention;
 float _PropagationDistanceAttenuation;
+float _PropagationReferenceSpacing;
 float _PropagationSurfaceReflectivity;
 float _PropagationMaximumRadiance;
 float _RadianceRayOriginBias;
@@ -191,7 +192,13 @@ float4 ResolveLobe(
     float3 directionalAverage = directional.a > 0.0 ? directional.rgb / directional.a : isotropic;
     float3 transported = lerp(isotropic, directionalAverage, _PropagationDirectionalRetention);
     float3 reflected = surface.a > 0.0 ? surface.rgb / surface.a : 0.0;
-    float3 bounced = transported * (_PropagationStrength * _PropagationDistanceAttenuation) +
+    // Strength and attenuation are authored at a reference probe spacing. Without
+    // distance normalization, halving the spacing squares the attenuation over the
+    // same world-space distance and makes a higher-resolution field much darker.
+    float probeSpacing = max(1e-4, RadianceCellSize().x);
+    float spacingRatio = probeSpacing / max(1e-4, _PropagationReferenceSpacing);
+    float transportFactor = pow(saturate(_PropagationStrength * _PropagationDistanceAttenuation), spacingRatio);
+    float3 bounced = transported * transportFactor +
                      reflected * (_PropagationStrength * _PropagationSurfaceReflectivity);
     return float4(min(direct.rgb + bounced, _PropagationMaximumRadiance.xxx), direct.a);
 }

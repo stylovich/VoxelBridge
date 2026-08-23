@@ -234,8 +234,11 @@ shaders receive the same resources as globals and call `SampleDynamicGI` directl
 
 Run **Tools > Dynamic GI > Phase 5 > Configure TestGI Radiance Clipmap**. It recreates
 the east-window room, disables the Phase-4 local field without removing it, follows the
-Main Camera, and configures C0 as `16 x 16 x 16` at `0.5 m` plus two `16 x 8 x 16`
-cascades at `1/2 m`. The taller near cascade covers the laboratory floor and ceiling.
+Main Camera, and configures the high-quality laboratory C0 as `32 x 32 x 32` at
+`0.25 m` plus two `16 x 8 x 16` cascades at `1/2 m`. C0 therefore keeps the same
+8 m world-space coverage as the earlier grid while using eight times as many probes.
+Its tiles contain `4 x 4 x 4` probes, so each tile remains 1 m wide and localized
+invalidation does not become eight times more dispatch-heavy.
 The selected debug view is Cascade 0, `+X`, with numeric labels. The portable validation checks
 snapping, partial slab invalidation, toroidal recycling, large teleports, manual shader
 sampling, fine/coarse blending, and debug readback:
@@ -398,10 +401,13 @@ while the slice labels and detailed query identify both source and directional l
 Selecting a cascade outside the configured propagation range correctly produces a zero
 delta because it has no separate direct/resolved texture sets.
 
-TestGI uses ten C0 passes because its 0.5 m probe spacing must cover the approximately
-5 m floor-to-ceiling path. This is a laboratory quality setting; the runtime default
-remains three passes and larger worlds should choose the pass count from the intended
-transport radius and budget. The GPU validation compares propagation with the source
+TestGI uses ten C0 passes as a correctness-first local transport preset. At the
+high-quality 0.25 m near spacing this gives 2.5 m of neighbor propagation, while direct
+Sun visibility and emissive injection still seed every eligible probe independently.
+Per-step attenuation is normalized against the configured 0.5 m reference spacing, so
+halving probe spacing no longer squares away the energy over the same physical distance.
+The runtime default remains three passes and larger worlds should choose the pass count
+from the intended transport radius and budget. The GPU validation compares propagation with the source
 enabled and disabled. It checks successive probe values, a useful colored ceiling bounce, zero emissive
 delta behind the wall, the dedicated delta query and numeric-slice kernel against
 `Resolved - Direct`, and nonzero propagation profiling counters:
@@ -504,6 +510,7 @@ _DynamicGI_IndirectIntensity
 _DynamicGI_SurfaceNormalBias
 _DynamicGI_GeometryAwareSurfaceSampling
 _DynamicGI_SurfaceVisibilityMaxSteps
+_DynamicGI_SurfaceVisibilityWeightFloor
 _DynamicGI_IndirectProviderMode
 _DynamicGI_ReplacementDarkeningStrength
 ```
@@ -513,15 +520,15 @@ before trilinear lookup. This prevents a floor, wall, or ceiling pixel from blen
 valid probes on the opposite side of a thin shell. When geometry-aware sampling is
 enabled, every one of the eight trilinear probe candidates must also have a clear short
 Geometry Field DDA path to the biased surface point. Blocked or invalid candidates are
-discarded and the surviving weights are renormalized. This closes wall/floor/ceiling
-junction leaks, at the cost of up to eight DDA traces for every sampled cascade. The
-maximum step count and the feature itself are configurable.
+discarded. Surviving weights are normalized against a configurable minimum weight instead
+of always being promoted back to full energy. This prevents one visible interpolation
+corner from becoming a bright block followed by a black seam. It closes wall/floor/ceiling
+junction leaks at the cost of up to eight DDA traces for every sampled cascade.
 
-The HDRP stock-material bridge has an additional camera-facing `HDRP View Bias` for
-T-junction pixels where a single surface normal cannot describe the intersecting wall.
-In TestGI the normal and view values are 0.625 m and 0.4 m respectively, derived from
-C0's 0.5 m spacing and 0.25 m geometry voxels; they remain configurable for projects
-with a different scale.
+The HDRP stock-material bridge samples the exact absolute world position reconstructed
+from depth. It deliberately has no camera-facing offset: such an offset makes the sampled
+side of a T-junction change when the camera rotates and creates view-dependent corner
+lines. The only surface offset is `Surface Normal Bias`, shared with the material API.
 
 HDRP stock Lit materials cannot call a custom include without being modified, so the
 portable module also provides `DynamicGIHDRPCompositePass`. It reconstructs absolute

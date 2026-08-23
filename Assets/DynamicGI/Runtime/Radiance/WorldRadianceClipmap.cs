@@ -99,6 +99,8 @@ namespace DynamicGI.Radiance
         [SerializeField, Range(0f, 0.95f)] private float propagationStrength = 0.55f;
         [SerializeField, Range(0f, 1f)] private float propagationDirectionalRetention = 0.35f;
         [SerializeField, Range(0f, 1f)] private float propagationDistanceAttenuation = 0.9f;
+        [Tooltip("Probe spacing at which propagation strength and distance attenuation are authored. Other cascades normalize attenuation by their physical spacing.")]
+        [SerializeField, Min(0.01f)] private float propagationReferenceSpacing = 0.5f;
         [Tooltip("Neutral occupancy-only reflection used until Geometry Field albedo is available.")]
         [SerializeField, Range(0f, 0.95f)] private float propagationSurfaceReflectivity = 0.35f;
         [SerializeField, Min(0.1f)] private float maximumPropagatedRadiance = 8f;
@@ -286,6 +288,7 @@ namespace DynamicGI.Radiance
             propagationStrength = Mathf.Clamp(propagationStrength, 0f, 0.95f);
             propagationDirectionalRetention = Mathf.Clamp01(propagationDirectionalRetention);
             propagationDistanceAttenuation = Mathf.Clamp01(propagationDistanceAttenuation);
+            propagationReferenceSpacing = Mathf.Max(0.01f, propagationReferenceSpacing);
             propagationSurfaceReflectivity = Mathf.Clamp(propagationSurfaceReflectivity, 0f, 0.95f);
             maximumPropagatedRadiance = Mathf.Max(0.1f, maximumPropagatedRadiance);
             maximumPropagationCascadeIndex = Mathf.Clamp(maximumPropagationCascadeIndex, 0, 3);
@@ -909,6 +912,7 @@ namespace DynamicGI.Radiance
             propagationShader.SetFloat("_PropagationStrength", propagationStrength);
             propagationShader.SetFloat("_PropagationDirectionalRetention", propagationDirectionalRetention);
             propagationShader.SetFloat("_PropagationDistanceAttenuation", propagationDistanceAttenuation);
+            propagationShader.SetFloat("_PropagationReferenceSpacing", propagationReferenceSpacing);
             propagationShader.SetFloat("_PropagationSurfaceReflectivity", propagationSurfaceReflectivity);
             propagationShader.SetFloat("_PropagationMaximumRadiance", maximumPropagatedRadiance);
             float bias = Mathf.Max(rayOriginBias, geometryField.VoxelSize * 0.1f);

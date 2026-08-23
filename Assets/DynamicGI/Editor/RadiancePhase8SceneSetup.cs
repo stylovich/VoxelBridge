@@ -46,12 +46,14 @@ namespace DynamicGI.Editor
             WorldRadianceClipmap clipmap = FindSingle<WorldRadianceClipmap>(scene);
             SerializedObject serializedClipmap = new(clipmap);
             Set(serializedClipmap, "enableDiffusePropagation", true);
-            // C0 spacing is 0.5 m and the room is 5 m tall. Ten passes let a floor
-            // reflection reach the underside of the ceiling in this laboratory.
+            // Ten passes provide a correctness-first local transport radius. Per-step
+            // attenuation is normalized below so changing C0 spacing does not also
+            // change energy loss per world-space metre.
             Set(serializedClipmap, "propagationIterations", 10);
             Set(serializedClipmap, "propagationStrength", 0.8f);
             Set(serializedClipmap, "propagationDirectionalRetention", 0.65f);
             Set(serializedClipmap, "propagationDistanceAttenuation", 0.95f);
+            Set(serializedClipmap, "propagationReferenceSpacing", 0.5f);
             Set(serializedClipmap, "propagationSurfaceReflectivity", 0.35f);
             Set(serializedClipmap, "maximumPropagatedRadiance", 8f);
             Set(serializedClipmap, "maximumPropagationCascadeIndex", 1);
@@ -139,7 +141,14 @@ namespace DynamicGI.Editor
                 Vector4 debugDelta = QueryDebug(clipmap, ceiling.position, RadianceDebugSource.PropagationDelta).Probe.Radiance.NegativeY;
                 Vector4 expectedDebugDelta = MaxZero(debugResolved - debugDirect);
                 float debugDeltaError = MaximumRgbError(debugDelta, expectedDebugDelta);
-                float debugSliceLuminance = ReadNearestDebugDeltaSample(clipmap, ceiling.position);
+                float debugSliceLuminance = ReadNearestDebugDeltaSample(
+                    clipmap,
+                    ceiling.position,
+                    out Vector3 debugSlicePosition);
+                Vector4 debugSliceProbe = QueryDebug(
+                    clipmap,
+                    debugSlicePosition,
+                    RadianceDebugSource.PropagationDelta).Probe.Radiance.NegativeY;
                 RadianceClipmapProbeResult blockedPropagatedResult = Query(clipmap, blocked.position);
 
                 contributor.SetContributionEnabled(false);
@@ -163,11 +172,12 @@ namespace DynamicGI.Editor
                         $"{FormatRgb(propagationStep2)} -> {FormatRgb(ceilingPropagated)}.");
                 }
                 if (debugDeltaError > 0.0001f ||
-                    Mathf.Abs(debugSliceLuminance - Luminance(debugDelta)) > 0.0001f)
+                    Mathf.Abs(debugSliceLuminance - Luminance(debugSliceProbe)) > 0.0001f)
                 {
                     throw new InvalidOperationException(
                         $"Propagation debug delta disagrees with resolved-direct: delta={FormatRgb(debugDelta)}, " +
-                        $"expected={FormatRgb(expectedDebugDelta)}, sliceL={debugSliceLuminance:0.000000}.");
+                        $"expected={FormatRgb(expectedDebugDelta)}, slicePosition={debugSlicePosition}, " +
+                        $"sliceL={debugSliceLuminance:0.000000}, sliceProbe={FormatRgb(debugSliceProbe)}.");
                 }
                 if (ceilingEmissiveBounce.x < ceilingEmissiveBounce.y * 4f + 0.0002f ||
                     ceilingEmissiveBounce.z < ceilingEmissiveBounce.y * 4f + 0.00005f)
@@ -244,7 +254,10 @@ namespace DynamicGI.Editor
             return result;
         }
 
-        private static float ReadNearestDebugDeltaSample(WorldRadianceClipmap field, Vector3 position)
+        private static float ReadNearestDebugDeltaSample(
+            WorldRadianceClipmap field,
+            Vector3 position,
+            out Vector3 nearestPosition)
         {
             if (!field.TryGetCascade(0, out RadianceCascade cascade))
                 throw new InvalidOperationException("Phase 8 debug validation requires cascade 0.");
@@ -269,6 +282,7 @@ namespace DynamicGI.Editor
             buffer.GetData(samples);
             float nearestDistance = float.PositiveInfinity;
             float nearestLuminance = 0f;
+            nearestPosition = default;
             for (int i = 0; i < samples.Length; i++)
             {
                 Vector4 sample = samples[i].PositionAndLuminance;
@@ -278,8 +292,11 @@ namespace DynamicGI.Editor
                     continue;
                 nearestDistance = distance;
                 nearestLuminance = sample.w;
+                nearestPosition = samplePosition;
             }
-            if (nearestDistance > cascade.ProbeSpacing * cascade.ProbeSpacing * 0.01f)
+            // Arbitrary world-space markers need not coincide with a probe center.
+            // The farthest point in a grid cell is half its 3D diagonal.
+            if (nearestDistance > cascade.ProbeSpacing * cascade.ProbeSpacing * 0.76f)
                 throw new InvalidOperationException("Phase 8 debug sample grid did not contain the ceiling marker.");
             return nearestLuminance;
         }
