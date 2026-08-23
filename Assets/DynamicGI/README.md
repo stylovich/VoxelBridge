@@ -1,4 +1,4 @@
-# Dynamic GI prototype — Phases 1–3 Geometry and Sky Visibility
+# Dynamic GI prototype — Phases 1–4 Geometry, Sky Visibility, and Local Radiance
 
 This folder contains the first, deliberately isolated layer of the runtime GI
 prototype. It does not replace or modify HDRP APV, HTrace SSGI, or HTrace AO.
@@ -116,6 +116,79 @@ must not indiscriminately multiply the complete APV indirect result, because tha
 also erase valid baked sun bounces. Material integration is intentionally deferred until
 the dynamic radiance field exists and the two indirect sources can be combined explicitly.
 
+## Phase 4 local directional radiance
+
+`WorldRadianceField` is a local, regular probe grid independent from APV. Each probe
+stores six RGB diffuse-irradiance values corresponding to surface normals `+X`, `-X`,
+`+Y`, `-Y`, `+Z`, and `-Z`. Six directions were chosen instead of SH L1 for this first
+iteration because individual lobes are immediately inspectable, injection is simple,
+and wall/window errors are easier to diagnose numerically.
+
+The current injection pass combines:
+
+- sky color/intensity multiplied by Phase 3 sky accessibility;
+- one realtime directional light;
+- exact Geometry Field DDA visibility from each probe toward the Sun.
+
+The six volumes use trilinear `RGBA16F` 3D textures (`RGBA32F` fallback), update in
+deduplicated tiles, and only recalculate after lighting/source changes or dependent
+geometry/sky regions change. A continuously moving Sun requeues tiles fairly instead
+of clearing the pending queue every frame. Camera following is available with snapped
+origins, but Phase 4 performs a full local reset when the origin moves; probe recycling
+and true clipmap cascades remain Phase 5 work.
+
+This is direct source injection into a radiance representation, not final multi-bounce
+GI. Neighbor propagation, surface albedo feedback, and reconvergence are intentionally
+reserved for Phase 8.
+
+### Radiance debug and numeric values
+
+`RadianceFieldDebug` renders every selected probe as a small GPU-instanced cube. Its
+color is exposure-mapped from Average, Maximum, or one of the six directional values.
+It can show field bounds, dirty/recent tiles, the debug neighborhood, Sun direction,
+probe wire gizmos, statistics, and numeric luminance labels.
+
+Numeric values come from a throttled asynchronous GPU readback of the debug buffer.
+No probe GameObjects or CPU raycasts are created. By default labels use a horizontal
+slice at the detailed-query marker, making every probe value in that slice readable;
+disable `Numeric Horizontal Slice Only` to inspect the full 3D selection. The detailed
+query label reports all six RGB values for one marker.
+
+### TestGI east-window laboratory
+
+Run **Tools > Dynamic GI > Phase 4 > Configure TestGI East Window Room**. The command
+idempotently creates a `10 x 5 x 8 m` room with a real opening in the east (`+X`) wall,
+positions the HDRP Sun so it enters through that opening, adds lit/blocked markers, and
+configures all three fields:
+
+- Geometry: `0.25 m` voxels.
+- Sky visibility: `0.5 m`, 24 rays.
+- Radiance: `24 x 12 x 20` (`5760`) probes at `0.5 m`, six RGB directions.
+- Test volume memory: approximately `270 KiB` for radiance.
+
+The scene-specific geometry/materials remain local and ignored by Git. The portable
+setup command recreates them in any project containing `Assets/Scenes/TestGI.unity`.
+Use **Validate TestGI East Window Room** for an in-scene GPU smoke test, or run the
+asset-independent generated-room validation:
+
+```powershell
+unity run . -- -executeMethod DynamicGI.Editor.RadiancePhase4Validation.Run -logFile -
+unity run . -- -executeMethod DynamicGI.Editor.RadiancePhase4SceneSetup.ValidateTestGI -logFile -
+```
+
+### Radiance shader sampling
+
+Include `Shaders/RadianceField.hlsl` and call:
+
+```hlsl
+float3 dynamicDiffuse = SampleDynamicGI(positionWS, normalWS);
+```
+
+The function trilinearly samples all relevant directional volumes and blends the three
+signed axes selected by the world-space normal. Outside the local volume it returns
+zero. It is not wired into HDRP/APV materials automatically in Phase 4; that explicit
+provider/compositing integration belongs to Phase 10.
+
 ## Data layout
 
 - Bricks are sparse CPU metadata mapped to fixed GPU slots.
@@ -158,7 +231,9 @@ For Shader Graph, use a File-mode Custom Function node pointing to
   hemisphere. This makes Phase 3 an ambient/sky field, not a complete AO solution.
 - The sky volume is fixed to the Geometry Field bounds. Camera-following radiance
   probes and clipmap cascades belong to later phases.
-- Phase 3 stores no radiance or color and performs no diffuse bounce propagation.
+- Phase 3 stores no radiance or color. Phase 4 stores source radiance but performs no
+  neighbor propagation or diffuse bounce yet.
+- Phase 4 supports one directional Sun source. Point/spot emissives are Phase 7 work.
 
 ## Mod/runtime registration contract
 

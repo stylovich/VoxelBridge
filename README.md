@@ -11,5 +11,6 @@ the prototype. The current implementation targets Unity 6000.3.21f1 with HDRP 17
 See `Assets/DynamicGI/README.md` for setup, architecture, validation, and limitations.
 
 The Test3-specific editor commands remain useful as examples, but the runtime Geometry
-Field, tiled Sky Visibility field, contributors, compute shaders, shader sampling APIs,
-and debug renderers do not depend on the Polygon assets or APV bake data.
+Field, tiled Sky Visibility field, six-direction local Radiance Field, contributors,
+compute shaders, shader sampling APIs, and debug renderers do not depend on the Polygon
+assets or APV bake data.

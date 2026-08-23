@@ -87,6 +87,59 @@ uint SampleGeometryOccupancy(float3 positionWS)
     return DynamicGIReadGeometryVoxel((int3)floor(relative / _DynamicGI_GeometryVoxelSize));
 }
 
+// Exact grid traversal shared by sky visibility, sun injection, and future
+// radiance propagation. Returns true when an occupied surface voxel is hit.
+bool DynamicGITraceGeometryDDA(
+    float3 rayOriginWS,
+    float3 rayDirectionWS,
+    float maximumDistance,
+    int maximumSteps)
+{
+    float3 relative = rayOriginWS - _DynamicGI_GeometryFieldOrigin;
+    if (any(relative < 0.0) || any(relative >= _DynamicGI_GeometryFieldSize))
+        return false;
+
+    int3 fieldResolution = DynamicGIGetGeometryVoxelResolution();
+    int3 voxel = clamp((int3)floor(relative / _DynamicGI_GeometryVoxelSize), 0, fieldResolution - 1);
+    if (DynamicGIReadGeometryVoxel(voxel) != 0u)
+        return true;
+
+    int3 stepDirection = int3(
+        rayDirectionWS.x >= 0.0 ? 1 : -1,
+        rayDirectionWS.y >= 0.0 ? 1 : -1,
+        rayDirectionWS.z >= 0.0 ? 1 : -1);
+    float3 safeDirection = float3(
+        abs(rayDirectionWS.x) > 1e-6 ? rayDirectionWS.x : (rayDirectionWS.x >= 0.0 ? 1e-6 : -1e-6),
+        abs(rayDirectionWS.y) > 1e-6 ? rayDirectionWS.y : (rayDirectionWS.y >= 0.0 ? 1e-6 : -1e-6),
+        abs(rayDirectionWS.z) > 1e-6 ? rayDirectionWS.z : (rayDirectionWS.z >= 0.0 ? 1e-6 : -1e-6));
+
+    float3 nextBoundaryWS = _DynamicGI_GeometryFieldOrigin + float3(
+        stepDirection.x > 0 ? voxel.x + 1 : voxel.x,
+        stepDirection.y > 0 ? voxel.y + 1 : voxel.y,
+        stepDirection.z > 0 ? voxel.z + 1 : voxel.z) * _DynamicGI_GeometryVoxelSize;
+    float3 nextCrossing = (nextBoundaryWS - rayOriginWS) / safeDirection;
+    float3 crossingDelta = _DynamicGI_GeometryVoxelSize / abs(safeDirection);
+
+    [loop]
+    for (int stepIndex = 0; stepIndex < maximumSteps; stepIndex++)
+    {
+        float nextDistance = min(nextCrossing.x, min(nextCrossing.y, nextCrossing.z));
+        if (nextDistance > maximumDistance)
+            return false;
+
+        bool3 crossingMask = nextCrossing <= nextDistance + 1e-5;
+        voxel += stepDirection * int3(crossingMask);
+        nextCrossing += crossingDelta * float3(crossingMask);
+
+        if (any(voxel < 0) || any(voxel >= fieldResolution))
+            return false;
+        if (DynamicGIReadGeometryVoxel(voxel) != 0u)
+            return true;
+    }
+
+    return false;
+}
+
 // Shader Graph Custom Function entry point.
 void SampleGeometryOccupancy_float(float3 PositionWS, out float Occupancy)
 {

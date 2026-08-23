@@ -1,0 +1,240 @@
+#pragma kernel ClearRadiance
+#pragma kernel InjectRadiance
+#pragma kernel QueryRadiance
+#pragma kernel BuildRadianceDebug
+#pragma target 5.0
+
+#include "GeometryField.hlsl"
+#include "SkyVisibilityField.hlsl"
+
+RWTexture3D<float4> _DynamicGI_RadiancePositiveX;
+RWTexture3D<float4> _DynamicGI_RadianceNegativeX;
+RWTexture3D<float4> _DynamicGI_RadiancePositiveY;
+RWTexture3D<float4> _DynamicGI_RadianceNegativeY;
+RWTexture3D<float4> _DynamicGI_RadiancePositiveZ;
+RWTexture3D<float4> _DynamicGI_RadianceNegativeZ;
+
+Texture3D<float4> _RadianceReadPositiveX;
+Texture3D<float4> _RadianceReadNegativeX;
+Texture3D<float4> _RadianceReadPositiveY;
+Texture3D<float4> _RadianceReadNegativeY;
+Texture3D<float4> _RadianceReadPositiveZ;
+Texture3D<float4> _RadianceReadNegativeZ;
+SamplerState sampler_RadianceReadPositiveX;
+
+float3 _DynamicGI_RadianceOrigin;
+float3 _DynamicGI_RadianceSize;
+int3 _DynamicGI_RadianceResolution;
+int _DynamicGI_RadianceAvailable;
+
+int3 _RadianceUpdateOffset;
+int3 _RadianceUpdateSize;
+float3 _RadianceSkyColor;
+float _RadianceSkyIntensity;
+float3 _RadianceSunDirection;
+float3 _RadianceSunColor;
+int _RadianceSunEnabled;
+float _RadianceSunTraceDistance;
+float _RadianceRayOriginBias;
+int _RadianceMaxDdaSteps;
+
+struct RadianceProbeData
+{
+    float4 PositiveX;
+    float4 NegativeX;
+    float4 PositiveY;
+    float4 NegativeY;
+    float4 PositiveZ;
+    float4 NegativeZ;
+};
+
+struct RadianceDebugSample
+{
+    float4 PositionAndLuminance;
+    float4 ColorAndValidity;
+};
+
+StructuredBuffer<float3> _RadianceQueryPositions;
+RWStructuredBuffer<RadianceProbeData> _RadianceQueryResults;
+RWStructuredBuffer<RadianceDebugSample> _RadianceDebugSamples;
+int _RadianceQueryCount;
+
+int3 _RadianceDebugOffset;
+int3 _RadianceDebugSize;
+int _RadianceDebugSampleCount;
+int _RadianceDebugSampleStride;
+int _RadianceDebugDirection;
+float3 _RadianceDebugCenter;
+float _RadianceDebugRadius;
+
+float3 RadianceCellSize()
+{
+    return _DynamicGI_RadianceSize / (float3)_DynamicGI_RadianceResolution;
+}
+
+float3 RadianceProbePosition(int3 coordinate)
+{
+    return _DynamicGI_RadianceOrigin + ((float3)coordinate + 0.5) * RadianceCellSize();
+}
+
+float4 InjectAxis(float3 axis, float skyVisibility, float sunVisibility)
+{
+    // Uniform upper-hemisphere irradiance is strongest for +Y, half strength on
+    // vertical surfaces, and zero for -Y. Direct sun uses the same normal basis.
+    float skyWeight = saturate(axis.y * 0.5 + 0.5);
+    float sunWeight = saturate(dot(axis, _RadianceSunDirection));
+    float3 sky = _RadianceSkyColor * (_RadianceSkyIntensity * skyVisibility * skyWeight);
+    float3 sun = _RadianceSunColor * (sunVisibility * sunWeight);
+    return float4(max(0.0, sky + sun), 1.0);
+}
+
+RadianceProbeData ReadRadianceLoad(int3 coordinate)
+{
+    RadianceProbeData result;
+    result.PositiveX = _RadianceReadPositiveX.Load(int4(coordinate, 0));
+    result.NegativeX = _RadianceReadNegativeX.Load(int4(coordinate, 0));
+    result.PositiveY = _RadianceReadPositiveY.Load(int4(coordinate, 0));
+    result.NegativeY = _RadianceReadNegativeY.Load(int4(coordinate, 0));
+    result.PositiveZ = _RadianceReadPositiveZ.Load(int4(coordinate, 0));
+    result.NegativeZ = _RadianceReadNegativeZ.Load(int4(coordinate, 0));
+    return result;
+}
+
+float3 SelectDebugRadiance(RadianceProbeData value, int direction)
+{
+    if (direction == 1) return value.PositiveX.rgb;
+    if (direction == 2) return value.NegativeX.rgb;
+    if (direction == 3) return value.PositiveY.rgb;
+    if (direction == 4) return value.NegativeY.rgb;
+    if (direction == 5) return value.PositiveZ.rgb;
+    if (direction == 6) return value.NegativeZ.rgb;
+    if (direction == 7)
+    {
+        float3 maximum = max(value.PositiveX.rgb, value.NegativeX.rgb);
+        maximum = max(maximum, value.PositiveY.rgb);
+        maximum = max(maximum, value.NegativeY.rgb);
+        maximum = max(maximum, value.PositiveZ.rgb);
+        return max(maximum, value.NegativeZ.rgb);
+    }
+
+    return (value.PositiveX.rgb + value.NegativeX.rgb + value.PositiveY.rgb +
+            value.NegativeY.rgb + value.PositiveZ.rgb + value.NegativeZ.rgb) / 6.0;
+}
+
+[numthreads(4, 4, 4)]
+void ClearRadiance(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    if (any(dispatchThreadId >= (uint3)_DynamicGI_RadianceResolution))
+        return;
+    float4 zero = 0.0;
+    _DynamicGI_RadiancePositiveX[dispatchThreadId] = zero;
+    _DynamicGI_RadianceNegativeX[dispatchThreadId] = zero;
+    _DynamicGI_RadiancePositiveY[dispatchThreadId] = zero;
+    _DynamicGI_RadianceNegativeY[dispatchThreadId] = zero;
+    _DynamicGI_RadiancePositiveZ[dispatchThreadId] = zero;
+    _DynamicGI_RadianceNegativeZ[dispatchThreadId] = zero;
+}
+
+[numthreads(4, 4, 4)]
+void InjectRadiance(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    if (any(dispatchThreadId >= (uint3)_RadianceUpdateSize))
+        return;
+
+    int3 coordinate = _RadianceUpdateOffset + (int3)dispatchThreadId;
+    if (any(coordinate < 0) || any(coordinate >= _DynamicGI_RadianceResolution))
+        return;
+
+    float3 positionWS = RadianceProbePosition(coordinate);
+    if (SampleGeometryOccupancy(positionWS) != 0u)
+    {
+        float4 zero = 0.0;
+        _DynamicGI_RadiancePositiveX[coordinate] = zero;
+        _DynamicGI_RadianceNegativeX[coordinate] = zero;
+        _DynamicGI_RadiancePositiveY[coordinate] = zero;
+        _DynamicGI_RadianceNegativeY[coordinate] = zero;
+        _DynamicGI_RadiancePositiveZ[coordinate] = zero;
+        _DynamicGI_RadianceNegativeZ[coordinate] = zero;
+        return;
+    }
+
+    float skyVisibility = SampleSkyVisibility(positionWS);
+    float sunVisibility = 0.0;
+    if (_RadianceSunEnabled != 0)
+    {
+        float3 origin = positionWS + _RadianceSunDirection * _RadianceRayOriginBias;
+        bool blocked = DynamicGITraceGeometryDDA(
+            origin,
+            _RadianceSunDirection,
+            _RadianceSunTraceDistance,
+            _RadianceMaxDdaSteps);
+        sunVisibility = blocked ? 0.0 : 1.0;
+    }
+
+    _DynamicGI_RadiancePositiveX[coordinate] = InjectAxis(float3(1.0, 0.0, 0.0), skyVisibility, sunVisibility);
+    _DynamicGI_RadianceNegativeX[coordinate] = InjectAxis(float3(-1.0, 0.0, 0.0), skyVisibility, sunVisibility);
+    _DynamicGI_RadiancePositiveY[coordinate] = InjectAxis(float3(0.0, 1.0, 0.0), skyVisibility, sunVisibility);
+    _DynamicGI_RadianceNegativeY[coordinate] = InjectAxis(float3(0.0, -1.0, 0.0), skyVisibility, sunVisibility);
+    _DynamicGI_RadiancePositiveZ[coordinate] = InjectAxis(float3(0.0, 0.0, 1.0), skyVisibility, sunVisibility);
+    _DynamicGI_RadianceNegativeZ[coordinate] = InjectAxis(float3(0.0, 0.0, -1.0), skyVisibility, sunVisibility);
+}
+
+[numthreads(64, 1, 1)]
+void QueryRadiance(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint index = dispatchThreadId.x;
+    if (index >= (uint)_RadianceQueryCount)
+        return;
+
+    RadianceProbeData result;
+    result.PositiveX = 0.0;
+    result.NegativeX = 0.0;
+    result.PositiveY = 0.0;
+    result.NegativeY = 0.0;
+    result.PositiveZ = 0.0;
+    result.NegativeZ = 0.0;
+    float3 relative = _RadianceQueryPositions[index] - _DynamicGI_RadianceOrigin;
+    if (_DynamicGI_RadianceAvailable != 0 && all(relative >= 0.0) && all(relative < _DynamicGI_RadianceSize))
+    {
+        float3 uvw = saturate(relative / _DynamicGI_RadianceSize);
+        result.PositiveX = _RadianceReadPositiveX.SampleLevel(sampler_RadianceReadPositiveX, uvw, 0.0);
+        result.NegativeX = _RadianceReadNegativeX.SampleLevel(sampler_RadianceReadPositiveX, uvw, 0.0);
+        result.PositiveY = _RadianceReadPositiveY.SampleLevel(sampler_RadianceReadPositiveX, uvw, 0.0);
+        result.NegativeY = _RadianceReadNegativeY.SampleLevel(sampler_RadianceReadPositiveX, uvw, 0.0);
+        result.PositiveZ = _RadianceReadPositiveZ.SampleLevel(sampler_RadianceReadPositiveX, uvw, 0.0);
+        result.NegativeZ = _RadianceReadNegativeZ.SampleLevel(sampler_RadianceReadPositiveX, uvw, 0.0);
+    }
+    _RadianceQueryResults[index] = result;
+}
+
+[numthreads(64, 1, 1)]
+void BuildRadianceDebug(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint dispatchIndex = dispatchThreadId.x;
+    if (dispatchIndex >= (uint)_RadianceDebugSampleCount)
+        return;
+
+    uint linearIndex = dispatchIndex * (uint)_RadianceDebugSampleStride;
+    uint candidateCount = (uint)(_RadianceDebugSize.x * _RadianceDebugSize.y * _RadianceDebugSize.z);
+    if (linearIndex >= candidateCount)
+        return;
+
+    int3 localCoordinate;
+    localCoordinate.x = (int)(linearIndex % (uint)_RadianceDebugSize.x);
+    localCoordinate.y = (int)((linearIndex / (uint)_RadianceDebugSize.x) % (uint)_RadianceDebugSize.y);
+    localCoordinate.z = (int)(linearIndex / (uint)(_RadianceDebugSize.x * _RadianceDebugSize.y));
+    int3 coordinate = _RadianceDebugOffset + localCoordinate;
+    float3 positionWS = RadianceProbePosition(coordinate);
+    RadianceProbeData radiance = ReadRadianceLoad(coordinate);
+    float3 color = SelectDebugRadiance(radiance, _RadianceDebugDirection);
+    float luminance = dot(color, float3(0.2126, 0.7152, 0.0722));
+    float validity = saturate((radiance.PositiveX.a + radiance.NegativeX.a + radiance.PositiveY.a +
+                               radiance.NegativeY.a + radiance.PositiveZ.a + radiance.NegativeZ.a) / 6.0);
+    if (_RadianceDebugRadius > 0.0 && distance(positionWS, _RadianceDebugCenter) > _RadianceDebugRadius)
+        validity = 0.0;
+
+    RadianceDebugSample sample;
+    sample.PositionAndLuminance = float4(positionWS, luminance);
+    sample.ColorAndValidity = float4(color, validity);
+    _RadianceDebugSamples[dispatchIndex] = sample;
+}

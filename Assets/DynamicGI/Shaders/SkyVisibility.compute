@@ -64,54 +64,6 @@ float3 HemisphereDirection(int rayIndex, int count, float azimuthRotation)
     return float3(cos(phi) * radial, y, sin(phi) * radial);
 }
 
-bool TraceGeometryDDA(float3 rayOriginWS, float3 rayDirectionWS, float maximumDistance)
-{
-    float3 relative = rayOriginWS - _DynamicGI_GeometryFieldOrigin;
-    if (any(relative < 0.0) || any(relative >= _DynamicGI_GeometryFieldSize))
-        return false;
-
-    int3 fieldResolution = DynamicGIGetGeometryVoxelResolution();
-    int3 voxel = (int3)floor(relative / _DynamicGI_GeometryVoxelSize);
-    voxel = clamp(voxel, 0, fieldResolution - 1);
-    if (DynamicGIReadGeometryVoxel(voxel) != 0u)
-        return true;
-
-    int3 stepDirection = int3(
-        rayDirectionWS.x >= 0.0 ? 1 : -1,
-        rayDirectionWS.y >= 0.0 ? 1 : -1,
-        rayDirectionWS.z >= 0.0 ? 1 : -1);
-    float3 safeDirection = float3(
-        abs(rayDirectionWS.x) > 1e-6 ? rayDirectionWS.x : (rayDirectionWS.x >= 0.0 ? 1e-6 : -1e-6),
-        abs(rayDirectionWS.y) > 1e-6 ? rayDirectionWS.y : (rayDirectionWS.y >= 0.0 ? 1e-6 : -1e-6),
-        abs(rayDirectionWS.z) > 1e-6 ? rayDirectionWS.z : (rayDirectionWS.z >= 0.0 ? 1e-6 : -1e-6));
-
-    float3 nextBoundaryWS = _DynamicGI_GeometryFieldOrigin + float3(
-        stepDirection.x > 0 ? voxel.x + 1 : voxel.x,
-        stepDirection.y > 0 ? voxel.y + 1 : voxel.y,
-        stepDirection.z > 0 ? voxel.z + 1 : voxel.z) * _DynamicGI_GeometryVoxelSize;
-    float3 nextCrossing = (nextBoundaryWS - rayOriginWS) / safeDirection;
-    float3 crossingDelta = _DynamicGI_GeometryVoxelSize / abs(safeDirection);
-
-    [loop]
-    for (int stepIndex = 0; stepIndex < _SkyMaxDdaSteps; stepIndex++)
-    {
-        float nextDistance = min(nextCrossing.x, min(nextCrossing.y, nextCrossing.z));
-        if (nextDistance > maximumDistance)
-            return false;
-
-        bool3 crossingMask = nextCrossing <= nextDistance + 1e-5;
-        voxel += stepDirection * int3(crossingMask);
-        nextCrossing += crossingDelta * float3(crossingMask);
-
-        if (any(voxel < 0) || any(voxel >= fieldResolution))
-            return false;
-        if (DynamicGIReadGeometryVoxel(voxel) != 0u)
-            return true;
-    }
-
-    return false;
-}
-
 float SampleSkyVisibilityTrilinear(float3 positionWS)
 {
     float3 relative = positionWS - _DynamicGI_SkyVisibilityOrigin;
@@ -157,7 +109,7 @@ void ComputeSkyVisibility(uint3 dispatchThreadId : SV_DispatchThreadID)
     {
         float3 direction = HemisphereDirection(rayIndex, _SkyRayCount, rotation);
         float3 origin = samplePositionWS + direction * _SkyRayOriginBias;
-        visibleRayCount += TraceGeometryDDA(origin, direction, _SkyMaxTraceDistance) ? 0.0 : 1.0;
+        visibleRayCount += DynamicGITraceGeometryDDA(origin, direction, _SkyMaxTraceDistance, _SkyMaxDdaSteps) ? 0.0 : 1.0;
     }
 
     _DynamicGI_SkyVisibilityTexture[sampleCoordinate] = visibleRayCount / max(1.0, (float)_SkyRayCount);

@@ -85,6 +85,12 @@ namespace DynamicGI.Occlusion
 
         public static WorldSkyVisibilityField Active { get; private set; }
 
+        /// <summary>Raised when all sky samples have been invalidated.</summary>
+        public event Action<Bounds> VisibilityFieldReset;
+
+        /// <summary>Raised after one sky tile has completed its compute update.</summary>
+        public event Action<Bounds> VisibilityRegionUpdated;
+
         public WorldGeometryField GeometryField => geometryField;
         public RenderTexture VisibilityTexture => skyVisibilityTexture;
         public Bounds FieldBounds => geometryField != null ? geometryField.FieldBounds : new Bounds(transform.position, Vector3.zero);
@@ -220,6 +226,8 @@ namespace DynamicGI.Occlusion
                         EnqueueTile(new Vector3Int(x, y, z));
                 }
             }
+
+            VisibilityFieldReset?.Invoke(FieldBounds);
         }
 
         /// <summary>
@@ -269,6 +277,18 @@ namespace DynamicGI.Occlusion
             pendingQueryCallback = callback;
             queryPending = true;
             AsyncGPUReadback.Request(queryResultBuffer, OnVisibilityReadback);
+            return true;
+        }
+
+        /// <summary>Provides the trilinear scalar field to dependent compute passes.</summary>
+        public bool BindSamplingResources(ComputeShader targetShader, int kernel)
+        {
+            if (targetShader == null || !EnsureInitialized() || skyVisibilityTexture == null)
+                return false;
+
+            BindSkyData(targetShader, kernel);
+            targetShader.SetTexture(kernel, SkyTextureId, skyVisibilityTexture);
+            targetShader.SetInt(SkyAvailableId, 1);
             return true;
         }
 
@@ -501,9 +521,11 @@ namespace DynamicGI.Occlusion
             updatedTilesThisFrame++;
             updatedSamplesThisFrame += size.x * size.y * size.z;
             computeDispatchesThisFrame++;
-            recentRegions.Add(new RecentRegion(GetTileBounds(coordinate), Time.frameCount + recentRegionLifetimeFrames));
+            Bounds updatedBounds = GetTileBounds(coordinate);
+            recentRegions.Add(new RecentRegion(updatedBounds, Time.frameCount + recentRegionLifetimeFrames));
             if (recentRegions.Count > 256)
                 recentRegions.RemoveAt(0);
+            VisibilityRegionUpdated?.Invoke(updatedBounds);
         }
 
         private void BindSkyData(ComputeShader shader, int kernel)
