@@ -44,6 +44,7 @@ namespace DynamicGI.Radiance
         private static readonly int CascadeCountId = Shader.PropertyToID("_DynamicGI_RadianceCascadeCount");
         private static readonly int[] PropagationDirectTextureIds = CreateDirectionalPropertyIds("_PropagationDirect");
         private static readonly int[] PropagationInputTextureIds = CreateDirectionalPropertyIds("_PropagationInput");
+        private static readonly int[] DebugDirectTextureIds = CreateDirectionalPropertyIds("_RadianceDebugDirect");
 
         private static readonly int[][] CascadeTextureIds =
         {
@@ -117,6 +118,7 @@ namespace DynamicGI.Radiance
         private int clearKernel = -1;
         private int injectKernel = -1;
         private int queryKernel = -1;
+        private int debugQueryKernel = -1;
         private int debugKernel = -1;
         private int propagationKernel = -1;
         private bool initialized;
@@ -468,6 +470,27 @@ namespace DynamicGI.Radiance
 
         public bool RequestProbe(Vector3 worldPosition, Action<RadianceClipmapProbeResult> callback)
         {
+            return RequestProbeInternal(worldPosition, RadianceDebugSource.Resolved, false, callback);
+        }
+
+        /// <summary>
+        /// Queries the same source shown by the clipmap debug renderer. The propagation
+        /// delta is evaluated on the GPU from the persistent resolved/direct textures.
+        /// </summary>
+        public bool RequestDebugProbe(
+            Vector3 worldPosition,
+            RadianceDebugSource source,
+            Action<RadianceClipmapProbeResult> callback)
+        {
+            return RequestProbeInternal(worldPosition, source, true, callback);
+        }
+
+        private bool RequestProbeInternal(
+            Vector3 worldPosition,
+            RadianceDebugSource source,
+            bool debugQuery,
+            Action<RadianceClipmapProbeResult> callback)
+        {
             if (!EnsureInitialized() || queryPending || queryPositionBuffer == null || queryResultBuffer == null)
                 return false;
             int cascadeIndex = FindFinestContainingCascade(worldPosition);
@@ -476,12 +499,20 @@ namespace DynamicGI.Radiance
             RadianceCascade cascade = cascades[cascadeIndex];
             singleQueryPosition[0] = worldPosition;
             queryPositionBuffer.SetData(singleQueryPosition);
-            BindReadTextures(cascade, queryKernel);
+            int kernel = debugQuery ? debugQueryKernel : queryKernel;
+            if (kernel < 0)
+                return false;
+            BindReadTextures(cascade, kernel);
+            if (debugQuery)
+            {
+                BindDebugDirectTextures(cascade, kernel);
+                radianceShader.SetInt("_RadianceDebugSource", (int)source);
+            }
             BindCascadeLayout(cascade);
-            radianceShader.SetBuffer(queryKernel, "_RadianceQueryPositions", queryPositionBuffer);
-            radianceShader.SetBuffer(queryKernel, "_RadianceQueryResults", queryResultBuffer);
+            radianceShader.SetBuffer(kernel, "_RadianceQueryPositions", queryPositionBuffer);
+            radianceShader.SetBuffer(kernel, "_RadianceQueryResults", queryResultBuffer);
             radianceShader.SetInt("_RadianceQueryCount", 1);
-            radianceShader.Dispatch(queryKernel, 1, 1, 1);
+            radianceShader.Dispatch(kernel, 1, 1, 1);
             computeDispatchesThisFrame++;
 
             pendingQueryCascade = cascadeIndex;
@@ -499,6 +530,27 @@ namespace DynamicGI.Radiance
             Vector3 center,
             float radius,
             RadianceDebugDirection direction,
+            out int sampleCount)
+        {
+            return BuildDebugSamples(
+                cascadeIndex,
+                sampleBuffer,
+                maximumSamples,
+                center,
+                radius,
+                direction,
+                RadianceDebugSource.Resolved,
+                out sampleCount);
+        }
+
+        public bool BuildDebugSamples(
+            int cascadeIndex,
+            GraphicsBuffer sampleBuffer,
+            int maximumSamples,
+            Vector3 center,
+            float radius,
+            RadianceDebugDirection direction,
+            RadianceDebugSource source,
             out int sampleCount)
         {
             sampleCount = 0;
@@ -532,6 +584,7 @@ namespace DynamicGI.Radiance
             lastDebugProbeCount = sampleCount;
             lastDebugProbeStride = stride;
             BindReadTextures(cascade, debugKernel);
+            BindDebugDirectTextures(cascade, debugKernel);
             BindCascadeLayout(cascade);
             radianceShader.SetBuffer(debugKernel, "_RadianceDebugSamples", sampleBuffer);
             radianceShader.SetInts("_RadianceDebugOffset", minimum.x, minimum.y, minimum.z);
@@ -539,6 +592,7 @@ namespace DynamicGI.Radiance
             radianceShader.SetInt("_RadianceDebugSampleCount", sampleCount);
             radianceShader.SetInt("_RadianceDebugSampleStride", stride);
             radianceShader.SetInt("_RadianceDebugDirection", (int)direction);
+            radianceShader.SetInt("_RadianceDebugSource", (int)source);
             radianceShader.SetVector("_RadianceDebugCenter", center);
             radianceShader.SetFloat("_RadianceDebugRadius", Mathf.Max(0f, radius));
             radianceShader.Dispatch(debugKernel, Mathf.CeilToInt(sampleCount / 64f), 1, 1);
@@ -565,7 +619,8 @@ namespace DynamicGI.Radiance
                 clearKernel = radianceShader.FindKernel("ClearRadiance");
                 injectKernel = radianceShader.FindKernel("InjectRadiance");
                 queryKernel = radianceShader.FindKernel("QueryRadiance");
-                debugKernel = radianceShader.FindKernel("BuildRadianceDebug");
+                debugQueryKernel = radianceShader.FindKernel("QueryRadianceClipmapDebug");
+                debugKernel = radianceShader.FindKernel("BuildRadianceClipmapDebug");
                 propagationKernel = enableDiffusePropagation && propagationShader != null
                     ? propagationShader.FindKernel("PropagateRadiance")
                     : -1;
@@ -784,6 +839,13 @@ namespace DynamicGI.Radiance
             radianceShader.SetTexture(kernel, "_RadianceReadNegativeY", cascade.Textures[3]);
             radianceShader.SetTexture(kernel, "_RadianceReadPositiveZ", cascade.Textures[4]);
             radianceShader.SetTexture(kernel, "_RadianceReadNegativeZ", cascade.Textures[5]);
+        }
+
+        private void BindDebugDirectTextures(RadianceCascade cascade, int kernel)
+        {
+            IReadOnlyList<RenderTexture> textures = cascade.DirectTextures;
+            for (int i = 0; i < 6; i++)
+                radianceShader.SetTexture(kernel, DebugDirectTextureIds[i], textures[i]);
         }
 
         private void BindPropagationDirectTextures(IReadOnlyList<RenderTexture> textures)
@@ -1117,6 +1179,7 @@ namespace DynamicGI.Radiance
             maximumEmissiveRange = 0f;
             emissiveUploadDirty = true;
             propagationKernel = -1;
+            debugQueryKernel = -1;
             lastDebugProbeCount = 0;
             lastDebugProbeStride = 0;
         }

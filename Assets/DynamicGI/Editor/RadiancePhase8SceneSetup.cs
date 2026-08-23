@@ -67,6 +67,13 @@ namespace DynamicGI.Editor
             SerializedObject serializedDebug = new(fieldDebug);
             Set(serializedDebug, "probeQueryTarget", propagationMid);
             Set(serializedDebug, "displayedDirection", (int)RadianceDebugDirection.NegativeY);
+            Set(serializedDebug, "displayedSource", (int)RadianceDebugSource.PropagationDelta);
+            Set(serializedDebug, "automaticExposure", true);
+            Set(serializedDebug, "automaticExposurePercentile", 0.25f);
+            Set(serializedDebug, "automaticExposureTarget", 0.65f);
+            Set(serializedDebug, "maximumAutomaticExposure", 4096f);
+            Set(serializedDebug, "automaticExposureAdaptation", 0.35f);
+            Set(serializedDebug, "smallValueDecimalPlaces", 6);
             serializedDebug.ApplyModifiedPropertiesWithoutUndo();
 
             EditorUtility.SetDirty(root);
@@ -79,7 +86,8 @@ namespace DynamicGI.Editor
 
             Debug.Log(
                 "DYNAMIC_GI_PHASE8_TESTGI_CONFIGURED | propagation=3x strength0.8 retention0.65 | " +
-                "C0+C1 | emissiveDirectRange=0.1m | queryY=3.25 | ceilingY=4.25 | debug=-Y");
+                "C0+C1 | emissiveDirectRange=0.1m | queryY=3.25 | ceilingY=4.25 | " +
+                "debug=PropagationDelta/-Y autoExposure");
         }
 
         [MenuItem("Tools/Dynamic GI/Phase 8/Validate TestGI Diffuse Propagation")]
@@ -130,6 +138,12 @@ namespace DynamicGI.Editor
                 Vector4 propagationStep1 = Query(clipmap, new Vector3(2.25f, 3.25f, -3.25f)).Probe.Radiance.NegativeY;
                 Vector4 propagationStep2 = Query(clipmap, new Vector3(2.25f, 3.75f, -3.25f)).Probe.Radiance.NegativeY;
                 Vector4 ceilingPropagated = Query(clipmap, ceiling.position).Probe.Radiance.NegativeY;
+                Vector4 debugResolved = QueryDebug(clipmap, ceiling.position, RadianceDebugSource.Resolved).Probe.Radiance.NegativeY;
+                Vector4 debugDirect = QueryDebug(clipmap, ceiling.position, RadianceDebugSource.Direct).Probe.Radiance.NegativeY;
+                Vector4 debugDelta = QueryDebug(clipmap, ceiling.position, RadianceDebugSource.PropagationDelta).Probe.Radiance.NegativeY;
+                Vector4 expectedDebugDelta = MaxZero(debugResolved - debugDirect);
+                float debugDeltaError = MaximumRgbError(debugDelta, expectedDebugDelta);
+                float debugSliceLuminance = ReadNearestDebugDeltaSample(clipmap, ceiling.position);
                 RadianceClipmapProbeResult blockedPropagatedResult = Query(clipmap, blocked.position);
 
                 contributor.SetContributionEnabled(false);
@@ -151,6 +165,13 @@ namespace DynamicGI.Editor
                         $"Three propagation passes did not reach the ceiling: direct={FormatRgb(ceilingDirectOnly)}, " +
                         $"steps={FormatRgb(propagationStep0)} -> {FormatRgb(propagationStep1)} -> " +
                         $"{FormatRgb(propagationStep2)} -> {FormatRgb(ceilingPropagated)}.");
+                }
+                if (debugDeltaError > 0.0001f ||
+                    Mathf.Abs(debugSliceLuminance - Luminance(debugDelta)) > 0.0001f)
+                {
+                    throw new InvalidOperationException(
+                        $"Propagation debug delta disagrees with resolved-direct: delta={FormatRgb(debugDelta)}, " +
+                        $"expected={FormatRgb(expectedDebugDelta)}, sliceL={debugSliceLuminance:0.000000}.");
                 }
                 if (ceilingEmissiveBounce.x < ceilingEmissiveBounce.y * 4f + 0.0002f ||
                     ceilingEmissiveBounce.z < ceilingEmissiveBounce.y * 4f + 0.00005f)
@@ -176,6 +197,7 @@ namespace DynamicGI.Editor
                     $"steps={FormatRgb(propagationStep0)}>{FormatRgb(propagationStep1)}>{FormatRgb(propagationStep2)} | " +
                     $"ceilingDirect={FormatRgb(ceilingDirectOnly)} | ceilingPropagated={FormatRgb(ceilingPropagated)} | " +
                     $"ceilingNoEmitter={FormatRgb(ceilingWithoutEmissive)} | ceilingDelta={ceilingBounce:0.0000} | " +
+                    $"debugDelta={FormatRgb(debugDelta)} | debugSliceL={debugSliceLuminance:0.000000} | " +
                     $"blockedEmitterDelta={blockedIncrease:0.0000} | " +
                     $"iterations={stats.PropagationIterations} | dispatches={stats.PropagationDispatchesThisFrame} | " +
                     $"writes={stats.PropagatedProbesThisFrame} | GPU={EditorUtility.FormatBytes(stats.EstimatedGpuBytes)}");
@@ -209,6 +231,61 @@ namespace DynamicGI.Editor
             if (!complete || result.Probe.HasError)
                 throw new InvalidOperationException("Phase 8 GPU radiance query failed.");
             return result;
+        }
+
+        private static RadianceClipmapProbeResult QueryDebug(
+            WorldRadianceClipmap field,
+            Vector3 position,
+            RadianceDebugSource source)
+        {
+            RadianceClipmapProbeResult result = default;
+            bool complete = false;
+            if (!field.RequestDebugProbe(position, source, value => { result = value; complete = true; }))
+                throw new InvalidOperationException($"Phase 8 clipmap rejected a {source} GPU debug query.");
+            AsyncGPUReadback.WaitAllRequests();
+            if (!complete || result.Probe.HasError)
+                throw new InvalidOperationException($"Phase 8 {source} GPU debug query failed.");
+            return result;
+        }
+
+        private static float ReadNearestDebugDeltaSample(WorldRadianceClipmap field, Vector3 position)
+        {
+            if (!field.TryGetCascade(0, out RadianceCascade cascade))
+                throw new InvalidOperationException("Phase 8 debug validation requires cascade 0.");
+            using GraphicsBuffer buffer = new(
+                GraphicsBuffer.Target.Structured,
+                cascade.ProbeCount,
+                RadianceDebugSampleGpu.Stride);
+            if (!field.BuildDebugSamples(
+                    0,
+                    buffer,
+                    cascade.ProbeCount,
+                    cascade.WorldBounds.center,
+                    0f,
+                    RadianceDebugDirection.NegativeY,
+                    RadianceDebugSource.PropagationDelta,
+                    out int count))
+            {
+                throw new InvalidOperationException("Phase 8 could not build propagation-delta debug samples.");
+            }
+
+            RadianceDebugSampleGpu[] samples = new RadianceDebugSampleGpu[count];
+            buffer.GetData(samples);
+            float nearestDistance = float.PositiveInfinity;
+            float nearestLuminance = 0f;
+            for (int i = 0; i < samples.Length; i++)
+            {
+                Vector4 sample = samples[i].PositionAndLuminance;
+                Vector3 samplePosition = new(sample.x, sample.y, sample.z);
+                float distance = (samplePosition - position).sqrMagnitude;
+                if (distance >= nearestDistance)
+                    continue;
+                nearestDistance = distance;
+                nearestLuminance = sample.w;
+            }
+            if (nearestDistance > cascade.ProbeSpacing * cascade.ProbeSpacing * 0.01f)
+                throw new InvalidOperationException("Phase 8 debug sample grid did not contain the ceiling marker.");
+            return nearestLuminance;
         }
 
         private static Transform CreateMarker(Transform parent, string name, Vector3 position)
@@ -267,6 +344,9 @@ namespace DynamicGI.Editor
         }
 
         private static float Luminance(Vector4 value) => value.x * 0.2126f + value.y * 0.7152f + value.z * 0.0722f;
+        private static float MaximumRgbError(Vector4 a, Vector4 b) => Mathf.Max(
+            Mathf.Abs(a.x - b.x),
+            Mathf.Max(Mathf.Abs(a.y - b.y), Mathf.Abs(a.z - b.z)));
         private static Vector4 MaxZero(Vector4 value) => new(
             Mathf.Max(0f, value.x),
             Mathf.Max(0f, value.y),

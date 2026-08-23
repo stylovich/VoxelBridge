@@ -373,9 +373,20 @@ injection but reachable in three C0 neighbor steps. The debug direction becomes 
 matching the underside of the ceiling. The existing red marker remains behind the
 voxelized divider.
 
+`RadianceClipmapDebug` exposes three non-destructive value sources: `Resolved` is the
+field consumed by shaders, `Direct` is the immutable Sun/sky/emissive injection, and
+`Propagation Delta` displays `max(Resolved - Direct, 0)`. The Phase-8 setup selects the
+delta view so direct light cannot hide a weak bounce. Automatic debug exposure uses a
+configurable low percentile of positive probe luminance, adapts between readbacks, and
+only affects instanced debug colors. Numeric ceiling and delta values use six decimals,
+while the slice labels and detailed query identify both source and directional lobe.
+Selecting a cascade outside the configured propagation range correctly produces a zero
+delta because it has no separate direct/resolved texture sets.
+
 The GPU validation compares propagation with the source enabled and disabled. It checks
 the three successive probe values, a colored third-step ceiling bounce, zero emissive
-delta behind the wall, and nonzero propagation profiling counters:
+delta behind the wall, the dedicated delta query and numeric-slice kernel against
+`Resolved - Direct`, and nonzero propagation profiling counters:
 
 ```powershell
 unity run . -- -force-d3d12 -executeMethod DynamicGI.Editor.RadiancePhase8SceneSetup.ConfigureTestGI -logFile -

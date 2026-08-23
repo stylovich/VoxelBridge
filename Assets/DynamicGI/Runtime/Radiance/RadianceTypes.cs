@@ -15,6 +15,17 @@ namespace DynamicGI.Radiance
         Maximum = 7
     }
 
+    /// <summary>
+    /// Selects which stage of the clipmap is inspected. PropagationDelta is a
+    /// debug-only view and never changes the radiance consumed by materials.
+    /// </summary>
+    public enum RadianceDebugSource
+    {
+        Resolved = 0,
+        Direct = 1,
+        PropagationDelta = 2
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     public struct RadianceProbeGpuData
     {

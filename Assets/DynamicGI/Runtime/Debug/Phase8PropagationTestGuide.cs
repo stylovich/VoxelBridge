@@ -35,7 +35,7 @@ namespace DynamicGI.Debugging
             if (ceilingBounceMarker != null)
                 UnityEditor.Handles.Label(
                     ceilingBounceMarker.position + Vector3.up * 0.25f,
-                    "PHASE 8: PROPAGATED CEILING (-Y)");
+                    "PHASE 8: PROPAGATION DELTA CEILING (-Y)");
             if (blockedMarker != null)
                 UnityEditor.Handles.Label(
                     blockedMarker.position + Vector3.up * 0.25f,

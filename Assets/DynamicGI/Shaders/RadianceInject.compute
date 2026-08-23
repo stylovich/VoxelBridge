@@ -2,6 +2,8 @@
 #pragma kernel InjectRadiance
 #pragma kernel QueryRadiance
 #pragma kernel BuildRadianceDebug
+#pragma kernel QueryRadianceClipmapDebug
+#pragma kernel BuildRadianceClipmapDebug
 #pragma target 5.0
 
 #include "GeometryField.hlsl"
@@ -21,6 +23,13 @@ Texture3D<float4> _RadianceReadNegativeY;
 Texture3D<float4> _RadianceReadPositiveZ;
 Texture3D<float4> _RadianceReadNegativeZ;
 SamplerState sampler_RadianceReadPositiveX;
+
+Texture3D<float4> _RadianceDebugDirectPositiveX;
+Texture3D<float4> _RadianceDebugDirectNegativeX;
+Texture3D<float4> _RadianceDebugDirectPositiveY;
+Texture3D<float4> _RadianceDebugDirectNegativeY;
+Texture3D<float4> _RadianceDebugDirectPositiveZ;
+Texture3D<float4> _RadianceDebugDirectNegativeZ;
 
 float3 _DynamicGI_RadianceOrigin;
 float3 _DynamicGI_RadianceSize;
@@ -77,6 +86,7 @@ int3 _RadianceDebugSize;
 int _RadianceDebugSampleCount;
 int _RadianceDebugSampleStride;
 int _RadianceDebugDirection;
+int _RadianceDebugSource;
 float3 _RadianceDebugCenter;
 float _RadianceDebugRadius;
 
@@ -164,6 +174,19 @@ RadianceProbeData ReadRadianceLoad(int3 coordinate)
     return result;
 }
 
+RadianceProbeData ReadDebugDirectLoad(int3 coordinate)
+{
+    coordinate = RadiancePhysicalCoordinate(coordinate);
+    RadianceProbeData result;
+    result.PositiveX = _RadianceDebugDirectPositiveX.Load(int4(coordinate, 0));
+    result.NegativeX = _RadianceDebugDirectNegativeX.Load(int4(coordinate, 0));
+    result.PositiveY = _RadianceDebugDirectPositiveY.Load(int4(coordinate, 0));
+    result.NegativeY = _RadianceDebugDirectNegativeY.Load(int4(coordinate, 0));
+    result.PositiveZ = _RadianceDebugDirectPositiveZ.Load(int4(coordinate, 0));
+    result.NegativeZ = _RadianceDebugDirectNegativeZ.Load(int4(coordinate, 0));
+    return result;
+}
+
 RadianceProbeData LerpRadiance(RadianceProbeData from, RadianceProbeData to, float weight)
 {
     RadianceProbeData result;
@@ -201,6 +224,54 @@ RadianceProbeData SampleToroidalRadiance(float3 relative)
         LerpRadiance(v011, v111, weight.x),
         weight.y);
     return LerpRadiance(z0, z1, weight.z);
+}
+
+RadianceProbeData SampleToroidalDebugDirect(float3 relative)
+{
+    float3 gridPosition = relative / RadianceCellSize() - 0.5;
+    int3 baseCoordinate = (int3)floor(gridPosition);
+    float3 weight = frac(gridPosition);
+    int3 c0 = clamp(baseCoordinate, 0, _DynamicGI_RadianceResolution - 1);
+    int3 c1 = clamp(baseCoordinate + 1, 0, _DynamicGI_RadianceResolution - 1);
+
+    RadianceProbeData v000 = ReadDebugDirectLoad(int3(c0.x, c0.y, c0.z));
+    RadianceProbeData v100 = ReadDebugDirectLoad(int3(c1.x, c0.y, c0.z));
+    RadianceProbeData v010 = ReadDebugDirectLoad(int3(c0.x, c1.y, c0.z));
+    RadianceProbeData v110 = ReadDebugDirectLoad(int3(c1.x, c1.y, c0.z));
+    RadianceProbeData v001 = ReadDebugDirectLoad(int3(c0.x, c0.y, c1.z));
+    RadianceProbeData v101 = ReadDebugDirectLoad(int3(c1.x, c0.y, c1.z));
+    RadianceProbeData v011 = ReadDebugDirectLoad(int3(c0.x, c1.y, c1.z));
+    RadianceProbeData v111 = ReadDebugDirectLoad(int3(c1.x, c1.y, c1.z));
+    RadianceProbeData z0 = LerpRadiance(
+        LerpRadiance(v000, v100, weight.x),
+        LerpRadiance(v010, v110, weight.x),
+        weight.y);
+    RadianceProbeData z1 = LerpRadiance(
+        LerpRadiance(v001, v101, weight.x),
+        LerpRadiance(v011, v111, weight.x),
+        weight.y);
+    return LerpRadiance(z0, z1, weight.z);
+}
+
+float4 SelectDebugLobe(float4 resolved, float4 directValue)
+{
+    if (_RadianceDebugSource == 1)
+        return directValue;
+    if (_RadianceDebugSource == 2)
+        return float4(max(0.0, resolved.rgb - directValue.rgb), resolved.a);
+    return resolved;
+}
+
+RadianceProbeData SelectDebugSource(RadianceProbeData resolved, RadianceProbeData directValue)
+{
+    RadianceProbeData result;
+    result.PositiveX = SelectDebugLobe(resolved.PositiveX, directValue.PositiveX);
+    result.NegativeX = SelectDebugLobe(resolved.NegativeX, directValue.NegativeX);
+    result.PositiveY = SelectDebugLobe(resolved.PositiveY, directValue.PositiveY);
+    result.NegativeY = SelectDebugLobe(resolved.NegativeY, directValue.NegativeY);
+    result.PositiveZ = SelectDebugLobe(resolved.PositiveZ, directValue.PositiveZ);
+    result.NegativeZ = SelectDebugLobe(resolved.NegativeZ, directValue.NegativeZ);
+    return result;
 }
 
 float3 SelectDebugRadiance(RadianceProbeData value, int direction)
@@ -347,6 +418,64 @@ void BuildRadianceDebug(uint3 dispatchThreadId : SV_DispatchThreadID)
     int3 coordinate = _RadianceDebugOffset + localCoordinate;
     float3 positionWS = RadianceProbePosition(coordinate);
     RadianceProbeData radiance = ReadRadianceLoad(coordinate);
+    float3 color = SelectDebugRadiance(radiance, _RadianceDebugDirection);
+    float luminance = dot(color, float3(0.2126, 0.7152, 0.0722));
+    float validity = saturate((radiance.PositiveX.a + radiance.NegativeX.a + radiance.PositiveY.a +
+                               radiance.NegativeY.a + radiance.PositiveZ.a + radiance.NegativeZ.a) / 6.0);
+    if (_RadianceDebugRadius > 0.0 && distance(positionWS, _RadianceDebugCenter) > _RadianceDebugRadius)
+        validity = 0.0;
+
+    RadianceDebugSample sample;
+    sample.PositionAndLuminance = float4(positionWS, luminance);
+    sample.ColorAndValidity = float4(color, validity);
+    _RadianceDebugSamples[dispatchIndex] = sample;
+}
+
+[numthreads(64, 1, 1)]
+void QueryRadianceClipmapDebug(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint index = dispatchThreadId.x;
+    if (index >= (uint)_RadianceQueryCount)
+        return;
+
+    RadianceProbeData result;
+    result.PositiveX = 0.0;
+    result.NegativeX = 0.0;
+    result.PositiveY = 0.0;
+    result.NegativeY = 0.0;
+    result.PositiveZ = 0.0;
+    result.NegativeZ = 0.0;
+    float3 relative = _RadianceQueryPositions[index] - _DynamicGI_RadianceOrigin;
+    if (_DynamicGI_RadianceAvailable != 0 && all(relative >= 0.0) && all(relative < _DynamicGI_RadianceSize))
+    {
+        RadianceProbeData resolved = SampleToroidalRadiance(relative);
+        RadianceProbeData directValue = SampleToroidalDebugDirect(relative);
+        result = SelectDebugSource(resolved, directValue);
+    }
+    _RadianceQueryResults[index] = result;
+}
+
+[numthreads(64, 1, 1)]
+void BuildRadianceClipmapDebug(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint dispatchIndex = dispatchThreadId.x;
+    if (dispatchIndex >= (uint)_RadianceDebugSampleCount)
+        return;
+
+    uint linearIndex = dispatchIndex * (uint)_RadianceDebugSampleStride;
+    uint candidateCount = (uint)(_RadianceDebugSize.x * _RadianceDebugSize.y * _RadianceDebugSize.z);
+    if (linearIndex >= candidateCount)
+        return;
+
+    int3 localCoordinate;
+    localCoordinate.x = (int)(linearIndex % (uint)_RadianceDebugSize.x);
+    localCoordinate.y = (int)((linearIndex / (uint)_RadianceDebugSize.x) % (uint)_RadianceDebugSize.y);
+    localCoordinate.z = (int)(linearIndex / (uint)(_RadianceDebugSize.x * _RadianceDebugSize.y));
+    int3 coordinate = _RadianceDebugOffset + localCoordinate;
+    float3 positionWS = RadianceProbePosition(coordinate);
+    RadianceProbeData resolved = ReadRadianceLoad(coordinate);
+    RadianceProbeData directValue = ReadDebugDirectLoad(coordinate);
+    RadianceProbeData radiance = SelectDebugSource(resolved, directValue);
     float3 color = SelectDebugRadiance(radiance, _RadianceDebugDirection);
     float luminance = dot(color, float3(0.2126, 0.7152, 0.0722));
     float validity = saturate((radiance.PositiveX.a + radiance.NegativeX.a + radiance.PositiveY.a +
