@@ -45,6 +45,14 @@ namespace DynamicGI.Debugging
         [Header("Numeric values")]
         [SerializeField] private bool showNumericValues = true;
         [SerializeField] private bool numericHorizontalSliceOnly = true;
+        [SerializeField] private bool showQueryNumericSlice = true;
+        [SerializeField] private bool showGroundNumericSlice = true;
+        [SerializeField] private float groundSliceWorldY = 0.25f;
+        [SerializeField] private Color groundSliceColor = new(1f, 0.72f, 0.08f, 1f);
+        [SerializeField] private bool showCeilingNumericSlice = true;
+        [SerializeField] private float ceilingSliceWorldY = 4.25f;
+        [SerializeField] private Color ceilingSliceColor = new(0.72f, 0.35f, 1f, 1f);
+        [SerializeField] private bool showNumericSlicePlanes = true;
         [SerializeField, Range(16, 2048)] private int maximumNumericLabels = 512;
         [SerializeField, Min(0.1f)] private float numericReadbackInterval = 0.5f;
         [SerializeField] private Color numericTextColor = Color.white;
@@ -61,6 +69,9 @@ namespace DynamicGI.Debugging
         private Mesh cubeMesh;
         private RadianceDebugSampleGpu[] numericSamples = Array.Empty<RadianceDebugSampleGpu>();
         private int numericSampleCount;
+        private int querySliceSampleCount;
+        private int groundSliceSampleCount;
+        private int ceilingSliceSampleCount;
         private int pendingNumericCount;
         private bool numericReadbackPending;
         private bool queryPending;
@@ -77,6 +88,9 @@ namespace DynamicGI.Debugging
 
         public int SelectedCascade => selectedCascade;
         public int NumericSampleCount => numericSampleCount;
+        public int QuerySliceSampleCount => querySliceSampleCount;
+        public int GroundSliceSampleCount => groundSliceSampleCount;
+        public int CeilingSliceSampleCount => ceilingSliceSampleCount;
         public bool HasQueryResult => hasQueryResult;
         public RadianceClipmapProbeResult LastQueryResult => lastQueryResult;
 
@@ -176,6 +190,9 @@ namespace DynamicGI.Debugging
             if (request.hasError)
             {
                 numericSampleCount = 0;
+                querySliceSampleCount = 0;
+                groundSliceSampleCount = 0;
+                ceilingSliceSampleCount = 0;
                 return;
             }
             var source = request.GetData<RadianceDebugSampleGpu>();
@@ -184,6 +201,7 @@ namespace DynamicGI.Debugging
                 numericSamples = new RadianceDebugSampleGpu[count];
             for (int i = 0; i < count; i++) numericSamples[i] = source[i];
             numericSampleCount = count;
+            UpdateNumericSliceCounts();
         }
 
         private Vector3 ResolveDebugCenter()
@@ -197,6 +215,43 @@ namespace DynamicGI.Debugging
         }
 
         private Vector3 ResolveQueryPosition() => probeQueryTarget != null ? probeQueryTarget.position : ResolveDebugCenter();
+
+        private void UpdateNumericSliceCounts()
+        {
+            querySliceSampleCount = 0;
+            groundSliceSampleCount = 0;
+            ceilingSliceSampleCount = 0;
+            if (radianceClipmap == null ||
+                !radianceClipmap.TryGetCascade(selectedCascade, out RadianceCascade cascade))
+            {
+                return;
+            }
+
+            for (int i = 0; i < numericSampleCount; i++)
+            {
+                RadianceDebugSampleGpu sample = numericSamples[i];
+                if (sample.ColorAndValidity.w <= 0.001f)
+                    continue;
+                switch (ClassifyNumericSlice(sample.PositionAndLuminance.y, cascade))
+                {
+                    case NumericSliceKind.Query: querySliceSampleCount++; break;
+                    case NumericSliceKind.Ground: groundSliceSampleCount++; break;
+                    case NumericSliceKind.Ceiling: ceilingSliceSampleCount++; break;
+                }
+            }
+        }
+
+        private NumericSliceKind ClassifyNumericSlice(float worldY, RadianceCascade cascade)
+        {
+            float tolerance = cascade.ProbeSpacing * 0.55f;
+            if (showQueryNumericSlice && Mathf.Abs(worldY - ResolveQueryPosition().y) <= tolerance)
+                return NumericSliceKind.Query;
+            if (showGroundNumericSlice && Mathf.Abs(worldY - groundSliceWorldY) <= tolerance)
+                return NumericSliceKind.Ground;
+            if (showCeilingNumericSlice && Mathf.Abs(worldY - ceilingSliceWorldY) <= tolerance)
+                return NumericSliceKind.Ceiling;
+            return NumericSliceKind.None;
+        }
 
         private void CreateResources()
         {
@@ -227,6 +282,9 @@ namespace DynamicGI.Debugging
             numericReadbackPending = false;
             queryPending = false;
             numericSampleCount = 0;
+            querySliceSampleCount = 0;
+            groundSliceSampleCount = 0;
+            ceilingSliceSampleCount = 0;
             if (debugMaterial != null)
             {
                 if (Application.isPlaying) Destroy(debugMaterial); else DestroyImmediate(debugMaterial);
@@ -276,12 +334,36 @@ namespace DynamicGI.Debugging
                 Gizmos.color = Color.white;
                 Gizmos.DrawWireSphere(ResolveDebugCenter(), 0.2f);
             }
+            if (showNumericValues && numericHorizontalSliceOnly && showNumericSlicePlanes)
+                DrawNumericSlicePlanes(cascadeStats[selectedCascade].Bounds);
 
 #if UNITY_EDITOR
             EnsureStyles();
             DrawNumericLabels();
             DrawDetailedQuery();
             if (showRingOffsetsAndStats) DrawCascadeStats();
+#endif
+        }
+
+        private void DrawNumericSlicePlanes(Bounds bounds)
+        {
+            if (showQueryNumericSlice)
+                DrawNumericSlicePlane(bounds, ResolveQueryPosition().y, numericTextColor, "CONSULTA");
+            if (showGroundNumericSlice)
+                DrawNumericSlicePlane(bounds, groundSliceWorldY, groundSliceColor, "SUELO");
+            if (showCeilingNumericSlice)
+                DrawNumericSlicePlane(bounds, ceilingSliceWorldY, ceilingSliceColor, "TECHO");
+        }
+
+        private static void DrawNumericSlicePlane(Bounds bounds, float worldY, Color color, string label)
+        {
+            if (worldY < bounds.min.y || worldY > bounds.max.y)
+                return;
+            Vector3 center = new(bounds.center.x, worldY, bounds.center.z);
+            Gizmos.color = new Color(color.r, color.g, color.b, 0.65f);
+            Gizmos.DrawWireCube(center, new Vector3(bounds.size.x, 0.01f, bounds.size.z));
+#if UNITY_EDITOR
+            UnityEditor.Handles.Label(new Vector3(bounds.min.x, worldY, bounds.min.z), $"{label} y={worldY:0.00}");
 #endif
         }
 
@@ -302,8 +384,10 @@ namespace DynamicGI.Debugging
                 RadianceDebugSampleGpu sample = numericSamples[i];
                 if (!IsEligible(sample, cascade) || ordinal++ % stride != 0)
                     continue;
+                numericStyle.normal.textColor = SliceColor(sample.PositionAndLuminance.y, cascade);
                 UnityEditor.Handles.Label(ToVector3(sample.PositionAndLuminance), sample.PositionAndLuminance.w.ToString("0.000"), numericStyle);
             }
+            numericStyle.normal.textColor = numericTextColor;
         }
 
         private bool IsEligible(RadianceDebugSampleGpu sample, RadianceCascade cascade)
@@ -312,7 +396,17 @@ namespace DynamicGI.Debugging
                 return false;
             if (!numericHorizontalSliceOnly)
                 return true;
-            return Mathf.Abs(sample.PositionAndLuminance.y - ResolveQueryPosition().y) <= cascade.ProbeSpacing * 0.55f;
+            return ClassifyNumericSlice(sample.PositionAndLuminance.y, cascade) != NumericSliceKind.None;
+        }
+
+        private Color SliceColor(float worldY, RadianceCascade cascade)
+        {
+            return ClassifyNumericSlice(worldY, cascade) switch
+            {
+                NumericSliceKind.Ground => groundSliceColor,
+                NumericSliceKind.Ceiling => ceilingSliceColor,
+                _ => numericTextColor
+            };
         }
 
         private void DrawDetailedQuery()
@@ -350,6 +444,8 @@ namespace DynamicGI.Debugging
                 cascadeStats[0].Bounds.max,
                 $"Clipmap total: {total.ActiveProbes} probes | dirty {total.DirtyTiles}\n" +
                 $"updated {total.UpdatedProbesThisFrame} | moves {total.OriginMovesThisFrame}\n" +
+                $"sun rev {total.SunRevision} | horizon {radianceClipmap.CurrentSunHorizonFactor:0.00} | refresh {total.LightingRefreshesThisFrame}\n" +
+                $"slices Q/G/C {querySliceSampleCount}/{groundSliceSampleCount}/{ceilingSliceSampleCount}\n" +
                 $"GPU {FormatBytes(total.EstimatedGpuBytes)} | CPU {total.UpdateCpuMilliseconds:0.###} ms",
                 detailStyle);
         }
@@ -397,6 +493,14 @@ namespace DynamicGI.Debugging
             public uint StartIndex;
             public uint BaseVertex;
             public uint StartInstance;
+        }
+
+        private enum NumericSliceKind
+        {
+            None,
+            Query,
+            Ground,
+            Ceiling
         }
     }
 }

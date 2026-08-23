@@ -58,8 +58,8 @@ namespace DynamicGI.Editor
 
             Debug.Log(
                 "DYNAMIC_GI_PHASE5_TESTGI_CONFIGURED | tracking=Main Camera | " +
-                "C0=16x8x16@0.5m | C1=16x8x16@1m | C2=16x8x16@2m | " +
-                "tile=2 probes | debug=C0/+X/numeric slice");
+                "C0=16x16x16@0.5m | C1=16x8x16@1m | C2=16x8x16@2m | " +
+                "tile=2 probes | debug=C0/+X/query+ground+ceiling slices");
         }
 
         [MenuItem("Tools/Dynamic GI/Phase 5/Validate TestGI Radiance Clipmap")]
@@ -123,11 +123,16 @@ namespace DynamicGI.Editor
             Set(value, "sunIntensityScale", 0.00001f);
             Set(value, "sunTraceDistance", 32f);
             Set(value, "rayOriginBias", 0.05f);
+            Set(value, "minimumSunAngularChangeDegrees", 0.1f);
+            Set(value, "minimumSunRadianceChange", 0.002f);
+            Set(value, "minimumSkyRadianceChange", 0.002f);
+            Set(value, "fadeSunBelowHorizon", true);
+            Set(value, "sunHorizonFadeDegrees", 3f);
             Set(value, "radianceShader", AssetDatabase.LoadAssetAtPath<ComputeShader>("Assets/DynamicGI/Shaders/RadianceInject.compute"));
 
             SerializedProperty settings = value.FindProperty("cascadeSettings");
             settings.arraySize = 3;
-            ConfigureCascade(settings.GetArrayElementAtIndex(0), "Near", 16, 8, 0.5f, 2, 1, 16);
+            ConfigureCascade(settings.GetArrayElementAtIndex(0), "Near", 16, 16, 0.5f, 2, 1, 16);
             ConfigureCascade(settings.GetArrayElementAtIndex(1), "Middle", 16, 8, 1f, 2, 2, 8);
             ConfigureCascade(settings.GetArrayElementAtIndex(2), "Far", 16, 8, 2f, 2, 4, 4);
             value.ApplyModifiedPropertiesWithoutUndo();
@@ -176,7 +181,13 @@ namespace DynamicGI.Editor
             Set(value, "probeScale", 0.22f);
             Set(value, "exposure", 1.25f);
             Set(value, "showNumericValues", true);
-            Set(value, "maximumNumericLabels", 512);
+            Set(value, "showQueryNumericSlice", true);
+            Set(value, "showGroundNumericSlice", true);
+            Set(value, "groundSliceWorldY", 0.25f);
+            Set(value, "showCeilingNumericSlice", true);
+            Set(value, "ceilingSliceWorldY", 4.25f);
+            Set(value, "showNumericSlicePlanes", true);
+            Set(value, "maximumNumericLabels", 768);
             Set(value, "numericHorizontalSliceOnly", true);
             Set(value, "queryDetailedProbe", true);
             value.ApplyModifiedPropertiesWithoutUndo();

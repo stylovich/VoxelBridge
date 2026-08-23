@@ -73,6 +73,13 @@ namespace DynamicGI.Radiance
         [SerializeField, Min(1f)] private float sunTraceDistance = 64f;
         [SerializeField, Min(0f)] private float rayOriginBias = 0.08f;
 
+        [Header("Sun updates")]
+        [SerializeField, Range(0f, 5f)] private float minimumSunAngularChangeDegrees = 0.1f;
+        [SerializeField, Min(0f)] private float minimumSunRadianceChange = 0.002f;
+        [SerializeField, Min(0f)] private float minimumSkyRadianceChange = 0.002f;
+        [SerializeField] private bool fadeSunBelowHorizon = true;
+        [SerializeField, Range(0.1f, 15f)] private float sunHorizonFadeDegrees = 3f;
+
         [Header("Compute")]
         [SerializeField] private ComputeShader radianceShader;
 
@@ -103,6 +110,8 @@ namespace DynamicGI.Radiance
         private int recycledProbesThisFrame;
         private int originMovesThisFrame;
         private int computeDispatchesThisFrame;
+        private int sunRevision;
+        private int lightingRefreshesThisFrame;
         private double updateCpuMilliseconds;
         private int lastDebugProbeCount;
         private int lastDebugProbeStride;
@@ -116,6 +125,10 @@ namespace DynamicGI.Radiance
         public int CascadeCount => cascades.Count;
         public bool IsInitialized => initialized;
         public float CascadeBlendStart => cascadeBlendStart;
+        public int SunRevision => sunRevision;
+        public Vector3 CurrentSunDirection => GetSunDirection();
+        public Vector3 CurrentSunRadiance => GetSunRadiance();
+        public float CurrentSunHorizonFactor => GetSunHorizonFactor(GetSunDirection());
         public int LastDebugProbeCount => lastDebugProbeCount;
         public int LastDebugProbeStride => lastDebugProbeStride;
 
@@ -142,6 +155,8 @@ namespace DynamicGI.Radiance
                     recycledProbesThisFrame,
                     originMovesThisFrame,
                     computeDispatchesThisFrame,
+                    sunRevision,
+                    lightingRefreshesThisFrame,
                     memory,
                     updateCpuMilliseconds);
             }
@@ -187,6 +202,10 @@ namespace DynamicGI.Radiance
             sunIntensityScale = Mathf.Max(0f, sunIntensityScale);
             sunTraceDistance = Mathf.Max(1f, sunTraceDistance);
             rayOriginBias = Mathf.Max(0f, rayOriginBias);
+            minimumSunAngularChangeDegrees = Mathf.Clamp(minimumSunAngularChangeDegrees, 0f, 5f);
+            minimumSunRadianceChange = Mathf.Max(0f, minimumSunRadianceChange);
+            minimumSkyRadianceChange = Mathf.Max(0f, minimumSkyRadianceChange);
+            sunHorizonFadeDegrees = Mathf.Clamp(sunHorizonFadeDegrees, 0.1f, 15f);
             if (cascadeSettings == null)
                 cascadeSettings = Array.Empty<RadianceCascadeSettings>();
             for (int i = 0; i < cascadeSettings.Length; i++)
@@ -251,8 +270,22 @@ namespace DynamicGI.Radiance
             if (!EnsureInitialized())
                 return;
             recentRegions.Clear();
-            for (int i = 0; i < cascades.Count; i++)
-                cascades[i].InvalidateAll();
+            InvalidateAllCascades();
+        }
+
+        /// <summary>
+        /// Explicit hook for custom day/night controllers. Ordinary transform, color,
+        /// intensity, enabled-state, and sky changes are detected automatically.
+        /// </summary>
+        [ContextMenu("Force Sun / Sky Refresh")]
+        public void ForceLightingRefresh()
+        {
+            if (!EnsureInitialized())
+                return;
+            CaptureLightingState();
+            sunRevision++;
+            lightingRefreshesThisFrame++;
+            InvalidateAllCascades();
         }
 
         [ContextMenu("Process All Dirty Cascade Tiles")]
@@ -604,16 +637,23 @@ namespace DynamicGI.Radiance
             Vector3 sun = GetSunRadiance();
             Color linearSky = skyColor.linear;
             Vector3 sky = new(linearSky.r * skyIntensity, linearSky.g * skyIntensity, linearSky.b * skyIntensity);
-            if ((direction - lastSunDirection).sqrMagnitude <= 0.000001f &&
-                (sun - lastSunRadiance).sqrMagnitude <= 0.000001f &&
-                (sky - lastSkyRadiance).sqrMagnitude <= 0.000001f)
-            {
+
+            bool sunHasEnergy = MaxComponent(sun) > minimumSunRadianceChange ||
+                                MaxComponent(lastSunRadiance) > minimumSunRadianceChange;
+            float minimumDirectionDot = Mathf.Cos(minimumSunAngularChangeDegrees * Mathf.Deg2Rad);
+            bool directionChanged = sunHasEnergy &&
+                                    Vector3.Dot(direction, lastSunDirection) < minimumDirectionDot;
+            bool sunRadianceChanged = MaxAbsDelta(sun, lastSunRadiance) > minimumSunRadianceChange;
+            bool skyRadianceChanged = MaxAbsDelta(sky, lastSkyRadiance) > minimumSkyRadianceChange;
+            if (!directionChanged && !sunRadianceChanged && !skyRadianceChanged)
                 return;
-            }
+
             lastSunDirection = direction;
             lastSunRadiance = sun;
             lastSkyRadiance = sky;
-            for (int i = 0; i < cascades.Count; i++) cascades[i].InvalidateAll();
+            if (directionChanged || sunRadianceChanged) sunRevision++;
+            lightingRefreshesThisFrame++;
+            InvalidateAllCascades();
         }
 
         private void CaptureLightingState()
@@ -640,9 +680,29 @@ namespace DynamicGI.Radiance
             if (sunLight == null || !sunLight.enabled || !sunLight.gameObject.activeInHierarchy)
                 return Vector3.zero;
             Color color = sunLight.color.linear;
-            float intensity = sunLight.intensity * sunIntensityScale;
+            float intensity = Mathf.Max(0f, sunLight.intensity) * sunIntensityScale;
+            intensity *= GetSunHorizonFactor(GetSunDirection());
             return new Vector3(color.r * intensity, color.g * intensity, color.b * intensity);
         }
+
+        private float GetSunHorizonFactor(Vector3 direction)
+        {
+            if (!fadeSunBelowHorizon)
+                return 1f;
+            float fadeHeight = Mathf.Sin(sunHorizonFadeDegrees * Mathf.Deg2Rad);
+            return Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(direction.y / Mathf.Max(0.0001f, fadeHeight)));
+        }
+
+        private void InvalidateAllCascades()
+        {
+            for (int i = 0; i < cascades.Count; i++) cascades[i].InvalidateAll();
+        }
+
+        private static float MaxAbsDelta(Vector3 value, Vector3 previous) =>
+            Mathf.Max(Mathf.Abs(value.x - previous.x),
+                Mathf.Max(Mathf.Abs(value.y - previous.y), Mathf.Abs(value.z - previous.z)));
+
+        private static float MaxComponent(Vector3 value) => Mathf.Max(value.x, Mathf.Max(value.y, value.z));
 
         private Bounds CalculateSunInfluence(Bounds changedBounds)
         {
@@ -751,6 +811,7 @@ namespace DynamicGI.Radiance
             recycledProbesThisFrame = 0;
             originMovesThisFrame = 0;
             computeDispatchesThisFrame = 0;
+            lightingRefreshesThisFrame = 0;
             updateCpuMilliseconds = 0.0;
         }
 

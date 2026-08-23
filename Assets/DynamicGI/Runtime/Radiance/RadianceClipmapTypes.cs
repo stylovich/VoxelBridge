@@ -25,6 +25,8 @@ namespace DynamicGI.Radiance
         public readonly int RecycledProbesThisFrame;
         public readonly int OriginMovesThisFrame;
         public readonly int ComputeDispatchesThisFrame;
+        public readonly int SunRevision;
+        public readonly int LightingRefreshesThisFrame;
         public readonly long EstimatedGpuBytes;
         public readonly double UpdateCpuMilliseconds;
 
@@ -38,6 +40,8 @@ namespace DynamicGI.Radiance
             int recycledProbesThisFrame,
             int originMovesThisFrame,
             int computeDispatchesThisFrame,
+            int sunRevision,
+            int lightingRefreshesThisFrame,
             long estimatedGpuBytes,
             double updateCpuMilliseconds)
         {
@@ -50,6 +54,8 @@ namespace DynamicGI.Radiance
             RecycledProbesThisFrame = recycledProbesThisFrame;
             OriginMovesThisFrame = originMovesThisFrame;
             ComputeDispatchesThisFrame = computeDispatchesThisFrame;
+            SunRevision = sunRevision;
+            LightingRefreshesThisFrame = lightingRefreshesThisFrame;
             EstimatedGpuBytes = estimatedGpuBytes;
             UpdateCpuMilliseconds = updateCpuMilliseconds;
         }

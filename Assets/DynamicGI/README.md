@@ -1,4 +1,4 @@
-# Dynamic GI prototype — Phases 1–5 Geometry, Visibility, and Radiance Clipmaps
+# Dynamic GI prototype — Phases 1–6 Geometry, Visibility, Clipmaps, and Dynamic Sun
 
 This folder contains the first, deliberately isolated layer of the runtime GI
 prototype. It does not replace or modify HDRP APV, HTrace SSGI, or HTrace AO.
@@ -227,8 +227,9 @@ shaders receive the same resources as globals and call `SampleDynamicGI` directl
 
 Run **Tools > Dynamic GI > Phase 5 > Configure TestGI Radiance Clipmap**. It recreates
 the east-window room, disables the Phase-4 local field without removing it, follows the
-Main Camera, and configures three `16 x 8 x 16` cascades at `0.5/1/2 m`. The selected
-debug view is Cascade 0, `+X`, with numeric labels. The portable validation checks
+Main Camera, and configures C0 as `16 x 16 x 16` at `0.5 m` plus two `16 x 8 x 16`
+cascades at `1/2 m`. The taller near cascade covers the laboratory floor and ceiling.
+The selected debug view is Cascade 0, `+X`, with numeric labels. The portable validation checks
 snapping, partial slab invalidation, toroidal recycling, large teleports, manual shader
 sampling, fine/coarse blending, and debug readback:
 
@@ -240,6 +241,56 @@ unity run . -- -executeMethod DynamicGI.Editor.RadiancePhase5SceneSetup.Validate
 The generated validation moves C0 by one 1 m tile: 256 of 2048 probes are exposed and
 1792 are recycled. In TestGI, the east-window probe must remain lit while the probe
 behind the solid wall stays dark.
+
+## Phase 6 dynamic Sun injection
+
+Every radiance tile injects the current directional Sun on the GPU. Probe-to-Sun
+visibility uses the same exact 3D DDA traversal of `WorldGeometryField` as the earlier
+validation field; no CPU raycasts or light bake are involved. Direct irradiance is
+stored in the six directional RGB lobes, so changing the Light transform, linear color,
+intensity, enabled state, or active state updates the runtime field automatically.
+
+`WorldRadianceClipmap` accumulates small changes against its last accepted state. The
+angular, Sun-radiance, and sky-radiance thresholds are configurable, avoiding continuous
+full invalidations from insignificant day/night-controller noise. A meaningful change
+increments `Sun Revision` and invalidates every cascade, but processing remains ordered
+near-to-far and respects each cascade's update interval and tile budget. Already-pending
+tiles are deduplicated, allowing the result to converge without recalculating every probe
+in one frame. Custom controllers may call `ForceLightingRefresh()` when an immediate new
+revision is required.
+
+When `Fade Sun Below Horizon` is enabled, direct radiance fades across the configured
+horizon angle and becomes zero when the direction-to-Sun falls below the world-space
+horizon (`direction.y <= 0`), even if an external day/night controller
+leaves the directional Light intensity nonzero. Sky accessibility remains independent,
+so nighttime probes can retain ambient sky contribution.
+
+### Ground and ceiling debug slices
+
+`RadianceClipmapDebug` can display three simultaneous world-space numeric slices using
+one shared GPU readback:
+
+- the detailed-query height (white);
+- a configurable ground height (amber);
+- a configurable ceiling height (violet).
+
+Each slice has an independent toggle and a wire-plane guide. The live cascade annotation
+reports valid query/ground/ceiling sample counts. TestGI uses `0.25 m` for the ground and
+`4.25 m` for the interior ceiling slice; these are debug heights, not global assumptions
+about a future city terrain.
+
+Run **Tools > Dynamic GI > Phase 6 > Configure TestGI Sun Injection**, then use
+**Validate TestGI Sun Cycle**, or run both headlessly:
+
+```powershell
+unity run . -- -executeMethod DynamicGI.Editor.RadiancePhase6SceneSetup.ConfigureTestGI -logFile -
+unity run . -- -executeMethod DynamicGI.Editor.RadiancePhase6SceneSetup.ValidateTestGI -logFile -
+```
+
+The validation checks east-window occlusion, intensity scaling, colored sunlight,
+east-to-west rotation, below-horizon night, per-frame cascade budgeting, and all three
+numeric slices. Direct Sun is still source injection rather than diffuse neighbor
+propagation; actual interior bounce remains Phase 8.
 
 ## Data layout
 
@@ -287,6 +338,9 @@ For Shader Graph, use a File-mode Custom Function node pointing to
   neighbor propagation or diffuse bounce yet.
 - Phase 5 reuses injected probes spatially but does not yet temporally blend new values;
   temporal accumulation is Phase 9 work.
+- During a Sun revision, tiles can temporarily contain different accepted Sun states
+  until their configured budgets converge. Phase 9 temporal accumulation will smooth
+  this transition.
 - Phase 4 supports one directional Sun source. Point/spot emissives are Phase 7 work.
 
 ## Mod/runtime registration contract

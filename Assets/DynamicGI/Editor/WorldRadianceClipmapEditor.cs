@@ -33,6 +33,8 @@ namespace DynamicGI.Editor
             EditorGUILayout.LabelField("Updated tiles / probes", $"{stats.UpdatedTilesThisFrame} / {stats.UpdatedProbesThisFrame}");
             EditorGUILayout.LabelField("Exposed / recycled", $"{stats.ExposedProbesThisFrame} / {stats.RecycledProbesThisFrame}");
             EditorGUILayout.LabelField("Origin moves", stats.OriginMovesThisFrame.ToString());
+            EditorGUILayout.LabelField("Sun revision / refreshes", $"{stats.SunRevision} / {stats.LightingRefreshesThisFrame}");
+            EditorGUILayout.LabelField("Sun horizon factor", clipmap.CurrentSunHorizonFactor.ToString("0.000"));
             EditorGUILayout.LabelField("Compute dispatches", stats.ComputeDispatchesThisFrame.ToString());
             EditorGUILayout.LabelField("Estimated GPU memory", EditorUtility.FormatBytes(stats.EstimatedGpuBytes));
             EditorGUILayout.LabelField("Scheduling CPU time", $"{stats.UpdateCpuMilliseconds:0.###} ms");
