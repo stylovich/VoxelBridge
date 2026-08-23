@@ -17,6 +17,8 @@ namespace DynamicGI.Radiance
         [SerializeField, Range(1, 8)] private int tileResolution = 2;
         [SerializeField, Min(1)] private int updateIntervalFrames = 1;
         [SerializeField, Min(1)] private int updateBudgetTiles = 16;
+        [SerializeField, Range(0.01f, 1f)] private float temporalAlpha = 0.25f;
+        [SerializeField, Range(1, 32)] private int temporalConvergenceSteps = 12;
 
         public string Name => string.IsNullOrWhiteSpace(name) ? "Cascade" : name;
         public bool Enabled => enabled;
@@ -26,6 +28,8 @@ namespace DynamicGI.Radiance
         public int TileResolution => tileResolution;
         public int UpdateIntervalFrames => updateIntervalFrames;
         public int UpdateBudgetTiles => updateBudgetTiles;
+        public float TemporalAlpha => temporalAlpha;
+        public int TemporalConvergenceSteps => temporalConvergenceSteps;
 
         public RadianceCascadeSettings()
         {
@@ -38,7 +42,9 @@ namespace DynamicGI.Radiance
             float probeSpacing,
             int tileResolution,
             int updateIntervalFrames,
-            int updateBudgetTiles)
+            int updateBudgetTiles,
+            float temporalAlpha = 0.25f,
+            int temporalConvergenceSteps = 12)
         {
             this.name = name;
             this.horizontalResolution = horizontalResolution;
@@ -47,6 +53,8 @@ namespace DynamicGI.Radiance
             this.tileResolution = tileResolution;
             this.updateIntervalFrames = updateIntervalFrames;
             this.updateBudgetTiles = updateBudgetTiles;
+            this.temporalAlpha = temporalAlpha;
+            this.temporalConvergenceSteps = temporalConvergenceSteps;
         }
 
         public void Sanitize()
@@ -58,6 +66,14 @@ namespace DynamicGI.Radiance
             tileResolution = Mathf.Min(tileResolution, verticalResolution);
             updateIntervalFrames = Mathf.Max(1, updateIntervalFrames);
             updateBudgetTiles = Mathf.Max(1, updateBudgetTiles);
+            // Existing serialized cascade entries predate Phase 9 and deserialize these
+            // fields as zero on some Unity versions. Upgrade them to useful safe defaults.
+            if (temporalAlpha <= 0f)
+                temporalAlpha = 0.25f;
+            if (temporalConvergenceSteps <= 0)
+                temporalConvergenceSteps = 12;
+            temporalAlpha = Mathf.Clamp(temporalAlpha, 0.01f, 1f);
+            temporalConvergenceSteps = Mathf.Clamp(temporalConvergenceSteps, 1, 32);
         }
 
     }
@@ -70,10 +86,18 @@ namespace DynamicGI.Radiance
     public sealed class RadianceCascade : IDisposable
     {
         private readonly HashSet<Vector3Int> dirtySet = new();
+        private readonly HashSet<Vector3Int> temporalResetSet = new();
+        private readonly HashSet<Vector3Int> temporalResetScratch = new();
+        private readonly HashSet<Vector3Int> temporalSet = new();
         private Queue<Vector3Int> dirtyQueue = new();
         private Queue<Vector3Int> queueScratch = new();
+        private Queue<Vector3Int> temporalQueue = new();
+        private Queue<Vector3Int> temporalQueueScratch = new();
+        private Dictionary<Vector3Int, int> temporalRemainingSteps = new();
+        private Dictionary<Vector3Int, int> temporalRemainingScratch = new();
         private readonly RenderTexture[] textures = new RenderTexture[6];
         private readonly RenderTexture[] directTextures = new RenderTexture[6];
+        private readonly RenderTexture[] candidateTextures = new RenderTexture[6];
         private readonly RenderTexture[] propagationScratchTexturesA = new RenderTexture[6];
         private readonly RenderTexture[] propagationScratchTexturesB = new RenderTexture[6];
         private readonly GraphicsFormat textureFormat;
@@ -91,6 +115,8 @@ namespace DynamicGI.Radiance
         public int TileResolution { get; }
         public int UpdateIntervalFrames { get; }
         public int UpdateBudgetTiles { get; }
+        public float TemporalAlpha { get; private set; }
+        public int TemporalConvergenceSteps { get; private set; }
         public Vector3Int OriginGlobalTile => originGlobalTile;
         public Vector3Int RingOffset => ringOffset;
         public Vector3 OriginWS => (Vector3)originGlobalTile * TileWorldSize;
@@ -100,11 +126,14 @@ namespace DynamicGI.Radiance
         public int ProbeCount => Resolution.x * Resolution.y * Resolution.z;
         public int TotalTileCount => TileGridResolution.x * TileGridResolution.y * TileGridResolution.z;
         public int DirtyTileCount => dirtySet.Count;
+        public int TemporalTileCount => temporalSet.Count;
+        public int PendingWorkTileCount => DirtyTileCount + TemporalTileCount;
         public int LastExposedTiles { get; private set; }
         public int LastExposedProbes { get; private set; }
         public int LastRecycledProbes { get; private set; }
         public IReadOnlyList<RenderTexture> Textures => textures;
         public IReadOnlyList<RenderTexture> DirectTextures => directTextures;
+        public IReadOnlyList<RenderTexture> CandidateTextures => candidateTextures;
         public IReadOnlyList<RenderTexture> PropagationScratchTexturesA => propagationScratchTexturesA;
         public IReadOnlyList<RenderTexture> PropagationScratchTexturesB => propagationScratchTexturesB;
         public bool HasPropagationTextures => hasPropagationTextures;
@@ -123,6 +152,8 @@ namespace DynamicGI.Radiance
             TileResolution = settings.TileResolution;
             UpdateIntervalFrames = settings.UpdateIntervalFrames;
             UpdateBudgetTiles = settings.UpdateBudgetTiles;
+            TemporalAlpha = settings.TemporalAlpha;
+            TemporalConvergenceSteps = settings.TemporalConvergenceSteps;
             Resolution = new Vector3Int(
                 settings.HorizontalResolution,
                 settings.VerticalResolution,
@@ -137,15 +168,16 @@ namespace DynamicGI.Radiance
             for (int i = 0; i < textures.Length; i++)
             {
                 textures[i] = CreateTexture(i, "Resolved");
+                directTextures[i] = CreateTexture(i, "Direct");
                 if (hasPropagationTextures)
                 {
-                    directTextures[i] = CreateTexture(i, "Direct");
+                    candidateTextures[i] = CreateTexture(i, "Candidate");
                     propagationScratchTexturesA[i] = CreateTexture(i, "Propagation Scratch A");
                     propagationScratchTexturesB[i] = CreateTexture(i, "Propagation Scratch B");
                 }
                 else
                 {
-                    directTextures[i] = textures[i];
+                    candidateTextures[i] = directTextures[i];
                 }
             }
             ResetToTarget(targetPosition);
@@ -177,7 +209,9 @@ namespace DynamicGI.Radiance
                 ringOffset = Vector3Int.zero;
                 dirtyQueue.Clear();
                 dirtySet.Clear();
-                EnqueueAllTiles();
+                ClearTemporalWork();
+                temporalResetSet.Clear();
+                EnqueueAllTiles(true);
                 LastExposedTiles = TotalTileCount;
                 LastExposedProbes = ProbeCount;
                 LastRecycledProbes = 0;
@@ -196,7 +230,7 @@ namespace DynamicGI.Radiance
                 Vector3Int globalTile = originGlobalTile + new Vector3Int(x, y, z);
                 if (!ContainsGlobalTile(globalTile, previousOrigin))
                 {
-                    if (EnqueueGlobalTile(globalTile))
+                    if (EnqueueGlobalTile(globalTile, true))
                         LastExposedTiles++;
                 }
             }
@@ -214,18 +248,22 @@ namespace DynamicGI.Radiance
             hasOrigin = true;
             dirtyQueue.Clear();
             dirtySet.Clear();
-            EnqueueAllTiles();
+            ClearTemporalWork();
+            temporalResetSet.Clear();
+            EnqueueAllTiles(true);
             LastExposedTiles = TotalTileCount;
             LastExposedProbes = ProbeCount;
             LastRecycledProbes = 0;
         }
 
-        public void InvalidateAll()
+        public void InvalidateAll(bool resetTemporal = false)
         {
-            EnqueueAllTiles();
+            if (resetTemporal)
+                ClearTemporalWork();
+            EnqueueAllTiles(resetTemporal);
         }
 
-        public void InvalidateWorldBounds(Bounds worldBounds)
+        public void InvalidateWorldBounds(Bounds worldBounds, bool resetTemporal = false)
         {
             Bounds intersection = WorldBounds;
             Vector3 minimum = Vector3.Max(intersection.min, worldBounds.min);
@@ -244,10 +282,18 @@ namespace DynamicGI.Radiance
             for (int z = minimumGlobal.z; z <= maximumGlobal.z; z++)
             for (int y = minimumGlobal.y; y <= maximumGlobal.y; y++)
             for (int x = minimumGlobal.x; x <= maximumGlobal.x; x++)
-                EnqueueGlobalTile(new Vector3Int(x, y, z));
+                EnqueueGlobalTile(new Vector3Int(x, y, z), resetTemporal);
         }
 
         public bool TryDequeueDirty(out Vector3Int globalTile, out Vector3Int localTile)
+        {
+            return TryDequeueDirty(out globalTile, out localTile, out _);
+        }
+
+        public bool TryDequeueDirty(
+            out Vector3Int globalTile,
+            out Vector3Int localTile,
+            out bool resetTemporal)
         {
             while (dirtyQueue.Count > 0)
             {
@@ -255,11 +301,63 @@ namespace DynamicGI.Radiance
                 if (!dirtySet.Remove(globalTile) || !ContainsGlobalTile(globalTile, originGlobalTile))
                     continue;
                 localTile = globalTile - originGlobalTile;
+                resetTemporal = temporalResetSet.Remove(globalTile);
                 return true;
             }
             globalTile = default;
             localTile = default;
+            resetTemporal = false;
             return false;
+        }
+
+        public void ScheduleTemporalConvergence(Vector3Int globalTile, int remainingSteps)
+        {
+            if (remainingSteps <= 0 || !ContainsGlobalTile(globalTile, originGlobalTile))
+            {
+                CancelTemporalConvergence(globalTile);
+                return;
+            }
+
+            temporalRemainingSteps[globalTile] = remainingSteps;
+            if (temporalSet.Add(globalTile))
+                temporalQueue.Enqueue(globalTile);
+        }
+
+        public void CancelTemporalConvergence(Vector3Int globalTile)
+        {
+            temporalSet.Remove(globalTile);
+            temporalRemainingSteps.Remove(globalTile);
+        }
+
+        public bool TryDequeueTemporal(
+            out Vector3Int globalTile,
+            out Vector3Int localTile,
+            out int remainingSteps)
+        {
+            while (temporalQueue.Count > 0)
+            {
+                globalTile = temporalQueue.Dequeue();
+                if (!temporalSet.Remove(globalTile) ||
+                    !temporalRemainingSteps.Remove(globalTile, out remainingSteps) ||
+                    !ContainsGlobalTile(globalTile, originGlobalTile))
+                {
+                    continue;
+                }
+
+                localTile = globalTile - originGlobalTile;
+                return true;
+            }
+
+            globalTile = default;
+            localTile = default;
+            remainingSteps = 0;
+            return false;
+        }
+
+        public void SetTemporalParameters(float alpha, int convergenceSteps)
+        {
+            TemporalAlpha = Mathf.Clamp(alpha, 0.01f, 1f);
+            TemporalConvergenceSteps = Mathf.Clamp(convergenceSteps, 1, 32);
         }
 
         public void GetDirtyTileBounds(List<Bounds> destination)
@@ -283,7 +381,7 @@ namespace DynamicGI.Radiance
         public long EstimateGpuBytes()
         {
             long bytesPerTexel = textureFormat == GraphicsFormat.R16G16B16A16_SFloat ? 8L : 16L;
-            int textureCount = textures.Length * (hasPropagationTextures ? 4 : 1);
+            int textureCount = textures.Length * (hasPropagationTextures ? 5 : 2);
             return (long)ProbeCount * bytesPerTexel * textureCount;
         }
 
@@ -292,10 +390,16 @@ namespace DynamicGI.Radiance
             dirtyQueue.Clear();
             queueScratch.Clear();
             dirtySet.Clear();
+            temporalResetSet.Clear();
+            temporalResetScratch.Clear();
+            ClearTemporalWork();
+            temporalQueueScratch.Clear();
+            temporalRemainingScratch.Clear();
             ReleaseTextures(textures);
+            ReleaseTextures(directTextures);
             if (hasPropagationTextures)
             {
-                ReleaseTextures(directTextures);
+                ReleaseTextures(candidateTextures);
                 ReleaseTextures(propagationScratchTexturesA);
                 ReleaseTextures(propagationScratchTexturesB);
             }
@@ -352,16 +456,21 @@ namespace DynamicGI.Radiance
                 TileGridResolution.z / 2);
         }
 
-        private void EnqueueAllTiles()
+        private void EnqueueAllTiles(bool resetTemporal)
         {
             for (int z = 0; z < TileGridResolution.z; z++)
             for (int y = 0; y < TileGridResolution.y; y++)
             for (int x = 0; x < TileGridResolution.x; x++)
-                EnqueueGlobalTile(originGlobalTile + new Vector3Int(x, y, z));
+                EnqueueGlobalTile(originGlobalTile + new Vector3Int(x, y, z), resetTemporal);
         }
 
-        private bool EnqueueGlobalTile(Vector3Int globalTile)
+        private bool EnqueueGlobalTile(Vector3Int globalTile, bool resetTemporal = false)
         {
+            if (resetTemporal)
+            {
+                temporalResetSet.Add(globalTile);
+                CancelTemporalConvergence(globalTile);
+            }
             if (!dirtySet.Add(globalTile))
                 return false;
             dirtyQueue.Enqueue(globalTile);
@@ -371,16 +480,62 @@ namespace DynamicGI.Radiance
         private void FilterPendingTilesToCurrentWindow()
         {
             queueScratch.Clear();
+            temporalResetScratch.Clear();
             dirtySet.Clear();
             while (dirtyQueue.Count > 0)
             {
                 Vector3Int tile = dirtyQueue.Dequeue();
                 if (ContainsGlobalTile(tile, originGlobalTile) && dirtySet.Add(tile))
+                {
                     queueScratch.Enqueue(tile);
+                    if (temporalResetSet.Contains(tile))
+                        temporalResetScratch.Add(tile);
+                }
             }
             Queue<Vector3Int> swap = dirtyQueue;
             dirtyQueue = queueScratch;
             queueScratch = swap;
+
+            temporalResetSet.Clear();
+            foreach (Vector3Int tile in temporalResetScratch)
+                temporalResetSet.Add(tile);
+
+            FilterTemporalWorkToCurrentWindow();
+        }
+
+        private void FilterTemporalWorkToCurrentWindow()
+        {
+            temporalQueueScratch.Clear();
+            temporalRemainingScratch.Clear();
+            temporalSet.Clear();
+            while (temporalQueue.Count > 0)
+            {
+                Vector3Int tile = temporalQueue.Dequeue();
+                if (!ContainsGlobalTile(tile, originGlobalTile) ||
+                    !temporalRemainingSteps.TryGetValue(tile, out int remaining) ||
+                    !temporalSet.Add(tile))
+                {
+                    continue;
+                }
+
+                temporalQueueScratch.Enqueue(tile);
+                temporalRemainingScratch[tile] = remaining;
+            }
+
+            Queue<Vector3Int> queueSwap = temporalQueue;
+            temporalQueue = temporalQueueScratch;
+            temporalQueueScratch = queueSwap;
+            Dictionary<Vector3Int, int> remainingSwap = temporalRemainingSteps;
+            temporalRemainingSteps = temporalRemainingScratch;
+            temporalRemainingScratch = remainingSwap;
+            temporalRemainingScratch.Clear();
+        }
+
+        private void ClearTemporalWork()
+        {
+            temporalQueue.Clear();
+            temporalSet.Clear();
+            temporalRemainingSteps.Clear();
         }
 
         private bool ContainsGlobalTile(Vector3Int value, Vector3Int windowOrigin)
@@ -422,10 +577,14 @@ namespace DynamicGI.Radiance
         public readonly Bounds Bounds;
         public readonly Vector3Int RingOffset;
         public readonly int DirtyTiles;
+        public readonly int PendingTemporalTiles;
         public readonly int TotalTiles;
         public readonly int ExposedProbes;
         public readonly int RecycledProbes;
         public readonly long EstimatedGpuBytes;
+        public readonly int UpdateIntervalFrames;
+        public readonly float TemporalAlpha;
+        public readonly int TemporalConvergenceSteps;
 
         public RadianceCascadeRuntimeStats(RadianceCascade cascade)
         {
@@ -436,10 +595,14 @@ namespace DynamicGI.Radiance
             Bounds = cascade.WorldBounds;
             RingOffset = cascade.RingOffset;
             DirtyTiles = cascade.DirtyTileCount;
+            PendingTemporalTiles = cascade.TemporalTileCount;
             TotalTiles = cascade.TotalTileCount;
             ExposedProbes = cascade.LastExposedProbes;
             RecycledProbes = cascade.LastRecycledProbes;
             EstimatedGpuBytes = cascade.EstimateGpuBytes();
+            UpdateIntervalFrames = cascade.UpdateIntervalFrames;
+            TemporalAlpha = cascade.TemporalAlpha;
+            TemporalConvergenceSteps = cascade.TemporalConvergenceSteps;
         }
     }
 }

@@ -15,12 +15,17 @@ namespace DynamicGI.Editor
             EditorGUILayout.Space();
             EditorGUILayout.HelpBox(
                 "Origins snap to whole update tiles. Probe textures are toroidal: moving the target rotates a ring offset and only exposes new slabs. " +
-                "Large teleports invalidate a full cascade. Nearby propagation cascades keep direct, resolved, and scratch textures so neighbor transport never feeds back into source injection.",
+                "Large teleports invalidate a full cascade. Direct injection, propagated candidates, and temporally resolved radiance remain separate; recycled/new geometry tiles replace history instead of blending unrelated world positions.",
                 MessageType.Info);
             using (new EditorGUILayout.HorizontalScope())
             {
                 if (GUILayout.Button("Rebuild All")) clipmap.RebuildAll();
                 if (GUILayout.Button("Process Dirty Now")) clipmap.ProcessAllDirtyNow();
+            }
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                if (GUILayout.Button("Candidate Step")) clipmap.ProcessAllCandidateUpdatesNow();
+                if (GUILayout.Button("Finish Temporal")) clipmap.ProcessAllTemporalNow();
             }
             if (clipmap.GetComponent<RadianceClipmapDebug>() == null && GUILayout.Button("Add Clipmap Debug"))
                 Undo.AddComponent<RadianceClipmapDebug>(clipmap.gameObject);
@@ -42,6 +47,11 @@ namespace DynamicGI.Editor
                 : "Disabled");
             EditorGUILayout.LabelField("Propagation dispatches", stats.PropagationDispatchesThisFrame.ToString());
             EditorGUILayout.LabelField("Propagated probe writes", stats.PropagatedProbesThisFrame.ToString());
+            EditorGUILayout.LabelField("Temporal", stats.TemporalAccumulationEnabled ? "Enabled" : "Disabled / unavailable");
+            EditorGUILayout.LabelField("Pending temporal tiles", stats.PendingTemporalTiles.ToString());
+            EditorGUILayout.LabelField("Temporal tiles / resets", $"{stats.TemporalTilesThisFrame} / {stats.TemporalResetTilesThisFrame}");
+            EditorGUILayout.LabelField("Temporal probe writes", stats.TemporalProbesThisFrame.ToString());
+            EditorGUILayout.LabelField("Temporal dispatches", stats.TemporalDispatchesThisFrame.ToString());
             EditorGUILayout.LabelField("Compute dispatches", stats.ComputeDispatchesThisFrame.ToString());
             EditorGUILayout.LabelField("Estimated GPU memory", EditorUtility.FormatBytes(stats.EstimatedGpuBytes));
             EditorGUILayout.LabelField("Scheduling CPU time", $"{stats.UpdateCpuMilliseconds:0.###} ms");

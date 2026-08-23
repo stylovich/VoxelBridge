@@ -338,10 +338,11 @@ injected energy; applying the result to scene materials remains Phase 10 work.
 ## Phase 8 bounded diffuse propagation
 
 `WorldRadianceClipmap` can now run 1–4 neighbor-propagation iterations after direct
-Sun/sky/emissive injection. Each propagated cascade owns four six-direction texture
-sets: immutable direct injection, two ping-pong scratch sets, and the resolved field
-sampled by shaders. Intermediate passes never overwrite resolved probes, preventing a
-later tile halo from destroying an earlier tile's converged result.
+Sun/sky/emissive injection. Each propagated cascade owns separate six-direction sets
+for immutable direct injection, a propagated candidate, two ping-pong scratch sets,
+and the temporally resolved field sampled by shaders. Intermediate passes never
+overwrite resolved probes, preventing a later tile halo from destroying an earlier
+tile's converged result.
 
 For every output probe, `RadiancePropagate.compute` visits the six axis neighbors and
 runs a short Geometry Field DDA between probe centers. Occupied probes remain zero and
@@ -397,6 +398,53 @@ The current neutral transport has no surface albedo because Phase 1 stores occup
 only. Once albedo is added to the Geometry Field, it can modulate the neighbor term
 without changing the ping-pong or invalidation architecture.
 
+## Phase 9 temporal updates
+
+Every cascade now has a configurable update interval, tile budget, temporal alpha,
+and finite convergence length. The default laboratory schedule is C0 every frame at
+`alpha 0.20`, C1 every two frames at `alpha 0.30`, and C2 every four frames at
+`alpha 0.40`. These values intentionally give distant cascades a larger alpha because
+their dispatch cadence is lower.
+
+Direct injection and propagation first write a stable candidate that is independent
+from the published resolved field. `RadianceTemporal.compute` then performs:
+
+```text
+resolved = lerp(previousResolved, candidate, temporalAlpha)
+```
+
+per updated tile. A bounded per-cascade queue repeats that inexpensive temporal pass
+without recomputing Sun DDA, emissive DDA, or propagation. The last configured step
+copies the candidate exactly, so the field reaches the new value instead of retaining
+a permanent exponential residual. Candidate work and smoothing work share the cascade
+tile budget; when both exist, work is split approximately in half (a one-tile budget
+alternates between the two queues so neither can starve).
+
+History validity follows world-space ownership. Newly exposed toroidal slabs, large
+teleports, full rebuilds, and geometry reconstruction replace history immediately.
+Sun/sky and emissive changes retain history and transition smoothly. An invalid
+candidate (normally a probe newly occupied by geometry) also clears immediately to
+prioritize preventing light leakage over temporal softness.
+
+The clipmap inspector and Scene-view annotation report pending temporal tiles,
+temporal dispatches/probe writes, forced history resets, and per-cascade cadence,
+alpha, and convergence steps. `ProcessAllCandidateUpdatesNow()` exposes the first
+temporal step for deterministic diagnostics, while `ProcessAllTemporalNow()` finishes
+only queued lerps; `ProcessAllDirtyNow()` completes both candidate and temporal work.
+
+Run **Tools > Dynamic GI > Phase 9 > Configure TestGI Temporal Updates**, then use
+**Validate TestGI Temporal Updates**, or run headlessly:
+
+```powershell
+unity run . -- -force-d3d12 -executeMethod DynamicGI.Editor.RadiancePhase9SceneSetup.ConfigureTestGI -logFile -
+unity run . -- -force-d3d12 -executeMethod DynamicGI.Editor.RadiancePhase9SceneSetup.ValidateTestGI -logFile -
+```
+
+The GPU validation disables the neon after reaching a stable baseline, checks the
+first `alpha 0.25` result against the exact lerp equation, drains the queue to the
+candidate, verifies the 1/2/4-frame cascade cadence, and scrolls C0 by one snapped tile
+to confirm that every newly exposed tile resets recycled history.
+
 ## Data layout
 
 - Bricks are sparse CPU metadata mapped to fixed GPU slots.
@@ -441,18 +489,15 @@ For Shader Graph, use a File-mode Custom Function node pointing to
   outside it, where sky accessibility uses its open-sky fallback.
 - The Phase-4 fixed local compatibility field remains direct-only. Phase-8 propagation
   is implemented on the scalable `WorldRadianceClipmap` path.
-- Phase 5 reuses injected probes spatially but does not yet temporally blend new values;
-  temporal accumulation is Phase 9 work.
-- During a Sun revision, tiles can temporarily contain different accepted Sun states
-  until their configured budgets converge. Phase 9 temporal accumulation will smooth
-  this transition.
+- During a Sun revision, tiles still accept new candidates according to their configured
+  budgets, but Phase 9 smooths each accepted tile instead of replacing its radiance at once.
 - Phase 7 emissive sources are isotropic AABB approximations. Textured/angular emission,
   spot cones, source-area integration, and GPU spatial binning are future refinements.
 - Emissive injection is capped by `Maximum Emissive Contributors` (64 by default); the
   manager warns and ignores overflow instead of allocating during a frame.
 - Phase-8 propagation uses six axis neighbors and neutral reflectance. It does not yet
-  use surface normals/albedo, diagonal transport, adaptive convergence, or temporal
-  accumulation. Small update tiles can produce many compute dispatches; their exact
+  use surface normals/albedo, diagonal transport, or adaptive convergence. Small update
+  tiles can produce many compute dispatches; their exact
   counts are exposed for profiling and future batching work.
 
 ## Mod/runtime registration contract

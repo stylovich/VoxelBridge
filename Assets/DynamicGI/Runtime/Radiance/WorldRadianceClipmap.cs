@@ -24,6 +24,7 @@ namespace DynamicGI.Radiance
         public const int MaximumCascadeCount = 4;
         private const string DefaultComputePath = "Assets/DynamicGI/Shaders/RadianceInject.compute";
         private const string DefaultPropagationComputePath = "Assets/DynamicGI/Shaders/RadiancePropagate.compute";
+        private const string DefaultTemporalComputePath = "Assets/DynamicGI/Shaders/RadianceTemporal.compute";
         private static readonly ProfilerMarker UpdateMarker = new("DynamicGI.RadianceClipmap.Update");
 
         private static readonly int PositiveXId = Shader.PropertyToID("_DynamicGI_RadiancePositiveX");
@@ -45,6 +46,7 @@ namespace DynamicGI.Radiance
         private static readonly int[] PropagationDirectTextureIds = CreateDirectionalPropertyIds("_PropagationDirect");
         private static readonly int[] PropagationInputTextureIds = CreateDirectionalPropertyIds("_PropagationInput");
         private static readonly int[] DebugDirectTextureIds = CreateDirectionalPropertyIds("_RadianceDebugDirect");
+        private static readonly int[] TemporalCandidateTextureIds = CreateDirectionalPropertyIds("_TemporalCandidate");
 
         private static readonly int[][] CascadeTextureIds =
         {
@@ -68,9 +70,9 @@ namespace DynamicGI.Radiance
         [Header("Cascades (maximum 4)")]
         [SerializeField] private RadianceCascadeSettings[] cascadeSettings =
         {
-            new("Cascade 0", 16, 8, 0.5f, 2, 1, 16),
-            new("Cascade 1", 16, 8, 1f, 2, 2, 8),
-            new("Cascade 2", 16, 8, 2f, 2, 4, 4)
+            new("Cascade 0", 16, 8, 0.5f, 2, 1, 16, 0.2f, 16),
+            new("Cascade 1", 16, 8, 1f, 2, 2, 8, 0.3f, 12),
+            new("Cascade 2", 16, 8, 2f, 2, 4, 4, 0.4f, 8)
         };
         [SerializeField, Range(0.4f, 0.9f)] private float cascadeBlendStart = 0.7f;
 
@@ -100,9 +102,13 @@ namespace DynamicGI.Radiance
         [SerializeField, Min(0.1f)] private float maximumPropagatedRadiance = 8f;
         [SerializeField, Range(0, 3)] private int maximumPropagationCascadeIndex = 1;
 
+        [Header("Temporal accumulation")]
+        [SerializeField] private bool enableTemporalAccumulation = true;
+
         [Header("Compute")]
         [SerializeField] private ComputeShader radianceShader;
         [SerializeField] private ComputeShader propagationShader;
+        [SerializeField] private ComputeShader temporalShader;
 
         private readonly List<RadianceCascade> cascades = new(MaximumCascadeCount);
         private readonly List<RecentRegion> recentRegions = new();
@@ -121,6 +127,7 @@ namespace DynamicGI.Radiance
         private int debugQueryKernel = -1;
         private int debugKernel = -1;
         private int propagationKernel = -1;
+        private int temporalKernel = -1;
         private bool initialized;
         private bool configurationDirty;
         private bool queryPending;
@@ -147,6 +154,10 @@ namespace DynamicGI.Radiance
         private bool emissiveOverflowWarningIssued;
         private int propagationDispatchesThisFrame;
         private int propagatedProbesThisFrame;
+        private int temporalDispatchesThisFrame;
+        private int temporalTilesThisFrame;
+        private int temporalProbesThisFrame;
+        private int temporalResetTilesThisFrame;
         private double updateCpuMilliseconds;
         private int lastDebugProbeCount;
         private int lastDebugProbeStride;
@@ -171,6 +182,7 @@ namespace DynamicGI.Radiance
         public int PropagationIterations => propagationIterations;
         public float PropagationStrength => propagationStrength;
         public int MaximumPropagationCascadeIndex => maximumPropagationCascadeIndex;
+        public bool TemporalAccumulationEnabled => enableTemporalAccumulation && temporalShader != null && temporalKernel >= 0;
         public int LastDebugProbeCount => lastDebugProbeCount;
         public int LastDebugProbeStride => lastDebugProbeStride;
 
@@ -180,12 +192,14 @@ namespace DynamicGI.Radiance
             {
                 int probes = 0;
                 int dirty = 0;
+                int temporal = 0;
                 long memory = RadianceProbeGpuData.Stride + sizeof(float) * 3L +
                               (long)maximumEmissiveContributors * EmissiveContributorGpuData.Stride;
                 for (int i = 0; i < cascades.Count; i++)
                 {
                     probes += cascades[i].ProbeCount;
                     dirty += cascades[i].DirtyTileCount;
+                    temporal += cascades[i].TemporalTileCount;
                     memory += cascades[i].EstimateGpuBytes();
                 }
                 return new RadianceClipmapStats(
@@ -207,6 +221,12 @@ namespace DynamicGI.Radiance
                     propagationIterations,
                     propagationDispatchesThisFrame,
                     propagatedProbesThisFrame,
+                    TemporalAccumulationEnabled,
+                    temporal,
+                    temporalDispatchesThisFrame,
+                    temporalTilesThisFrame,
+                    temporalProbesThisFrame,
+                    temporalResetTilesThisFrame,
                     memory,
                     updateCpuMilliseconds);
             }
@@ -299,6 +319,12 @@ namespace DynamicGI.Radiance
                 originMovesThisFrame++;
                 exposedProbesThisFrame += cascade.LastExposedProbes;
                 recycledProbesThisFrame += cascade.LastRecycledProbes;
+                if (cascade.LastExposedProbes == cascade.ProbeCount && cascade.LastRecycledProbes == 0)
+                {
+                    // A teleport reuses no logical probes. Clear the old physical ring so
+                    // unprocessed tiles cannot briefly display radiance from another place.
+                    ClearCascade(cascade);
+                }
             }
 
             DetectLightingChanges();
@@ -332,7 +358,7 @@ namespace DynamicGI.Radiance
             if (!EnsureInitialized())
                 return;
             recentRegions.Clear();
-            InvalidateAllCascades();
+            InvalidateAllCascades(true);
         }
 
         /// <summary>
@@ -364,16 +390,60 @@ namespace DynamicGI.Radiance
                 return;
             }
             for (int i = 0; i < cascades.Count; i++)
-                while (cascades[i].DirtyTileCount > 0) ProcessCascade(cascades[i], cascades[i].DirtyTileCount);
+            {
+                RadianceCascade cascade = cascades[i];
+                while (cascade.PendingWorkTileCount > 0)
+                    ProcessCascade(cascade, cascade.PendingWorkTileCount);
+            }
+            PublishShaderGlobals();
+        }
+
+        /// <summary>
+        /// Generates every pending direct/propagated candidate and applies exactly one
+        /// temporal resolve. Remaining smoothing work stays queued. This is primarily a
+        /// deterministic debug and validation hook; ordinary runtime work uses Update.
+        /// </summary>
+        public void ProcessAllCandidateUpdatesNow()
+        {
+            if (!CanProcessRadianceNow())
+                return;
+            UploadEmissiveContributorsIfNeeded();
+            for (int i = 0; i < cascades.Count; i++)
+            {
+                RadianceCascade cascade = cascades[i];
+                while (cascade.DirtyTileCount > 0)
+                    ProcessCandidateTiles(cascade, cascade.DirtyTileCount);
+            }
+            PublishShaderGlobals();
+        }
+
+        /// <summary>Completes queued temporal lerps without rebuilding source candidates.</summary>
+        public void ProcessAllTemporalNow()
+        {
+            if (!CanProcessRadianceNow())
+                return;
+            for (int i = 0; i < cascades.Count; i++)
+            {
+                RadianceCascade cascade = cascades[i];
+                while (cascade.TemporalTileCount > 0)
+                    ProcessTemporalTiles(cascade, cascade.TemporalTileCount);
+            }
             PublishShaderGlobals();
         }
 
         public void InvalidateRegion(Bounds worldBounds)
         {
+            InvalidateRegion(worldBounds, false);
+        }
+
+        private void InvalidateRegion(Bounds worldBounds, bool resetTemporal)
+        {
             if (!EnsureInitialized())
                 return;
             for (int i = 0; i < cascades.Count; i++)
-                cascades[i].InvalidateWorldBounds(ExpandForPropagation(worldBounds, cascades[i]));
+                cascades[i].InvalidateWorldBounds(
+                    ExpandForPropagation(worldBounds, cascades[i]),
+                    resetTemporal);
         }
 
         /// <summary>
@@ -389,6 +459,18 @@ namespace DynamicGI.Radiance
             propagationStrength = value;
             if (initialized)
                 InvalidateAllCascades();
+        }
+
+        /// <summary>
+        /// Runtime scalability/debug hook. Changing alpha or convergence length keeps
+        /// existing radiance and affects the next invalidation for this cascade.
+        /// </summary>
+        public bool SetTemporalParameters(int cascadeIndex, float alpha, int convergenceSteps)
+        {
+            if (!EnsureInitialized() || !TryGetCascade(cascadeIndex, out RadianceCascade cascade))
+                return false;
+            cascade.SetTemporalParameters(alpha, convergenceSteps);
+            return true;
         }
 
         public bool TryGetCascade(int index, out RadianceCascade cascade)
@@ -607,6 +689,21 @@ namespace DynamicGI.Radiance
             return initialized;
         }
 
+        private bool CanProcessRadianceNow()
+        {
+            if (!EnsureInitialized())
+                return false;
+            if (geometryField != null && geometryField.IsInitialized && geometryField.DirtyBrickCount == 0 &&
+                (skyVisibilityField == null ||
+                 (skyVisibilityField.IsInitialized && skyVisibilityField.DirtyTileCount == 0)))
+            {
+                return true;
+            }
+
+            UnityEngine.Debug.LogWarning("Radiance Clipmap is waiting for Geometry/Sky Visibility updates.", this);
+            return false;
+        }
+
         private void Initialize()
         {
             configurationDirty = false;
@@ -623,6 +720,9 @@ namespace DynamicGI.Radiance
                 debugKernel = radianceShader.FindKernel("BuildRadianceClipmapDebug");
                 propagationKernel = enableDiffusePropagation && propagationShader != null
                     ? propagationShader.FindKernel("PropagateRadiance")
+                    : -1;
+                temporalKernel = enableTemporalAccumulation && temporalShader != null
+                    ? temporalShader.FindKernel("AccumulateRadianceTemporal")
                     : -1;
                 textureFormat = ChooseTextureFormat();
                 Vector3 target = ResolveTrackingPosition();
@@ -670,12 +770,41 @@ namespace DynamicGI.Radiance
 
         private void ProcessCascade(RadianceCascade cascade, int budget)
         {
+            budget = Mathf.Max(0, budget);
+            if (budget == 0)
+                return;
+
+            int candidateBudget = budget;
+            if (TemporalAccumulationEnabled && cascade.DirtyTileCount > 0 && cascade.TemporalTileCount > 0)
+            {
+                if (budget == 1)
+                {
+                    bool candidateTurn =
+                        ((Time.frameCount / cascade.UpdateIntervalFrames + cascade.Index) & 1) == 0;
+                    candidateBudget = candidateTurn ? 1 : 0;
+                }
+                else
+                {
+                    candidateBudget = (budget + 1) / 2;
+                }
+            }
+            int candidates = ProcessCandidateTiles(cascade, candidateBudget);
+            int remainingBudget = budget - candidates;
+            if (TemporalAccumulationEnabled && remainingBudget > 0)
+                ProcessTemporalTiles(cascade, remainingBudget);
+        }
+
+        private int ProcessCandidateTiles(RadianceCascade cascade, int budget)
+        {
             processedTiles.Clear();
             int processed = 0;
-            while (processed < budget && cascade.TryDequeueDirty(out Vector3Int globalTile, out Vector3Int localTile))
+            while (processed < budget && cascade.TryDequeueDirty(
+                       out Vector3Int globalTile,
+                       out Vector3Int localTile,
+                       out bool resetTemporal))
             {
                 DispatchInjectionTile(cascade, localTile);
-                processedTiles.Add(new ProcessedTile(globalTile, localTile));
+                processedTiles.Add(new ProcessedTile(globalTile, localTile, resetTemporal));
                 processed++;
             }
 
@@ -685,12 +814,45 @@ namespace DynamicGI.Radiance
                 ProcessedTile tile = processedTiles[i];
                 if (propagate)
                     DispatchPropagationTile(cascade, tile.LocalTile);
+                if (TemporalAccumulationEnabled)
+                {
+                    DispatchTemporalTile(cascade, tile.LocalTile, tile.ResetTemporal, tile.ResetTemporal);
+                    if (tile.ResetTemporal || cascade.TemporalAlpha >= 0.999f ||
+                        cascade.TemporalConvergenceSteps <= 1)
+                    {
+                        cascade.CancelTemporalConvergence(tile.GlobalTile);
+                    }
+                    else
+                    {
+                        cascade.ScheduleTemporalConvergence(
+                            tile.GlobalTile,
+                            cascade.TemporalConvergenceSteps - 1);
+                    }
+                }
                 Bounds updatedBounds = cascade.GetGlobalTileBounds(tile.GlobalTile);
                 if (propagate)
                     updatedBounds = ExpandForPropagation(updatedBounds, cascade);
                 recentRegions.Add(new RecentRegion(cascade.Index, updatedBounds, Time.frameCount + 180));
                 if (recentRegions.Count > 512) recentRegions.RemoveAt(0);
             }
+            return processed;
+        }
+
+        private int ProcessTemporalTiles(RadianceCascade cascade, int budget)
+        {
+            int processed = 0;
+            while (processed < budget && cascade.TryDequeueTemporal(
+                       out Vector3Int globalTile,
+                       out Vector3Int localTile,
+                       out int remainingSteps))
+            {
+                bool finalStep = remainingSteps <= 1;
+                DispatchTemporalTile(cascade, localTile, finalStep, false);
+                if (remainingSteps > 1)
+                    cascade.ScheduleTemporalConvergence(globalTile, remainingSteps - 1);
+                processed++;
+            }
+            return processed;
         }
 
         private void DispatchInjectionTile(RadianceCascade cascade, Vector3Int localTile)
@@ -700,9 +862,10 @@ namespace DynamicGI.Radiance
             if (skyVisibilityField == null || !skyVisibilityField.BindSamplingResources(radianceShader, injectKernel))
                 radianceShader.SetInt("_DynamicGI_SkyVisibilityAvailable", 0);
 
-            IReadOnlyList<RenderTexture> injectionTarget = ShouldPropagate(cascade)
-                ? cascade.DirectTextures
-                : cascade.Textures;
+            IReadOnlyList<RenderTexture> injectionTarget =
+                ShouldPropagate(cascade) || TemporalAccumulationEnabled
+                    ? cascade.DirectTextures
+                    : cascade.Textures;
             BindWriteTextures(radianceShader, injectKernel, injectionTarget);
             BindCascadeLayout(cascade);
             Vector3 toSun = GetSunDirection();
@@ -757,7 +920,9 @@ namespace DynamicGI.Radiance
             {
                 bool finalIteration = iteration == propagationIterations - 1;
                 IReadOnlyList<RenderTexture> output = finalIteration
-                    ? cascade.Textures
+                    ? TemporalAccumulationEnabled
+                        ? cascade.CandidateTextures
+                        : cascade.Textures
                     : (iteration & 1) == 0
                         ? cascade.PropagationScratchTexturesA
                         : cascade.PropagationScratchTexturesB;
@@ -780,12 +945,51 @@ namespace DynamicGI.Radiance
             }
         }
 
+        private void DispatchTemporalTile(
+            RadianceCascade cascade,
+            Vector3Int localTile,
+            bool forceReplace,
+            bool countAsHistoryReset)
+        {
+            if (!TemporalAccumulationEnabled)
+                return;
+
+            IReadOnlyList<RenderTexture> candidate = ShouldPropagate(cascade)
+                ? cascade.CandidateTextures
+                : cascade.DirectTextures;
+            BindCascadeLayout(temporalShader, cascade);
+            BindWriteTextures(temporalShader, temporalKernel, cascade.Textures);
+            for (int i = 0; i < 6; i++)
+                temporalShader.SetTexture(temporalKernel, TemporalCandidateTextureIds[i], candidate[i]);
+
+            Vector3Int offset = localTile * cascade.TileResolution;
+            int tileResolution = cascade.TileResolution;
+            temporalShader.SetInts("_TemporalUpdateOffset", offset.x, offset.y, offset.z);
+            temporalShader.SetInts("_TemporalUpdateSize", tileResolution, tileResolution, tileResolution);
+            temporalShader.SetFloat("_TemporalAlpha", cascade.TemporalAlpha);
+            temporalShader.SetInt("_TemporalForceReplace", forceReplace ? 1 : 0);
+            temporalShader.Dispatch(
+                temporalKernel,
+                Mathf.CeilToInt(tileResolution / 4f),
+                Mathf.CeilToInt(tileResolution / 4f),
+                Mathf.CeilToInt(tileResolution / 4f));
+
+            int probes = tileResolution * tileResolution * tileResolution;
+            temporalDispatchesThisFrame++;
+            temporalTilesThisFrame++;
+            temporalProbesThisFrame += probes;
+            if (countAsHistoryReset)
+                temporalResetTilesThisFrame++;
+            computeDispatchesThisFrame++;
+        }
+
         private void ClearCascade(RadianceCascade cascade)
         {
             ClearTextureSet(cascade, cascade.Textures);
+            ClearTextureSet(cascade, cascade.DirectTextures);
             if (!cascade.HasPropagationTextures)
                 return;
-            ClearTextureSet(cascade, cascade.DirectTextures);
+            ClearTextureSet(cascade, cascade.CandidateTextures);
             ClearTextureSet(cascade, cascade.PropagationScratchTexturesA);
             ClearTextureSet(cascade, cascade.PropagationScratchTexturesB);
         }
@@ -843,7 +1047,9 @@ namespace DynamicGI.Radiance
 
         private void BindDebugDirectTextures(RadianceCascade cascade, int kernel)
         {
-            IReadOnlyList<RenderTexture> textures = cascade.DirectTextures;
+            IReadOnlyList<RenderTexture> textures = ShouldPropagate(cascade)
+                ? cascade.DirectTextures
+                : cascade.Textures;
             for (int i = 0; i < 6; i++)
                 radianceShader.SetTexture(kernel, DebugDirectTextureIds[i], textures[i]);
         }
@@ -965,9 +1171,9 @@ namespace DynamicGI.Radiance
             return Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(direction.y / Mathf.Max(0.0001f, fadeHeight)));
         }
 
-        private void InvalidateAllCascades()
+        private void InvalidateAllCascades(bool resetTemporal = false)
         {
-            for (int i = 0; i < cascades.Count; i++) cascades[i].InvalidateAll();
+            for (int i = 0; i < cascades.Count; i++) cascades[i].InvalidateAll(resetTemporal);
         }
 
         private void OnEmissiveContributorChanged(
@@ -1097,8 +1303,8 @@ namespace DynamicGI.Radiance
             subscribedSkyField = null;
         }
 
-        private void OnGeometryReset(Bounds _) { for (int i = 0; i < cascades.Count; i++) cascades[i].InvalidateAll(); }
-        private void OnGeometryRegionRebuilt(Bounds bounds) => InvalidateRegion(CalculateSunInfluence(bounds));
+        private void OnGeometryReset(Bounds _) { for (int i = 0; i < cascades.Count; i++) cascades[i].InvalidateAll(true); }
+        private void OnGeometryRegionRebuilt(Bounds bounds) => InvalidateRegion(CalculateSunInfluence(bounds), true);
         private void OnSkyReset(Bounds _) { for (int i = 0; i < cascades.Count; i++) cascades[i].InvalidateAll(); }
         private void OnSkyRegionUpdated(Bounds bounds) => InvalidateRegion(bounds);
 
@@ -1148,6 +1354,10 @@ namespace DynamicGI.Radiance
             computeDispatchesThisFrame = 0;
             propagationDispatchesThisFrame = 0;
             propagatedProbesThisFrame = 0;
+            temporalDispatchesThisFrame = 0;
+            temporalTilesThisFrame = 0;
+            temporalProbesThisFrame = 0;
+            temporalResetTilesThisFrame = 0;
             lightingRefreshesThisFrame = 0;
             emissiveChangesThisFrame = pendingEmissiveChanges;
             pendingEmissiveChanges = 0;
@@ -1179,6 +1389,7 @@ namespace DynamicGI.Radiance
             maximumEmissiveRange = 0f;
             emissiveUploadDirty = true;
             propagationKernel = -1;
+            temporalKernel = -1;
             debugQueryKernel = -1;
             lastDebugProbeCount = 0;
             lastDebugProbeStride = 0;
@@ -1220,6 +1431,8 @@ namespace DynamicGI.Radiance
                 radianceShader = UnityEditor.AssetDatabase.LoadAssetAtPath<ComputeShader>(DefaultComputePath);
             if (propagationShader == null)
                 propagationShader = UnityEditor.AssetDatabase.LoadAssetAtPath<ComputeShader>(DefaultPropagationComputePath);
+            if (temporalShader == null)
+                temporalShader = UnityEditor.AssetDatabase.LoadAssetAtPath<ComputeShader>(DefaultTemporalComputePath);
 #endif
         }
 
@@ -1227,11 +1440,13 @@ namespace DynamicGI.Radiance
         {
             public readonly Vector3Int GlobalTile;
             public readonly Vector3Int LocalTile;
+            public readonly bool ResetTemporal;
 
-            public ProcessedTile(Vector3Int globalTile, Vector3Int localTile)
+            public ProcessedTile(Vector3Int globalTile, Vector3Int localTile, bool resetTemporal)
             {
                 GlobalTile = globalTile;
                 LocalTile = localTile;
+                ResetTemporal = resetTemporal;
             }
         }
 

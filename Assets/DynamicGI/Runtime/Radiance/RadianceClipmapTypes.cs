@@ -34,6 +34,12 @@ namespace DynamicGI.Radiance
         public readonly int PropagationIterations;
         public readonly int PropagationDispatchesThisFrame;
         public readonly int PropagatedProbesThisFrame;
+        public readonly bool TemporalAccumulationEnabled;
+        public readonly int PendingTemporalTiles;
+        public readonly int TemporalDispatchesThisFrame;
+        public readonly int TemporalTilesThisFrame;
+        public readonly int TemporalProbesThisFrame;
+        public readonly int TemporalResetTilesThisFrame;
         public readonly long EstimatedGpuBytes;
         public readonly double UpdateCpuMilliseconds;
 
@@ -56,6 +62,12 @@ namespace DynamicGI.Radiance
             int propagationIterations,
             int propagationDispatchesThisFrame,
             int propagatedProbesThisFrame,
+            bool temporalAccumulationEnabled,
+            int pendingTemporalTiles,
+            int temporalDispatchesThisFrame,
+            int temporalTilesThisFrame,
+            int temporalProbesThisFrame,
+            int temporalResetTilesThisFrame,
             long estimatedGpuBytes,
             double updateCpuMilliseconds)
         {
@@ -77,6 +89,12 @@ namespace DynamicGI.Radiance
             PropagationIterations = propagationIterations;
             PropagationDispatchesThisFrame = propagationDispatchesThisFrame;
             PropagatedProbesThisFrame = propagatedProbesThisFrame;
+            TemporalAccumulationEnabled = temporalAccumulationEnabled;
+            PendingTemporalTiles = pendingTemporalTiles;
+            TemporalDispatchesThisFrame = temporalDispatchesThisFrame;
+            TemporalTilesThisFrame = temporalTilesThisFrame;
+            TemporalProbesThisFrame = temporalProbesThisFrame;
+            TemporalResetTilesThisFrame = temporalResetTilesThisFrame;
             EstimatedGpuBytes = estimatedGpuBytes;
             UpdateCpuMilliseconds = updateCpuMilliseconds;
         }

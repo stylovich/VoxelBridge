@@ -517,7 +517,8 @@ namespace DynamicGI.Debugging
                 UnityEditor.Handles.Label(
                     stats.Bounds.min,
                     $"C{i} {stats.Name} | {stats.Resolution.x}x{stats.Resolution.y}x{stats.Resolution.z} @ {stats.Spacing:0.##}m\n" +
-                    $"ring {stats.RingOffset} | dirty {stats.DirtyTiles}/{stats.TotalTiles}\n" +
+                    $"ring {stats.RingOffset} | dirty {stats.DirtyTiles}/{stats.TotalTiles} | temporal {stats.PendingTemporalTiles}\n" +
+                    $"cadence {stats.UpdateIntervalFrames}f | alpha {stats.TemporalAlpha:0.00} x{stats.TemporalConvergenceSteps}\n" +
                     $"exposed {stats.ExposedProbes} | recycled {stats.RecycledProbes} | {FormatBytes(stats.EstimatedGpuBytes)}",
                     detailStyle);
             }
@@ -530,6 +531,8 @@ namespace DynamicGI.Debugging
                 $"emissives {total.ActiveEmissiveContributors} | rev {total.EmissiveRevision} | changes {total.EmissiveChangesThisFrame}\n" +
                 $"propagation {(total.PropagationEnabled ? $"{total.PropagationIterations}x @ {radianceClipmap.PropagationStrength:0.00}" : "off")} | " +
                 $"dispatch {total.PropagationDispatchesThisFrame} | writes {total.PropagatedProbesThisFrame}\n" +
+                $"temporal {(total.TemporalAccumulationEnabled ? "on" : "off")} | pending {total.PendingTemporalTiles} | " +
+                $"tiles/reset {total.TemporalTilesThisFrame}/{total.TemporalResetTilesThisFrame} | writes {total.TemporalProbesThisFrame}\n" +
                 $"debug {SourceLabel(displayedSource)} {DirectionLabel(displayedDirection)} | " +
                 $"exposure {(automaticExposure ? $"auto {EffectiveExposure:0.#}x P{automaticExposurePercentile * 100f:0}" : $"{exposure:0.#}x")}\n" +
                 $"slices Q/G/C {querySliceSampleCount}/{groundSliceSampleCount}/{ceilingSliceSampleCount}\n" +
