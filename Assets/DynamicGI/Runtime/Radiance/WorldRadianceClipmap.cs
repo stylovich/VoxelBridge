@@ -95,10 +95,12 @@ namespace DynamicGI.Radiance
 
         [Header("Diffuse propagation")]
         [SerializeField] private bool enableDiffusePropagation = true;
-        [SerializeField, Range(1, 4)] private int propagationIterations = 3;
+        [SerializeField, Range(1, 12)] private int propagationIterations = 3;
         [SerializeField, Range(0f, 0.95f)] private float propagationStrength = 0.55f;
         [SerializeField, Range(0f, 1f)] private float propagationDirectionalRetention = 0.35f;
         [SerializeField, Range(0f, 1f)] private float propagationDistanceAttenuation = 0.9f;
+        [Tooltip("Neutral occupancy-only reflection used until Geometry Field albedo is available.")]
+        [SerializeField, Range(0f, 0.95f)] private float propagationSurfaceReflectivity = 0.35f;
         [SerializeField, Min(0.1f)] private float maximumPropagatedRadiance = 8f;
         [SerializeField, Range(0, 3)] private int maximumPropagationCascadeIndex = 1;
 
@@ -280,10 +282,11 @@ namespace DynamicGI.Radiance
             minimumSkyRadianceChange = Mathf.Max(0f, minimumSkyRadianceChange);
             sunHorizonFadeDegrees = Mathf.Clamp(sunHorizonFadeDegrees, 0.1f, 15f);
             maximumEmissiveContributors = Mathf.Clamp(maximumEmissiveContributors, 1, 256);
-            propagationIterations = Mathf.Clamp(propagationIterations, 1, 4);
+            propagationIterations = Mathf.Clamp(propagationIterations, 1, 12);
             propagationStrength = Mathf.Clamp(propagationStrength, 0f, 0.95f);
             propagationDirectionalRetention = Mathf.Clamp01(propagationDirectionalRetention);
             propagationDistanceAttenuation = Mathf.Clamp01(propagationDistanceAttenuation);
+            propagationSurfaceReflectivity = Mathf.Clamp(propagationSurfaceReflectivity, 0f, 0.95f);
             maximumPropagatedRadiance = Mathf.Max(0.1f, maximumPropagatedRadiance);
             maximumPropagationCascadeIndex = Mathf.Clamp(maximumPropagationCascadeIndex, 0, 3);
             if (cascadeSettings == null)
@@ -906,6 +909,7 @@ namespace DynamicGI.Radiance
             propagationShader.SetFloat("_PropagationStrength", propagationStrength);
             propagationShader.SetFloat("_PropagationDirectionalRetention", propagationDirectionalRetention);
             propagationShader.SetFloat("_PropagationDistanceAttenuation", propagationDistanceAttenuation);
+            propagationShader.SetFloat("_PropagationSurfaceReflectivity", propagationSurfaceReflectivity);
             propagationShader.SetFloat("_PropagationMaximumRadiance", maximumPropagatedRadiance);
             float bias = Mathf.Max(rayOriginBias, geometryField.VoxelSize * 0.1f);
             propagationShader.SetFloat("_RadianceRayOriginBias", bias);

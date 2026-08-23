@@ -16,6 +16,9 @@ namespace DynamicGI.Editor
             EditorGUILayout.HelpBox(
                 "Occlusion Strength is exposed as ambient/sky accessibility. It is not multiplied over APV or the complete Dynamic GI result.",
                 MessageType.Info);
+            EditorGUILayout.HelpBox(
+                "Surface Normal Bias keeps trilinear samples on the visible side of thin shells. HDRP View Bias additionally handles visible T-junctions in the stock-material bridge; keep both near the C0 probe spacing and validate them against your smallest rooms.",
+                MessageType.Info);
             if (controls.ScreenSpaceBridgeEnabled &&
                 controls.ProviderMode == IndirectLightingProviderMode.DynamicOnly)
             {

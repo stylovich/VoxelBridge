@@ -346,16 +346,22 @@ tile's converged result.
 
 For every output probe, `RadiancePropagate.compute` visits the six axis neighbors and
 runs a short Geometry Field DDA between probe centers. Occupied probes remain zero and
-a crossed wall rejects that transport edge. Visible neighbor energy is split between
-an isotropic diffuse term and configurable directional retention, then evaluated with
-the bounded recurrence:
+a crossed wall rejects that transport edge. Directional neighbor energy is normalized
+per lobe instead of being divided by all six neighbors, while the isotropic component
+retains the six-neighbor average. A blocked edge also identifies an adjacent surface:
+until Geometry Field albedo/normals exist, the incident opposite lobe is reflected with
+a configurable neutral `propagationSurfaceReflectivity`. This occupancy-only surface
+term is what lets Sun received near a floor become upward diffuse transport without
+allowing the transport edge through the floor.
+
+The combined neighbor and surface terms use the bounded recurrence:
 
 ```text
 resolved(next) = direct + propagationStrength * attenuatedNeighbors(previous)
 ```
 
 Strength is clamped below one and output radiance has a configurable ceiling. Each pass
-uses a shrinking halo around the dirty tile, so three iterations can move energy three
+uses a shrinking halo around the dirty tile, so N iterations can move energy roughly N
 probe spacings without rebuilding the complete cascade. Geometry, sky, and emissive
 invalidation bounds expand by the same propagation radius. `SetPropagationStrength()`
 provides a runtime quality hook and invalidates existing resolved data safely.
@@ -384,8 +390,11 @@ while the slice labels and detailed query identify both source and directional l
 Selecting a cascade outside the configured propagation range correctly produces a zero
 delta because it has no separate direct/resolved texture sets.
 
-The GPU validation compares propagation with the source enabled and disabled. It checks
-the three successive probe values, a colored third-step ceiling bounce, zero emissive
+TestGI uses ten C0 passes because its 0.5 m probe spacing must cover the approximately
+5 m floor-to-ceiling path. This is a laboratory quality setting; the runtime default
+remains three passes and larger worlds should choose the pass count from the intended
+transport radius and budget. The GPU validation compares propagation with the source
+enabled and disabled. It checks successive probe values, a useful colored ceiling bounce, zero emissive
 delta behind the wall, the dedicated delta query and numeric-slice kernel against
 `Resolved - Direct`, and nonzero propagation profiling counters:
 
@@ -484,8 +493,17 @@ _DynamicGI_Strength
 _DynamicGI_OcclusionStrength
 _DynamicGI_IndirectSaturation
 _DynamicGI_IndirectIntensity
+_DynamicGI_SurfaceNormalBias
 _DynamicGI_IndirectProviderMode
 ```
+
+Material-facing controlled samples move the world position along the visible normal
+before trilinear lookup. This prevents a floor, wall, or ceiling pixel from blending
+valid probes on the opposite side of a thin shell. The HDRP stock-material bridge has
+an additional camera-facing `HDRP View Bias` for T-junction pixels where a single
+surface normal cannot describe the intersecting wall. In TestGI the values are 0.625 m
+and 0.4 m respectively, derived from C0's 0.5 m spacing and 0.25 m geometry voxels;
+they remain configurable for projects with a different scale.
 
 HDRP stock Lit materials cannot call a custom include without being modified, so the
 portable module also provides `DynamicGIHDRPCompositePass`. It reconstructs absolute
@@ -509,6 +527,11 @@ The GPU validation samples the resolved clipmap through the same HLSL include us
 materials, verifies all four provider modes, confirms the exact
 `existing + controlledDynamic` equation, checks ambient accessibility bounds, and
 inspects the serialized HDRP pass/shader wiring.
+
+Two additional Phase-10 diagnostics reproduce the original low-energy/leak regression:
+the surface diagnostic compares exact, inward-biased, exterior, and ceiling/wall-edge
+samples under east Sun, while the bridge-scale diagnostic renders the camera twice and
+measures the linear Custom Pass delta at `strength=1`, `intensity=1`.
 
 ## Data layout
 

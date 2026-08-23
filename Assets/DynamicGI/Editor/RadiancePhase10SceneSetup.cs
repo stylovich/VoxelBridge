@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using DynamicGI.Contributors;
 using DynamicGI.Geometry;
 using DynamicGI.Occlusion;
 using DynamicGI.Radiance;
@@ -51,6 +52,8 @@ namespace DynamicGI.Editor
                 0.5f,
                 1f,
                 1f,
+                0.625f,
+                0.4f,
                 true,
                 0f);
 
@@ -131,6 +134,7 @@ namespace DynamicGI.Editor
             samplingShader.SetFloat("_DynamicGI_OcclusionStrength", controls.OcclusionStrength);
             samplingShader.SetFloat("_DynamicGI_IndirectSaturation", controls.IndirectSaturation);
             samplingShader.SetFloat("_DynamicGI_IndirectIntensity", controls.IndirectIntensity);
+            samplingShader.SetFloat("_DynamicGI_SurfaceNormalBias", controls.SurfaceNormalBias);
             samplingShader.SetInt("_DynamicGI_ScreenSpaceBridgeEnabled", 1);
 
             ProviderGpuResult combined = DispatchProvider(
@@ -163,6 +167,291 @@ namespace DynamicGI.Editor
                 $"existingRGB={Format(ExistingIndirect)} | combinedRGB={Format(combined.FinalIndirect)} | " +
                 $"accessibility={accessibility:0.000} | modes=4/4 | APV/existing preserved additively | " +
                 $"bridge={volume.injectionPoint}/CameraColor | shader={((DynamicGIHDRPCompositePass)volume.customPasses[0]).CompositeShader.name}");
+        }
+
+        [MenuItem("Tools/Dynamic GI/Phase 10/Diagnose TestGI Surface Sampling")]
+        public static void DiagnoseTestGISurfaceSampling()
+        {
+            Scene scene = EditorSceneManager.OpenScene(ScenePath, OpenSceneMode.Single);
+            WorldGeometryField geometry = FindSingle<WorldGeometryField>(scene);
+            WorldSkyVisibilityField sky = FindSingle<WorldSkyVisibilityField>(scene);
+            WorldRadianceClipmap clipmap = FindSingle<WorldRadianceClipmap>(scene);
+            GIEmissiveContributor contributor = FindSingle<GIEmissiveContributor>(scene);
+            Light sun = FindDirectionalSun(scene);
+            Camera camera = FindSingle<Camera>(scene);
+
+            bool originalSunEnabled = sun.enabled;
+            Quaternion originalSunRotation = sun.transform.rotation;
+            Color originalSunColor = sun.color;
+            float originalSunIntensity = sun.intensity;
+            bool originalEmission = contributor.Contributes;
+            SerializedObject serializedClipmap = new(clipmap);
+            SerializedProperty propagationIterations = serializedClipmap.FindProperty("propagationIterations");
+            int originalPropagationIterations = propagationIterations.intValue;
+
+            try
+            {
+                contributor.SetContributionEnabled(false);
+                propagationIterations.intValue = 10;
+                serializedClipmap.ApplyModifiedPropertiesWithoutUndo();
+                sun.enabled = true;
+                sun.color = new Color(1f, 0.9f, 0.75f);
+                sun.intensity = 130000f;
+                sun.transform.rotation = Quaternion.LookRotation(new Vector3(-1f, -0.15f, 0f).normalized, Vector3.up);
+
+                geometry.RebuildAll();
+                geometry.ProcessAllDirtyNow();
+                sky.RebuildAll();
+                sky.ProcessAllDirtyNow();
+                clipmap.ForceLightingRefresh();
+                clipmap.ProcessAllDirtyNow();
+
+                Vector3[] positions =
+                {
+                    new(0f, 4.875f, 0f), // exact underside of the ceiling mesh
+                    new(0f, 4.25f, 0f),  // first stable interior ceiling probe row
+                    new(0f, 5.25f, 0f),  // outside, above the ceiling
+                    new(0f, 0.125f, 0f), // exact top of the floor mesh
+                    new(0f, 0.75f, 0f),  // first stable interior floor probe row
+                    new(0f, -0.25f, 0f), // outside, below the floor
+                    new(0f, 4.875f, 3.875f), // ceiling/north-wall junction
+                    new(0f, 4.25f, 3.25f),   // matching interior junction sample
+                };
+                Vector3[] normals =
+                {
+                    Vector3.down,
+                    Vector3.down,
+                    Vector3.down,
+                    Vector3.up,
+                    Vector3.up,
+                    Vector3.up,
+                    Vector3.down,
+                    Vector3.down,
+                };
+                Vector4[] samples = QueryRawDynamicGI(clipmap, positions, normals, "QueryDynamicGI", 0f);
+                Vector4[] surfaceSamples = QueryRawDynamicGI(clipmap, positions, normals, "QuerySurfaceDynamicGI", 0.625f);
+                Vector3[] bridgePositions = (Vector3[])positions.Clone();
+                for (int i = 0; i < bridgePositions.Length; i++)
+                {
+                    Vector3 toCamera = camera.transform.position - bridgePositions[i];
+                    bridgePositions[i] += toCamera.sqrMagnitude > 0f ? toCamera.normalized * 0.4f : Vector3.zero;
+                }
+                Vector4[] bridgeSamples = QueryRawDynamicGI(
+                    clipmap,
+                    bridgePositions,
+                    normals,
+                    "QuerySurfaceDynamicGI",
+                    0.625f);
+                float rawCeiling = Luminance(samples[0]);
+                float biasedCeiling = Luminance(surfaceSamples[0]);
+                float rawEdge = Luminance(samples[6]);
+                float bridgeEdge = Luminance(bridgeSamples[6]);
+                float bridgeCeiling = Luminance(bridgeSamples[0]);
+                if (biasedCeiling > rawCeiling * 0.35f)
+                {
+                    throw new InvalidOperationException(
+                        $"Surface-normal bias still mixes exterior ceiling probes: raw={rawCeiling:0.000000}, biased={biasedCeiling:0.000000}.");
+                }
+                if (bridgeEdge > rawEdge * 0.2f)
+                {
+                    throw new InvalidOperationException(
+                        $"HDRP view bias still leaks at the ceiling/wall junction: raw={rawEdge:0.000000}, bridge={bridgeEdge:0.000000}.");
+                }
+                if (bridgeCeiling < 0.02f)
+                {
+                    throw new InvalidOperationException(
+                        $"Ten-pass solar propagation did not produce a useful ceiling rebound: L={bridgeCeiling:0.000000}.");
+                }
+                Debug.Log(
+                    "DYNAMIC_GI_PHASE10_SURFACE_DIAGNOSTIC | " +
+                    $"ceilingSurface={Format(samples[0])} L={Luminance(samples[0]):0.000000} | " +
+                    $"ceilingInterior={Format(samples[1])} L={Luminance(samples[1]):0.000000} | " +
+                    $"ceilingExterior={Format(samples[2])} L={Luminance(samples[2]):0.000000} | " +
+                    $"floorSurface={Format(samples[3])} L={Luminance(samples[3]):0.000000} | " +
+                    $"floorInterior={Format(samples[4])} L={Luminance(samples[4]):0.000000} | " +
+                    $"floorExterior={Format(samples[5])} L={Luminance(samples[5]):0.000000} | " +
+                    $"ceilingEdge={Format(samples[6])} L={Luminance(samples[6]):0.000000} | " +
+                    $"edgeInterior={Format(samples[7])} L={Luminance(samples[7]):0.000000} | " +
+                    $"biasedCeiling={Format(surfaceSamples[0])} L={Luminance(surfaceSamples[0]):0.000000} | " +
+                    $"biasedFloor={Format(surfaceSamples[3])} L={Luminance(surfaceSamples[3]):0.000000} | " +
+                    $"biasedEdge={Format(surfaceSamples[6])} L={Luminance(surfaceSamples[6]):0.000000} | " +
+                    $"bridgeCeiling={Format(bridgeSamples[0])} L={Luminance(bridgeSamples[0]):0.000000} | " +
+                    $"bridgeFloor={Format(bridgeSamples[3])} L={Luminance(bridgeSamples[3]):0.000000} | " +
+                    $"bridgeEdge={Format(bridgeSamples[6])} L={Luminance(bridgeSamples[6]):0.000000}");
+            }
+            finally
+            {
+                contributor.SetContributionEnabled(originalEmission);
+                serializedClipmap.Update();
+                propagationIterations.intValue = originalPropagationIterations;
+                serializedClipmap.ApplyModifiedPropertiesWithoutUndo();
+                sun.enabled = originalSunEnabled;
+                sun.transform.rotation = originalSunRotation;
+                sun.color = originalSunColor;
+                sun.intensity = originalSunIntensity;
+                if (clipmap.IsInitialized)
+                {
+                    clipmap.ForceLightingRefresh();
+                    clipmap.ProcessAllDirtyNow();
+                }
+            }
+        }
+
+        [MenuItem("Tools/Dynamic GI/Phase 10/Diagnose TestGI HDRP Bridge Scale")]
+        public static void DiagnoseTestGIBridgeScale()
+        {
+            Scene scene = EditorSceneManager.OpenScene(ScenePath, OpenSceneMode.Single);
+            WorldGeometryField geometry = FindSingle<WorldGeometryField>(scene);
+            WorldSkyVisibilityField sky = FindSingle<WorldSkyVisibilityField>(scene);
+            WorldRadianceClipmap clipmap = FindSingle<WorldRadianceClipmap>(scene);
+            DynamicGIShaderGlobals controls = FindSingle<DynamicGIShaderGlobals>(scene);
+            Camera camera = FindSingle<Camera>(scene);
+
+            IndirectLightingProviderMode originalMode = controls.ProviderMode;
+            float originalStrength = controls.DynamicGIStrength;
+            float originalOcclusion = controls.OcclusionStrength;
+            float originalSaturation = controls.IndirectSaturation;
+            float originalIntensity = controls.IndirectIntensity;
+            float originalNormalBias = controls.SurfaceNormalBias;
+            float originalViewBias = controls.HdrpViewBias;
+            bool originalBridge = controls.ScreenSpaceBridgeEnabled;
+            float originalAlbedoWeight = controls.HdrpAlbedoWeight;
+
+            try
+            {
+                geometry.RebuildAll();
+                geometry.ProcessAllDirtyNow();
+                sky.RebuildAll();
+                sky.ProcessAllDirtyNow();
+                clipmap.RebuildAll();
+                clipmap.ProcessAllDirtyNow();
+
+                controls.Configure(
+                    IndirectLightingProviderMode.DynamicOnly,
+                    1f,
+                    0f,
+                    1f,
+                    1f,
+                    0.625f,
+                    0.4f,
+                    false,
+                    0f);
+                Color[] withoutBridge = CaptureLinearCamera(camera);
+
+                controls.Configure(
+                    IndirectLightingProviderMode.DynamicOnly,
+                    1f,
+                    0f,
+                    1f,
+                    1f,
+                    0.625f,
+                    0.4f,
+                    true,
+                    0f);
+                Color[] withBridge = CaptureLinearCamera(camera);
+
+                float maximum = 0f;
+                double sum = 0.0;
+                int positivePixels = 0;
+                for (int i = 0; i < withBridge.Length; i++)
+                {
+                    Vector3 delta = new(
+                        Mathf.Max(0f, withBridge[i].r - withoutBridge[i].r),
+                        Mathf.Max(0f, withBridge[i].g - withoutBridge[i].g),
+                        Mathf.Max(0f, withBridge[i].b - withoutBridge[i].b));
+                    float luminance = Luminance(delta);
+                    maximum = Mathf.Max(maximum, luminance);
+                    sum += luminance;
+                    if (luminance > 0.0001f)
+                        positivePixels++;
+                }
+
+                Debug.Log(
+                    $"DYNAMIC_GI_PHASE10_BRIDGE_DIAGNOSTIC | strength=1 intensity=1 | " +
+                    $"maxDeltaL={maximum:0.000000} | meanDeltaL={(sum / withBridge.Length):0.000000} | " +
+                    $"positivePixels={positivePixels}/{withBridge.Length}");
+                if (maximum < 0.02f || positivePixels < 1000)
+                {
+                    throw new InvalidOperationException(
+                        $"Default HDRP bridge output is still too weak: max={maximum:0.000000}, positive={positivePixels}/{withBridge.Length}.");
+                }
+            }
+            finally
+            {
+                controls.Configure(
+                    originalMode,
+                    originalStrength,
+                    originalOcclusion,
+                    originalSaturation,
+                    originalIntensity,
+                    originalNormalBias,
+                    originalViewBias,
+                    originalBridge,
+                    originalAlbedoWeight);
+            }
+        }
+
+        private static Color[] CaptureLinearCamera(Camera camera)
+        {
+            RenderTexture previousTarget = camera.targetTexture;
+            RenderTexture previousActive = RenderTexture.active;
+            RenderTexture target = RenderTexture.GetTemporary(
+                640,
+                360,
+                24,
+                RenderTextureFormat.ARGBHalf,
+                RenderTextureReadWrite.Linear);
+            Texture2D readback = new(640, 360, TextureFormat.RGBAFloat, false, true);
+            try
+            {
+                camera.targetTexture = target;
+                camera.Render();
+                camera.Render();
+                RenderTexture.active = target;
+                readback.ReadPixels(new Rect(0f, 0f, 640f, 360f), 0, 0, false);
+                readback.Apply(false, false);
+                return readback.GetPixels();
+            }
+            finally
+            {
+                camera.targetTexture = previousTarget;
+                RenderTexture.active = previousActive;
+                RenderTexture.ReleaseTemporary(target);
+                UnityEngine.Object.DestroyImmediate(readback);
+            }
+        }
+
+        private static Vector4[] QueryRawDynamicGI(
+            WorldRadianceClipmap clipmap,
+            Vector3[] positions,
+            Vector3[] normals,
+            string kernelName,
+            float surfaceNormalBias)
+        {
+            ComputeShader shader = AssetDatabase.LoadAssetAtPath<ComputeShader>(SamplingShaderPath);
+            if (shader == null)
+                throw new InvalidOperationException($"Missing sampling diagnostic shader at {SamplingShaderPath}.");
+            int kernel = shader.FindKernel(kernelName);
+            if (!clipmap.BindSamplingResources(shader, kernel))
+                throw new InvalidOperationException("Could not bind the radiance clipmap to the surface diagnostic.");
+
+            using GraphicsBuffer positionBuffer = new(GraphicsBuffer.Target.Structured, positions.Length, sizeof(float) * 3);
+            using GraphicsBuffer normalBuffer = new(GraphicsBuffer.Target.Structured, normals.Length, sizeof(float) * 3);
+            using GraphicsBuffer resultBuffer = new(GraphicsBuffer.Target.Structured, positions.Length, sizeof(float) * 4);
+            positionBuffer.SetData(positions);
+            normalBuffer.SetData(normals);
+            shader.SetBuffer(kernel, "_DynamicGISamplePositions", positionBuffer);
+            shader.SetBuffer(kernel, "_DynamicGISampleNormals", normalBuffer);
+            shader.SetBuffer(kernel, "_DynamicGISampleResults", resultBuffer);
+            shader.SetInt("_DynamicGISampleCount", positions.Length);
+            shader.SetFloat("_DynamicGI_SurfaceNormalBias", surfaceNormalBias);
+            shader.Dispatch(kernel, Mathf.CeilToInt(positions.Length / 64f), 1, 1);
+
+            AsyncGPUReadbackRequest request = AsyncGPUReadback.Request(resultBuffer);
+            AsyncGPUReadback.WaitAllRequests();
+            if (request.hasError)
+                throw new InvalidOperationException("GPU readback failed for the surface sampling diagnostic.");
+            return request.GetData<Vector4>().ToArray();
         }
 
         private static ProviderGpuResult DispatchProvider(
@@ -243,6 +532,14 @@ namespace DynamicGI.Editor
             for (int i = 0; i < transforms.Length; i++)
                 if (transforms[i].name == name) return transforms[i];
             throw new InvalidOperationException($"Could not find TestGI marker '{name}'.");
+        }
+
+        private static Light FindDirectionalSun(Scene scene)
+        {
+            Light[] lights = FindComponents<Light>(scene);
+            for (int i = 0; i < lights.Length; i++)
+                if (lights[i].type == LightType.Directional) return lights[i];
+            throw new InvalidOperationException("TestGI has no directional Sun.");
         }
 
         private static void DestroyGeneratedRoot(Scene scene, string name)

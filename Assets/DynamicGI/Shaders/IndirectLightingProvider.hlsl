@@ -13,6 +13,7 @@ float _DynamicGI_Strength;
 float _DynamicGI_OcclusionStrength;
 float _DynamicGI_IndirectSaturation;
 float _DynamicGI_IndirectIntensity;
+float _DynamicGI_SurfaceNormalBias;
 int _DynamicGI_IndirectProviderMode;
 int _DynamicGI_ScreenSpaceBridgeEnabled;
 
@@ -26,7 +27,10 @@ float3 ApplyDynamicGIControls(float3 value)
 
 float3 SampleControlledDynamicGI(float3 positionWS, float3 normalWS)
 {
-    return ApplyDynamicGIControls(SampleDynamicGI(positionWS, normalWS));
+    return ApplyDynamicGIControls(SampleDynamicGIAtSurface(
+        positionWS,
+        normalWS,
+        _DynamicGI_SurfaceNormalBias));
 }
 
 // Accessibility is deliberately separate from radiance composition. Multiplying all

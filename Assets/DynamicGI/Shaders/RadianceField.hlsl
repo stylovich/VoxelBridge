@@ -217,9 +217,28 @@ float3 SampleDynamicGI(float3 positionWS, float3 normalWS)
         : DynamicGISampleLocalRadiance(positionWS, normalWS);
 }
 
+// Surface materials must not interpolate probes from both sides of a thin shell.
+// The caller controls the world-space bias because the appropriate distance depends
+// on the near-cascade spacing and the source project's geometry scale.
+float3 SampleDynamicGIAtSurface(float3 positionWS, float3 normalWS, float normalBias)
+{
+    float3 normal = normalize(normalWS);
+    return SampleDynamicGI(positionWS + normal * max(0.0, normalBias), normal);
+}
+
 void SampleDynamicGI_float(float3 PositionWS, float3 NormalWS, out float3 DynamicGI)
 {
     DynamicGI = SampleDynamicGI(PositionWS, NormalWS);
+}
+
+
+void SampleDynamicGIAtSurface_float(
+    float3 PositionWS,
+    float3 NormalWS,
+    float NormalBias,
+    out float3 DynamicGI)
+{
+    DynamicGI = SampleDynamicGIAtSurface(PositionWS, NormalWS, NormalBias);
 }
 
 #endif

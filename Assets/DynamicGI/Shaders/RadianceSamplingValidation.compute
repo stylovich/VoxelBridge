@@ -1,4 +1,5 @@
 #pragma kernel QueryDynamicGI
+#pragma kernel QuerySurfaceDynamicGI
 #pragma kernel QueryIndirectLightingProvider
 #pragma target 5.0
 
@@ -26,6 +27,19 @@ void QueryDynamicGI(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (index >= (uint)_DynamicGISampleCount)
         return;
     float3 value = SampleDynamicGI(_DynamicGISamplePositions[index], _DynamicGISampleNormals[index]);
+    _DynamicGISampleResults[index] = float4(value, 1.0);
+}
+
+[numthreads(64, 1, 1)]
+void QuerySurfaceDynamicGI(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint index = dispatchThreadId.x;
+    if (index >= (uint)_DynamicGISampleCount)
+        return;
+    float3 value = SampleDynamicGIAtSurface(
+        _DynamicGISamplePositions[index],
+        _DynamicGISampleNormals[index],
+        _DynamicGI_SurfaceNormalBias);
     _DynamicGISampleResults[index] = float4(value, 1.0);
 }
 

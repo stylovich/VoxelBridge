@@ -34,6 +34,7 @@ int3 _PropagationUpdateSize;
 float _PropagationStrength;
 float _PropagationDirectionalRetention;
 float _PropagationDistanceAttenuation;
+float _PropagationSurfaceReflectivity;
 float _PropagationMaximumRadiance;
 float _RadianceRayOriginBias;
 int _RadianceMaxDdaSteps;
@@ -97,10 +98,51 @@ float3 AverageRadiance(RadianceProbeData value)
             value.NegativeY.rgb + value.PositiveZ.rgb + value.NegativeZ.rgb) / 6.0;
 }
 
+void AccumulateWeightedLobe(inout float4 sum, float3 radiance, float weight)
+{
+    if (weight <= 0.0)
+        return;
+    sum.rgb += radiance * weight;
+    sum.a += weight;
+}
+
+void AccumulateDirectionalTransport(
+    RadianceProbeData neighbor,
+    float3 directionToNeighbor,
+    float validity,
+    inout RadianceProbeData directionalSum)
+{
+    AccumulateWeightedLobe(directionalSum.PositiveX, neighbor.PositiveX.rgb, max(0.0, directionToNeighbor.x) * validity);
+    AccumulateWeightedLobe(directionalSum.NegativeX, neighbor.NegativeX.rgb, max(0.0, -directionToNeighbor.x) * validity);
+    AccumulateWeightedLobe(directionalSum.PositiveY, neighbor.PositiveY.rgb, max(0.0, directionToNeighbor.y) * validity);
+    AccumulateWeightedLobe(directionalSum.NegativeY, neighbor.NegativeY.rgb, max(0.0, -directionToNeighbor.y) * validity);
+    AccumulateWeightedLobe(directionalSum.PositiveZ, neighbor.PositiveZ.rgb, max(0.0, directionToNeighbor.z) * validity);
+    AccumulateWeightedLobe(directionalSum.NegativeZ, neighbor.NegativeZ.rgb, max(0.0, -directionToNeighbor.z) * validity);
+}
+
+// A blocked edge identifies a nearby surface even though Phase 1 stores no normals.
+// The direction opposite the blocked neighbor is the surface-facing normal. Reflect
+// that incident lobe back into the lobe that faces the surface. This is the minimal
+// occupancy-only approximation that lets sun received by a floor reach a ceiling.
+void AccumulateSurfaceReflection(
+    RadianceProbeData current,
+    float3 directionToSurface,
+    inout RadianceProbeData surfaceSum)
+{
+    AccumulateWeightedLobe(surfaceSum.PositiveX, current.NegativeX.rgb, max(0.0, directionToSurface.x));
+    AccumulateWeightedLobe(surfaceSum.NegativeX, current.PositiveX.rgb, max(0.0, -directionToSurface.x));
+    AccumulateWeightedLobe(surfaceSum.PositiveY, current.NegativeY.rgb, max(0.0, directionToSurface.y));
+    AccumulateWeightedLobe(surfaceSum.NegativeY, current.PositiveY.rgb, max(0.0, -directionToSurface.y));
+    AccumulateWeightedLobe(surfaceSum.PositiveZ, current.NegativeZ.rgb, max(0.0, directionToSurface.z));
+    AccumulateWeightedLobe(surfaceSum.NegativeZ, current.PositiveZ.rgb, max(0.0, -directionToSurface.z));
+}
+
 void AccumulateVisibleNeighbor(
     int3 neighborCoordinate,
     float3 positionWS,
+    RadianceProbeData current,
     inout RadianceProbeData directionalSum,
+    inout RadianceProbeData surfaceSum,
     inout float3 isotropicSum,
     inout float visibleWeight)
 {
@@ -121,6 +163,7 @@ void AccumulateVisibleNeighbor(
             traceDistance,
             _RadianceMaxDdaSteps))
     {
+        AccumulateSurfaceReflection(current, direction, surfaceSum);
         return;
     }
 
@@ -130,22 +173,26 @@ void AccumulateVisibleNeighbor(
     if (validity <= 0.0)
         return;
 
-    directionalSum.PositiveX.rgb += neighbor.PositiveX.rgb * validity;
-    directionalSum.NegativeX.rgb += neighbor.NegativeX.rgb * validity;
-    directionalSum.PositiveY.rgb += neighbor.PositiveY.rgb * validity;
-    directionalSum.NegativeY.rgb += neighbor.NegativeY.rgb * validity;
-    directionalSum.PositiveZ.rgb += neighbor.PositiveZ.rgb * validity;
-    directionalSum.NegativeZ.rgb += neighbor.NegativeZ.rgb * validity;
+    AccumulateDirectionalTransport(neighbor, direction, validity, directionalSum);
     isotropicSum += AverageRadiance(neighbor) * validity;
     visibleWeight += validity;
 }
 
-float4 ResolveLobe(float4 direct, float3 directional, float3 isotropic, float visibleWeight)
+float4 ResolveLobe(
+    float4 direct,
+    float4 directional,
+    float3 isotropicSum,
+    float visibleWeight,
+    float4 surface)
 {
-    if (visibleWeight <= 0.0)
+    if (visibleWeight <= 0.0 && surface.a <= 0.0)
         return direct;
-    float3 transported = lerp(isotropic, directional, _PropagationDirectionalRetention) / visibleWeight;
-    float3 bounced = transported * (_PropagationStrength * _PropagationDistanceAttenuation);
+    float3 isotropic = visibleWeight > 0.0 ? isotropicSum / visibleWeight : 0.0;
+    float3 directionalAverage = directional.a > 0.0 ? directional.rgb / directional.a : isotropic;
+    float3 transported = lerp(isotropic, directionalAverage, _PropagationDirectionalRetention);
+    float3 reflected = surface.a > 0.0 ? surface.rgb / surface.a : 0.0;
+    float3 bounced = transported * (_PropagationStrength * _PropagationDistanceAttenuation) +
+                     reflected * (_PropagationStrength * _PropagationSurfaceReflectivity);
     return float4(min(direct.rgb + bounced, _PropagationMaximumRadiance.xxx), direct.a);
 }
 
@@ -174,20 +221,22 @@ void PropagateRadiance(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     RadianceProbeData direct = ReadDirect(coordinate);
+    RadianceProbeData current = ReadInput(coordinate);
     RadianceProbeData directionalSum = (RadianceProbeData)0;
+    RadianceProbeData surfaceSum = (RadianceProbeData)0;
     float3 isotropicSum = 0.0;
     float visibleWeight = 0.0;
-    AccumulateVisibleNeighbor(coordinate + int3(1, 0, 0), positionWS, directionalSum, isotropicSum, visibleWeight);
-    AccumulateVisibleNeighbor(coordinate + int3(-1, 0, 0), positionWS, directionalSum, isotropicSum, visibleWeight);
-    AccumulateVisibleNeighbor(coordinate + int3(0, 1, 0), positionWS, directionalSum, isotropicSum, visibleWeight);
-    AccumulateVisibleNeighbor(coordinate + int3(0, -1, 0), positionWS, directionalSum, isotropicSum, visibleWeight);
-    AccumulateVisibleNeighbor(coordinate + int3(0, 0, 1), positionWS, directionalSum, isotropicSum, visibleWeight);
-    AccumulateVisibleNeighbor(coordinate + int3(0, 0, -1), positionWS, directionalSum, isotropicSum, visibleWeight);
+    AccumulateVisibleNeighbor(coordinate + int3(1, 0, 0), positionWS, current, directionalSum, surfaceSum, isotropicSum, visibleWeight);
+    AccumulateVisibleNeighbor(coordinate + int3(-1, 0, 0), positionWS, current, directionalSum, surfaceSum, isotropicSum, visibleWeight);
+    AccumulateVisibleNeighbor(coordinate + int3(0, 1, 0), positionWS, current, directionalSum, surfaceSum, isotropicSum, visibleWeight);
+    AccumulateVisibleNeighbor(coordinate + int3(0, -1, 0), positionWS, current, directionalSum, surfaceSum, isotropicSum, visibleWeight);
+    AccumulateVisibleNeighbor(coordinate + int3(0, 0, 1), positionWS, current, directionalSum, surfaceSum, isotropicSum, visibleWeight);
+    AccumulateVisibleNeighbor(coordinate + int3(0, 0, -1), positionWS, current, directionalSum, surfaceSum, isotropicSum, visibleWeight);
 
-    _DynamicGI_RadiancePositiveX[physicalCoordinate] = ResolveLobe(direct.PositiveX, directionalSum.PositiveX.rgb, isotropicSum, visibleWeight);
-    _DynamicGI_RadianceNegativeX[physicalCoordinate] = ResolveLobe(direct.NegativeX, directionalSum.NegativeX.rgb, isotropicSum, visibleWeight);
-    _DynamicGI_RadiancePositiveY[physicalCoordinate] = ResolveLobe(direct.PositiveY, directionalSum.PositiveY.rgb, isotropicSum, visibleWeight);
-    _DynamicGI_RadianceNegativeY[physicalCoordinate] = ResolveLobe(direct.NegativeY, directionalSum.NegativeY.rgb, isotropicSum, visibleWeight);
-    _DynamicGI_RadiancePositiveZ[physicalCoordinate] = ResolveLobe(direct.PositiveZ, directionalSum.PositiveZ.rgb, isotropicSum, visibleWeight);
-    _DynamicGI_RadianceNegativeZ[physicalCoordinate] = ResolveLobe(direct.NegativeZ, directionalSum.NegativeZ.rgb, isotropicSum, visibleWeight);
+    _DynamicGI_RadiancePositiveX[physicalCoordinate] = ResolveLobe(direct.PositiveX, directionalSum.PositiveX, isotropicSum, visibleWeight, surfaceSum.PositiveX);
+    _DynamicGI_RadianceNegativeX[physicalCoordinate] = ResolveLobe(direct.NegativeX, directionalSum.NegativeX, isotropicSum, visibleWeight, surfaceSum.NegativeX);
+    _DynamicGI_RadiancePositiveY[physicalCoordinate] = ResolveLobe(direct.PositiveY, directionalSum.PositiveY, isotropicSum, visibleWeight, surfaceSum.PositiveY);
+    _DynamicGI_RadianceNegativeY[physicalCoordinate] = ResolveLobe(direct.NegativeY, directionalSum.NegativeY, isotropicSum, visibleWeight, surfaceSum.NegativeY);
+    _DynamicGI_RadiancePositiveZ[physicalCoordinate] = ResolveLobe(direct.PositiveZ, directionalSum.PositiveZ, isotropicSum, visibleWeight, surfaceSum.PositiveZ);
+    _DynamicGI_RadianceNegativeZ[physicalCoordinate] = ResolveLobe(direct.NegativeZ, directionalSum.NegativeZ, isotropicSum, visibleWeight, surfaceSum.NegativeZ);
 }

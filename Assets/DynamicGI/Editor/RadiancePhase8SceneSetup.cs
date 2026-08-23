@@ -53,10 +53,13 @@ namespace DynamicGI.Editor
             WorldRadianceClipmap clipmap = FindSingle<WorldRadianceClipmap>(scene);
             SerializedObject serializedClipmap = new(clipmap);
             Set(serializedClipmap, "enableDiffusePropagation", true);
-            Set(serializedClipmap, "propagationIterations", 3);
+            // C0 spacing is 0.5 m and the room is 5 m tall. Ten passes let a floor
+            // reflection reach the underside of the ceiling in this laboratory.
+            Set(serializedClipmap, "propagationIterations", 10);
             Set(serializedClipmap, "propagationStrength", 0.8f);
             Set(serializedClipmap, "propagationDirectionalRetention", 0.65f);
             Set(serializedClipmap, "propagationDistanceAttenuation", 0.95f);
+            Set(serializedClipmap, "propagationSurfaceReflectivity", 0.35f);
             Set(serializedClipmap, "maximumPropagatedRadiance", 8f);
             Set(serializedClipmap, "maximumPropagationCascadeIndex", 1);
             Set(serializedClipmap, "propagationShader", AssetDatabase.LoadAssetAtPath<ComputeShader>(
@@ -85,7 +88,7 @@ namespace DynamicGI.Editor
                 throw new InvalidOperationException($"Could not save {ScenePath}.");
 
             Debug.Log(
-                "DYNAMIC_GI_PHASE8_TESTGI_CONFIGURED | propagation=3x strength0.8 retention0.65 | " +
+                "DYNAMIC_GI_PHASE8_TESTGI_CONFIGURED | propagation=10x strength0.8 retention0.65 surfaceReflectivity0.35 | " +
                 "C0+C1 | emissiveDirectRange=0.1m | queryY=3.25 | ceilingY=4.25 | " +
                 "debug=PropagationDelta/-Y autoExposure");
         }
@@ -159,10 +162,10 @@ namespace DynamicGI.Editor
 
                 if (directReference.Probe.AverageLuminance <= 0.05f)
                     throw new InvalidOperationException("Phase 8 direct emissive reference has no source energy.");
-                if (ceilingBounce <= 0.0003f)
+                if (ceilingBounce <= 0.02f)
                 {
                     throw new InvalidOperationException(
-                        $"Three propagation passes did not reach the ceiling: direct={FormatRgb(ceilingDirectOnly)}, " +
+                        $"Configured propagation did not produce a useful ceiling rebound: direct={FormatRgb(ceilingDirectOnly)}, " +
                         $"steps={FormatRgb(propagationStep0)} -> {FormatRgb(propagationStep1)} -> " +
                         $"{FormatRgb(propagationStep2)} -> {FormatRgb(ceilingPropagated)}.");
                 }
@@ -178,7 +181,7 @@ namespace DynamicGI.Editor
                 {
                     throw new InvalidOperationException($"Ceiling bounce did not retain emissive color: {ceilingEmissiveBounce}.");
                 }
-                if (blockedIncrease > Mathf.Max(0.0002f, ceilingBounce * 0.35f))
+                if (blockedIncrease > Mathf.Max(0.0005f, ceilingBounce * 0.05f))
                 {
                     throw new InvalidOperationException(
                         $"Propagation leaked through the voxel wall: blockedDelta={blockedIncrease:0.0000}, " +
@@ -187,7 +190,7 @@ namespace DynamicGI.Editor
 
                 RadianceClipmapStats stats = clipmap.Stats;
                 if (!stats.PropagationEnabled || stats.PropagationDispatchesThisFrame <= 0 ||
-                    stats.PropagatedProbesThisFrame <= 0)
+                    stats.PropagatedProbesThisFrame <= 0 || stats.PropagationIterations < 10)
                 {
                     throw new InvalidOperationException("Propagation statistics did not record GPU work.");
                 }
