@@ -13,4 +13,5 @@ See `Assets/DynamicGI/README.md` for setup, architecture, validation, and limita
 The Test3-specific editor commands remain useful as examples, but the runtime Geometry
 Field, tiled Sky Visibility field, six-direction local Radiance Field, contributors,
 camera-centred Radiance Clipmap, bounded diffuse propagation, compute shaders, shader
-sampling APIs, and debug renderers do not depend on the Polygon assets or APV bake data.
+sampling/provider APIs, the optional HDRP stock-material bridge, and debug renderers do
+not depend on the Polygon assets or APV bake data.

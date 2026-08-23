@@ -445,6 +445,71 @@ first `alpha 0.25` result against the exact lerp equation, drains the queue to t
 candidate, verifies the 1/2/4-frame cascade cadence, and scrolls C0 by one snapped tile
 to confirm that every newly exposed tile resets recycled history.
 
+## Phase 10 material sampling and HDRP integration
+
+`Shaders/IndirectLightingProvider.hlsl` is the material-facing abstraction. Its core
+entry point is:
+
+```hlsl
+float3 SampleIndirectLightingProvider(
+    float3 positionWS,
+    float3 normalWS,
+    float3 existingIndirect);
+```
+
+Provider modes are `ExistingPlusDynamic`, `DynamicOnly`, `ExistingOnly`, and
+`Disabled`. Existing indirect is an input rather than an APV call hidden inside the
+include, so a future project can remove APV without changing the Dynamic GI field. The
+raw `SampleDynamicGI(positionWS, normalWS)` API remains available in
+`RadianceField.hlsl`. The provider applies the global strength, saturation, and
+intensity controls before combining values.
+
+Sky visibility is exposed independently through
+`SampleDynamicGIAmbientAccessibility(positionWS)`. `OcclusionStrength` blends that
+value from neutral (`1`) toward the sky field. It never multiplies the complete APV or
+Dynamic GI result; a material should use it only on a separable sky/ambient lobe.
+
+For Shader Graph, add a File-mode Custom Function node pointing to
+`Assets/DynamicGI/Shaders/IndirectLightingProvider.hlsl` and use one of:
+
+- `SampleControlledDynamicGI` with `PositionWS`, `NormalWS` and `DynamicGI` Vector3;
+- `SampleIndirectLightingProvider` with `PositionWS`, `NormalWS`, `ExistingIndirect`
+  and `FinalIndirect` Vector3;
+- `SampleDynamicGIAmbientAccessibility` with `PositionWS` and scalar `Accessibility`.
+
+`DynamicGIShaderGlobals` publishes these global controls:
+
+```text
+_DynamicGI_Strength
+_DynamicGI_OcclusionStrength
+_DynamicGI_IndirectSaturation
+_DynamicGI_IndirectIntensity
+_DynamicGI_IndirectProviderMode
+```
+
+HDRP stock Lit materials cannot call a custom include without being modified, so the
+portable module also provides `DynamicGIHDRPCompositePass`. It reconstructs absolute
+world position and normal from HDRP depth/normal buffers and adds only Dynamic GI to
+opaque camera color at `BeforeTransparent`. This gives immediate APV coexistence in
+the laboratory without replacing materials. It is intentionally a compatibility
+bridge: it does not affect transparents, cannot remove APV in `DynamicOnly`, and does
+not know the exact material diffuse BRDF. Use the material provider for final-quality
+integration. Optional GBuffer albedo weighting is disabled by default so forward
+opaque materials remain valid.
+
+Run **Tools > Dynamic GI > Phase 10 > Configure TestGI Material Sampling**, then use
+**Validate TestGI Material Sampling**, or run headlessly:
+
+```powershell
+unity run . -- -force-d3d12 -executeMethod DynamicGI.Editor.RadiancePhase10SceneSetup.ConfigureTestGI -logFile -
+unity run . -- -force-d3d12 -executeMethod DynamicGI.Editor.RadiancePhase10SceneSetup.ValidateTestGI -logFile -
+```
+
+The GPU validation samples the resolved clipmap through the same HLSL include used by
+materials, verifies all four provider modes, confirms the exact
+`existing + controlledDynamic` equation, checks ambient accessibility bounds, and
+inspects the serialized HDRP pass/shader wiring.
+
 ## Data layout
 
 - Bricks are sparse CPU metadata mapped to fixed GPU slots.
@@ -499,6 +564,10 @@ For Shader Graph, use a File-mode Custom Function node pointing to
   use surface normals/albedo, diagonal transport, or adaptive convergence. Small update
   tiles can produce many compute dispatches; their exact
   counts are exposed for profiling and future batching work.
+- The Phase-10 HDRP compatibility bridge is an opaque screen-space additive pass. It
+  does not affect transparent/forward-only albedo correctly and cannot subtract APV.
+  Per-material integration through `IndirectLightingProvider.hlsl` is the authoritative
+  path for an APV-free renderer and accurate diffuse albedo/BRDF response.
 
 ## Mod/runtime registration contract
 

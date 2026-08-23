@@ -1,12 +1,23 @@
 #pragma kernel QueryDynamicGI
+#pragma kernel QueryIndirectLightingProvider
 #pragma target 5.0
 
-#include "RadianceField.hlsl"
+#include "IndirectLightingProvider.hlsl"
 
 StructuredBuffer<float3> _DynamicGISamplePositions;
 StructuredBuffer<float3> _DynamicGISampleNormals;
 RWStructuredBuffer<float4> _DynamicGISampleResults;
 int _DynamicGISampleCount;
+
+StructuredBuffer<float3> _DynamicGIExistingIndirect;
+
+struct DynamicGIProviderValidationResult
+{
+    float4 ControlledDynamicAndAccessibility;
+    float4 FinalIndirect;
+};
+
+RWStructuredBuffer<DynamicGIProviderValidationResult> _DynamicGIProviderResults;
 
 [numthreads(64, 1, 1)]
 void QueryDynamicGI(uint3 dispatchThreadId : SV_DispatchThreadID)
@@ -16,4 +27,24 @@ void QueryDynamicGI(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     float3 value = SampleDynamicGI(_DynamicGISamplePositions[index], _DynamicGISampleNormals[index]);
     _DynamicGISampleResults[index] = float4(value, 1.0);
+}
+
+[numthreads(64, 1, 1)]
+void QueryIndirectLightingProvider(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint index = dispatchThreadId.x;
+    if (index >= (uint)_DynamicGISampleCount)
+        return;
+    float3 positionWS = _DynamicGISamplePositions[index];
+    float3 normalWS = _DynamicGISampleNormals[index];
+    float3 dynamicIndirect = SampleControlledDynamicGI(positionWS, normalWS);
+    float accessibility = SampleDynamicGIAmbientAccessibility(positionWS);
+    float3 finalIndirect = SampleIndirectLightingProvider(
+        positionWS,
+        normalWS,
+        _DynamicGIExistingIndirect[index]);
+    DynamicGIProviderValidationResult result;
+    result.ControlledDynamicAndAccessibility = float4(dynamicIndirect, accessibility);
+    result.FinalIndirect = float4(finalIndirect, 1.0);
+    _DynamicGIProviderResults[index] = result;
 }
