@@ -1,7 +1,7 @@
-# Dynamic GI prototype — Phases 1–6 Geometry, Visibility, Clipmaps, and Dynamic Sun
+# Dynamic GI prototype — Phases 1–7 Geometry, Visibility, Clipmaps, Sun, and Emissives
 
-This folder contains the first, deliberately isolated layer of the runtime GI
-prototype. It does not replace or modify HDRP APV, HTrace SSGI, or HTrace AO.
+This folder contains the portable runtime GI prototype. It does not replace or modify
+HDRP APV, HTrace SSGI, or HTrace AO.
 Phase 3 consumes the Geometry Field but remains an independent ambient-accessibility
 signal; no existing indirect-lighting result is modified automatically.
 
@@ -292,6 +292,49 @@ east-to-west rotation, below-horizon night, per-frame cascade budgeting, and all
 numeric slices. Direct Sun is still source injection rather than diffuse neighbor
 propagation; actual interior bounce remains Phase 8.
 
+## Phase 7 runtime emissive injection
+
+`GIEmissiveContributor` is the content/mod-facing contract for diffuse emissive
+sources. Attach it to an object, assign its renderers, emission color/intensity,
+influence range, and maximum cascade. The component registers itself automatically;
+content authors never place or reference probes. Runtime code may call `Configure`,
+`SetContributionEnabled`, or `NotifyEmissionChanged` after changing source data.
+
+`WorldRadianceClipmap` uploads active contributors to a fixed-capacity structured GPU
+buffer only when the registry changes. Each updated probe tests contributors within
+range, performs one Geometry Field DDA toward each applicable source, applies quadratic
+distance falloff, and injects RGB into the six directional lobes. A solid voxel wall
+therefore blocks the source while a real opening passes it. Sources default to the two
+nearest cascades, avoiding needless work in distant levels; both capacity and each
+source's last cascade are configurable.
+
+Registration, removal, movement, enable/disable, color, intensity, and range changes
+invalidate only the union of the old/new influence bounds and only the permitted
+cascades. The clipmap then reconverges through its existing tile budgets. The inspector
+and cascade annotation report active emissives, revision, changes, dirty work, and the
+buffer's estimated GPU memory.
+
+### TestGI Phase-7 neon laboratory
+
+Run **Tools > Dynamic GI > Phase 7 > Configure TestGI Emissive Injection**. It adds a
+magenta neon panel and two probe markers to the east-window room. The green marker has
+line of sight to the panel; the red marker is behind a voxelized divider. The selected
+debug direction becomes `-Z`, while query, ground, and ceiling numeric slices remain
+visible. `Phase7EmissiveTestGuide` labels the source, markers, and DDA occluder.
+
+The validation disables the Sun to isolate the result, verifies visible/blocked
+separation, disables the contributor, changes it from magenta to cyan, confirms the GPU
+upload, and checks that invalidation covers fewer than all clipmap tiles:
+
+```powershell
+unity run . -- -force-d3d12 -executeMethod DynamicGI.Editor.RadiancePhase7SceneSetup.ConfigureTestGI -logFile -
+unity run . -- -force-d3d12 -executeMethod DynamicGI.Editor.RadiancePhase7SceneSetup.ValidateTestGI -logFile -
+```
+
+This first version deliberately treats a source as isotropic and uses its renderer AABB
+as a conservative source radius. It injects emitted light into probes but does not yet
+propagate that energy between probes or apply it to scene materials automatically.
+
 ## Data layout
 
 - Bricks are sparse CPU metadata mapped to fixed GPU slots.
@@ -341,7 +384,10 @@ For Shader Graph, use a File-mode Custom Function node pointing to
 - During a Sun revision, tiles can temporarily contain different accepted Sun states
   until their configured budgets converge. Phase 9 temporal accumulation will smooth
   this transition.
-- Phase 4 supports one directional Sun source. Point/spot emissives are Phase 7 work.
+- Phase 7 emissive sources are isotropic AABB approximations. Textured/angular emission,
+  spot cones, source-area integration, and GPU spatial binning are future refinements.
+- Emissive injection is capped by `Maximum Emissive Contributors` (64 by default); the
+  manager warns and ignores overflow instead of allocating during a frame.
 
 ## Mod/runtime registration contract
 
@@ -353,5 +399,8 @@ A future mod loader only needs to instantiate geometry and attach/configure
 3. Registration events invalidate the union of affected brick regions.
 4. The field reconstructs those bricks within the configured per-frame budget.
 
-Sky visibility already consumes the same page table and bit-packed occupancy through
-`GeometryField.hlsl`; the radiance field will use this bridge in the next phase.
+For a neon sign or other emissive, attach `GIEmissiveContributor` to the renderer root
+and call `Configure(renderers, color, intensity, range, maximumCascade)`. Disabling or
+destroying that component removes its contribution and locally invalidates the field.
+The contract intentionally remains independent of HDRP material internals so a mod
+loader can derive these few values from its own asset metadata.

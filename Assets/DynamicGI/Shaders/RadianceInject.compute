@@ -40,6 +40,17 @@ float _RadianceSunTraceDistance;
 float _RadianceRayOriginBias;
 int _RadianceMaxDdaSteps;
 
+struct EmissiveContributorData
+{
+    float4 CenterAndRange;
+    float4 Radiance;
+    float4 BoundsExtentsAndMaxCascade;
+};
+
+StructuredBuffer<EmissiveContributorData> _GIEmissiveContributors;
+int _GIEmissiveContributorCount;
+int _RadianceCascadeIndex;
+
 struct RadianceProbeData
 {
     float4 PositiveX;
@@ -97,6 +108,47 @@ float4 InjectAxis(float3 axis, float skyVisibility, float sunVisibility)
     float3 sky = _RadianceSkyColor * (_RadianceSkyIntensity * skyVisibility * skyWeight);
     float3 sun = _RadianceSunColor * (sunVisibility * sunWeight);
     return float4(max(0.0, sky + sun), 1.0);
+}
+
+void InjectEmissiveContributors(float3 positionWS, inout RadianceProbeData result)
+{
+    for (int contributorIndex = 0; contributorIndex < _GIEmissiveContributorCount; contributorIndex++)
+    {
+        EmissiveContributorData contributor = _GIEmissiveContributors[contributorIndex];
+        if (_RadianceCascadeIndex > (int)contributor.BoundsExtentsAndMaxCascade.w)
+            continue;
+
+        float3 toSource = contributor.CenterAndRange.xyz - positionWS;
+        float centerDistance = length(toSource);
+        if (centerDistance <= 1e-5)
+            continue;
+        float3 direction = toSource / centerDistance;
+        float sourceRadius = length(contributor.BoundsExtentsAndMaxCascade.xyz);
+        float surfaceDistance = max(0.0, centerDistance - sourceRadius);
+        float range = max(0.001, contributor.CenterAndRange.w);
+        if (surfaceDistance >= range)
+            continue;
+
+        bool blocked = false;
+        if (surfaceDistance > _RadianceRayOriginBias * 2.0)
+        {
+            float3 origin = positionWS + direction * _RadianceRayOriginBias;
+            float traceDistance = max(0.0, surfaceDistance - _RadianceRayOriginBias * 2.0);
+            blocked = DynamicGITraceGeometryDDA(origin, direction, traceDistance, _RadianceMaxDdaSteps);
+        }
+        if (blocked)
+            continue;
+
+        float falloff = saturate(1.0 - surfaceDistance / range);
+        falloff *= falloff;
+        float3 radiance = contributor.Radiance.rgb * falloff;
+        result.PositiveX.rgb += radiance * saturate(direction.x);
+        result.NegativeX.rgb += radiance * saturate(-direction.x);
+        result.PositiveY.rgb += radiance * saturate(direction.y);
+        result.NegativeY.rgb += radiance * saturate(-direction.y);
+        result.PositiveZ.rgb += radiance * saturate(direction.z);
+        result.NegativeZ.rgb += radiance * saturate(-direction.z);
+    }
 }
 
 RadianceProbeData ReadRadianceLoad(int3 coordinate)
@@ -223,12 +275,20 @@ void InjectRadiance(uint3 dispatchThreadId : SV_DispatchThreadID)
         sunVisibility = blocked ? 0.0 : 1.0;
     }
 
-    _DynamicGI_RadiancePositiveX[physicalCoordinate] = InjectAxis(float3(1.0, 0.0, 0.0), skyVisibility, sunVisibility);
-    _DynamicGI_RadianceNegativeX[physicalCoordinate] = InjectAxis(float3(-1.0, 0.0, 0.0), skyVisibility, sunVisibility);
-    _DynamicGI_RadiancePositiveY[physicalCoordinate] = InjectAxis(float3(0.0, 1.0, 0.0), skyVisibility, sunVisibility);
-    _DynamicGI_RadianceNegativeY[physicalCoordinate] = InjectAxis(float3(0.0, -1.0, 0.0), skyVisibility, sunVisibility);
-    _DynamicGI_RadiancePositiveZ[physicalCoordinate] = InjectAxis(float3(0.0, 0.0, 1.0), skyVisibility, sunVisibility);
-    _DynamicGI_RadianceNegativeZ[physicalCoordinate] = InjectAxis(float3(0.0, 0.0, -1.0), skyVisibility, sunVisibility);
+    RadianceProbeData result;
+    result.PositiveX = InjectAxis(float3(1.0, 0.0, 0.0), skyVisibility, sunVisibility);
+    result.NegativeX = InjectAxis(float3(-1.0, 0.0, 0.0), skyVisibility, sunVisibility);
+    result.PositiveY = InjectAxis(float3(0.0, 1.0, 0.0), skyVisibility, sunVisibility);
+    result.NegativeY = InjectAxis(float3(0.0, -1.0, 0.0), skyVisibility, sunVisibility);
+    result.PositiveZ = InjectAxis(float3(0.0, 0.0, 1.0), skyVisibility, sunVisibility);
+    result.NegativeZ = InjectAxis(float3(0.0, 0.0, -1.0), skyVisibility, sunVisibility);
+    InjectEmissiveContributors(positionWS, result);
+    _DynamicGI_RadiancePositiveX[physicalCoordinate] = result.PositiveX;
+    _DynamicGI_RadianceNegativeX[physicalCoordinate] = result.NegativeX;
+    _DynamicGI_RadiancePositiveY[physicalCoordinate] = result.PositiveY;
+    _DynamicGI_RadianceNegativeY[physicalCoordinate] = result.NegativeY;
+    _DynamicGI_RadiancePositiveZ[physicalCoordinate] = result.PositiveZ;
+    _DynamicGI_RadianceNegativeZ[physicalCoordinate] = result.NegativeZ;
 }
 
 [numthreads(64, 1, 1)]

@@ -445,6 +445,7 @@ namespace DynamicGI.Debugging
                 $"Clipmap total: {total.ActiveProbes} probes | dirty {total.DirtyTiles}\n" +
                 $"updated {total.UpdatedProbesThisFrame} | moves {total.OriginMovesThisFrame}\n" +
                 $"sun rev {total.SunRevision} | horizon {radianceClipmap.CurrentSunHorizonFactor:0.00} | refresh {total.LightingRefreshesThisFrame}\n" +
+                $"emissives {total.ActiveEmissiveContributors} | rev {total.EmissiveRevision} | changes {total.EmissiveChangesThisFrame}\n" +
                 $"slices Q/G/C {querySliceSampleCount}/{groundSliceSampleCount}/{ceilingSliceSampleCount}\n" +
                 $"GPU {FormatBytes(total.EstimatedGpuBytes)} | CPU {total.UpdateCpuMilliseconds:0.###} ms",
                 detailStyle);

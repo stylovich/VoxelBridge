@@ -27,6 +27,9 @@ namespace DynamicGI.Radiance
         public readonly int ComputeDispatchesThisFrame;
         public readonly int SunRevision;
         public readonly int LightingRefreshesThisFrame;
+        public readonly int ActiveEmissiveContributors;
+        public readonly int EmissiveRevision;
+        public readonly int EmissiveChangesThisFrame;
         public readonly long EstimatedGpuBytes;
         public readonly double UpdateCpuMilliseconds;
 
@@ -42,6 +45,9 @@ namespace DynamicGI.Radiance
             int computeDispatchesThisFrame,
             int sunRevision,
             int lightingRefreshesThisFrame,
+            int activeEmissiveContributors,
+            int emissiveRevision,
+            int emissiveChangesThisFrame,
             long estimatedGpuBytes,
             double updateCpuMilliseconds)
         {
@@ -56,6 +62,9 @@ namespace DynamicGI.Radiance
             ComputeDispatchesThisFrame = computeDispatchesThisFrame;
             SunRevision = sunRevision;
             LightingRefreshesThisFrame = lightingRefreshesThisFrame;
+            ActiveEmissiveContributors = activeEmissiveContributors;
+            EmissiveRevision = emissiveRevision;
+            EmissiveChangesThisFrame = emissiveChangesThisFrame;
             EstimatedGpuBytes = estimatedGpuBytes;
             UpdateCpuMilliseconds = updateCpuMilliseconds;
         }

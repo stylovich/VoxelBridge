@@ -74,6 +74,7 @@ namespace DynamicGI.Radiance
         private WorldSkyVisibilityField subscribedSkyField;
         private GraphicsBuffer queryPositionBuffer;
         private GraphicsBuffer queryResultBuffer;
+        private GraphicsBuffer emptyEmissiveBuffer;
         private Vector3Int resolution;
         private Vector3Int tileGridResolution;
         private Vector3 resolvedOrigin;
@@ -388,6 +389,10 @@ namespace DynamicGI.Radiance
                     radianceTextures[i] = CreateTexture(i);
                 queryPositionBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, sizeof(float) * 3);
                 queryResultBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, RadianceProbeGpuData.Stride);
+                emptyEmissiveBuffer = new GraphicsBuffer(
+                    GraphicsBuffer.Target.Structured,
+                    1,
+                    EmissiveContributorGpuData.Stride);
             }
             catch (Exception exception)
             {
@@ -491,6 +496,12 @@ namespace DynamicGI.Radiance
             radianceShader.SetInt("_RadianceSunEnabled", sunLight != null && sunLight.enabled && sunLight.gameObject.activeInHierarchy ? 1 : 0);
             radianceShader.SetFloat("_RadianceSunTraceDistance", sunTraceDistance);
             radianceShader.SetFloat("_RadianceRayOriginBias", Mathf.Max(rayOriginBias, geometryField.VoxelSize * 0.1f));
+            // The Phase-4 local field remains a compatibility path. The shared
+            // injection kernel requires an emissive buffer, but only the clipmap
+            // consumes registered Phase-7 contributors.
+            radianceShader.SetBuffer(injectKernel, "_GIEmissiveContributors", emptyEmissiveBuffer);
+            radianceShader.SetInt("_GIEmissiveContributorCount", 0);
+            radianceShader.SetInt("_RadianceCascadeIndex", 0);
             int ddaSteps = Mathf.Clamp(Mathf.CeilToInt(sunTraceDistance / geometryField.VoxelSize * 1.8f) + 4, 8, 4096);
             radianceShader.SetInt("_RadianceMaxDdaSteps", ddaSteps);
             radianceShader.Dispatch(injectKernel,
@@ -759,7 +770,8 @@ namespace DynamicGI.Radiance
         {
             long probes = (long)resolution.x * resolution.y * resolution.z;
             long bytesPerTexel = textureFormat == GraphicsFormat.R16G16B16A16_SFloat ? 8L : 16L;
-            return probes * bytesPerTexel * 6L + RadianceProbeGpuData.Stride + sizeof(float) * 3L;
+            return probes * bytesPerTexel * 6L + RadianceProbeGpuData.Stride + sizeof(float) * 3L +
+                   EmissiveContributorGpuData.Stride;
         }
 
         private void ReleaseResources()
@@ -777,8 +789,10 @@ namespace DynamicGI.Radiance
 
             queryPositionBuffer?.Dispose();
             queryResultBuffer?.Dispose();
+            emptyEmissiveBuffer?.Dispose();
             queryPositionBuffer = null;
             queryResultBuffer = null;
+            emptyEmissiveBuffer = null;
             for (int i = 0; i < radianceTextures.Length; i++)
             {
                 RenderTexture texture = radianceTextures[i];

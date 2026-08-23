@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using DynamicGI.Contributors;
 using DynamicGI.Geometry;
 using DynamicGI.Occlusion;
 using Unity.Profiling;
@@ -35,6 +36,9 @@ namespace DynamicGI.Radiance
         private static readonly int ResolutionId = Shader.PropertyToID("_DynamicGI_RadianceResolution");
         private static readonly int AvailableId = Shader.PropertyToID("_DynamicGI_RadianceAvailable");
         private static readonly int RingOffsetId = Shader.PropertyToID("_RadianceRingOffset");
+        private static readonly int EmissiveContributorsId = Shader.PropertyToID("_GIEmissiveContributors");
+        private static readonly int EmissiveContributorCountId = Shader.PropertyToID("_GIEmissiveContributorCount");
+        private static readonly int RadianceCascadeIndexId = Shader.PropertyToID("_RadianceCascadeIndex");
         private static readonly int ClipmapAvailableId = Shader.PropertyToID("_DynamicGI_RadianceClipmapAvailable");
         private static readonly int CascadeCountId = Shader.PropertyToID("_DynamicGI_RadianceCascadeCount");
 
@@ -80,6 +84,9 @@ namespace DynamicGI.Radiance
         [SerializeField] private bool fadeSunBelowHorizon = true;
         [SerializeField, Range(0.1f, 15f)] private float sunHorizonFadeDegrees = 3f;
 
+        [Header("Emissive injection")]
+        [SerializeField, Range(1, 256)] private int maximumEmissiveContributors = 64;
+
         [Header("Compute")]
         [SerializeField] private ComputeShader radianceShader;
 
@@ -90,6 +97,8 @@ namespace DynamicGI.Radiance
         private WorldSkyVisibilityField subscribedSkyField;
         private GraphicsBuffer queryPositionBuffer;
         private GraphicsBuffer queryResultBuffer;
+        private GraphicsBuffer emissiveContributorBuffer;
+        private EmissiveContributorGpuData[] emissiveUploadData = Array.Empty<EmissiveContributorGpuData>();
         private GraphicsFormat textureFormat;
         private int clearKernel = -1;
         private int injectKernel = -1;
@@ -112,6 +121,13 @@ namespace DynamicGI.Radiance
         private int computeDispatchesThisFrame;
         private int sunRevision;
         private int lightingRefreshesThisFrame;
+        private int activeEmissiveContributors;
+        private int emissiveRevision;
+        private int emissiveChangesThisFrame;
+        private int pendingEmissiveChanges;
+        private float maximumEmissiveRange;
+        private bool emissiveUploadDirty = true;
+        private bool emissiveOverflowWarningIssued;
         private double updateCpuMilliseconds;
         private int lastDebugProbeCount;
         private int lastDebugProbeStride;
@@ -129,6 +145,8 @@ namespace DynamicGI.Radiance
         public Vector3 CurrentSunDirection => GetSunDirection();
         public Vector3 CurrentSunRadiance => GetSunRadiance();
         public float CurrentSunHorizonFactor => GetSunHorizonFactor(GetSunDirection());
+        public int ActiveEmissiveContributorCount => activeEmissiveContributors;
+        public int EmissiveRevision => emissiveRevision;
         public int LastDebugProbeCount => lastDebugProbeCount;
         public int LastDebugProbeStride => lastDebugProbeStride;
 
@@ -138,7 +156,8 @@ namespace DynamicGI.Radiance
             {
                 int probes = 0;
                 int dirty = 0;
-                long memory = RadianceProbeGpuData.Stride + sizeof(float) * 3L;
+                long memory = RadianceProbeGpuData.Stride + sizeof(float) * 3L +
+                              (long)maximumEmissiveContributors * EmissiveContributorGpuData.Stride;
                 for (int i = 0; i < cascades.Count; i++)
                 {
                     probes += cascades[i].ProbeCount;
@@ -157,6 +176,9 @@ namespace DynamicGI.Radiance
                     computeDispatchesThisFrame,
                     sunRevision,
                     lightingRefreshesThisFrame,
+                    activeEmissiveContributors,
+                    emissiveRevision,
+                    emissiveChangesThisFrame,
                     memory,
                     updateCpuMilliseconds);
             }
@@ -177,6 +199,8 @@ namespace DynamicGI.Radiance
             skyVisibilityField ??= WorldSkyVisibilityField.Active;
             TryAssignDefaultComputeShader();
             RefreshSubscriptions();
+            GIEmissiveContributor.RegistryChanged -= OnEmissiveContributorChanged;
+            GIEmissiveContributor.RegistryChanged += OnEmissiveContributorChanged;
             if (Active != null && Active != this)
                 UnityEngine.Debug.LogWarning("Multiple WorldRadianceClipmap instances are enabled. Shader globals use the latest one.", this);
             Active = this;
@@ -185,6 +209,7 @@ namespace DynamicGI.Radiance
 
         private void OnDisable()
         {
+            GIEmissiveContributor.RegistryChanged -= OnEmissiveContributorChanged;
             UnsubscribeSources();
             ReleaseResources();
             if (Active == this)
@@ -206,6 +231,7 @@ namespace DynamicGI.Radiance
             minimumSunRadianceChange = Mathf.Max(0f, minimumSunRadianceChange);
             minimumSkyRadianceChange = Mathf.Max(0f, minimumSkyRadianceChange);
             sunHorizonFadeDegrees = Mathf.Clamp(sunHorizonFadeDegrees, 0.1f, 15f);
+            maximumEmissiveContributors = Mathf.Clamp(maximumEmissiveContributors, 1, 256);
             if (cascadeSettings == null)
                 cascadeSettings = Array.Empty<RadianceCascadeSettings>();
             for (int i = 0; i < cascadeSettings.Length; i++)
@@ -227,6 +253,8 @@ namespace DynamicGI.Radiance
                 Shader.SetGlobalInt(ClipmapAvailableId, 0);
                 return;
             }
+
+            UploadEmissiveContributorsIfNeeded();
 
             Vector3 targetPosition = ResolveTrackingPosition();
             for (int i = 0; i < cascades.Count; i++)
@@ -293,6 +321,7 @@ namespace DynamicGI.Radiance
         {
             if (!EnsureInitialized())
                 return;
+            UploadEmissiveContributorsIfNeeded();
             if (geometryField == null || !geometryField.IsInitialized || geometryField.DirtyBrickCount > 0 ||
                 (skyVisibilityField != null &&
                  (!skyVisibilityField.IsInitialized || skyVisibilityField.DirtyTileCount > 0)))
@@ -506,6 +535,12 @@ namespace DynamicGI.Radiance
                     throw new InvalidOperationException("At least one enabled Radiance Cascade is required.");
                 queryPositionBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, sizeof(float) * 3);
                 queryResultBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, RadianceProbeGpuData.Stride);
+                emissiveContributorBuffer = new GraphicsBuffer(
+                    GraphicsBuffer.Target.Structured,
+                    maximumEmissiveContributors,
+                    EmissiveContributorGpuData.Stride);
+                emissiveUploadData = new EmissiveContributorGpuData[maximumEmissiveContributors];
+                emissiveUploadDirty = true;
             }
             catch (Exception exception)
             {
@@ -515,6 +550,7 @@ namespace DynamicGI.Radiance
             }
 
             initialized = true;
+            UploadEmissiveContributorsIfNeeded();
             CaptureLightingState();
             PublishShaderGlobals();
         }
@@ -554,7 +590,11 @@ namespace DynamicGI.Radiance
             radianceShader.SetInt("_RadianceSunEnabled", sunLight != null && sunLight.enabled && sunLight.gameObject.activeInHierarchy ? 1 : 0);
             radianceShader.SetFloat("_RadianceSunTraceDistance", sunTraceDistance);
             radianceShader.SetFloat("_RadianceRayOriginBias", Mathf.Max(rayOriginBias, geometryField.VoxelSize * 0.1f));
-            int ddaSteps = Mathf.Clamp(Mathf.CeilToInt(sunTraceDistance / geometryField.VoxelSize * 1.8f) + 4, 8, 4096);
+            radianceShader.SetBuffer(injectKernel, EmissiveContributorsId, emissiveContributorBuffer);
+            radianceShader.SetInt(EmissiveContributorCountId, activeEmissiveContributors);
+            radianceShader.SetInt(RadianceCascadeIndexId, cascade.Index);
+            float maximumTraceDistance = Mathf.Max(sunTraceDistance, maximumEmissiveRange);
+            int ddaSteps = Mathf.Clamp(Mathf.CeilToInt(maximumTraceDistance / geometryField.VoxelSize * 1.8f) + 4, 8, 4096);
             radianceShader.SetInt("_RadianceMaxDdaSteps", ddaSteps);
             radianceShader.Dispatch(injectKernel,
                 Mathf.CeilToInt(cascade.TileResolution / 4f),
@@ -698,6 +738,61 @@ namespace DynamicGI.Radiance
             for (int i = 0; i < cascades.Count; i++) cascades[i].InvalidateAll();
         }
 
+        private void OnEmissiveContributorChanged(
+            GIEmissiveContributor _,
+            EmissiveContributorChange change)
+        {
+            emissiveUploadDirty = true;
+            emissiveRevision++;
+            pendingEmissiveChanges++;
+            if (!initialized)
+                return;
+
+            int lastCascade = Mathf.Min(change.MaximumCascadeIndex, cascades.Count - 1);
+            for (int i = 0; i <= lastCascade; i++)
+                cascades[i].InvalidateWorldBounds(change.InfluenceBounds);
+        }
+
+        private void UploadEmissiveContributorsIfNeeded()
+        {
+            if (!emissiveUploadDirty || emissiveContributorBuffer == null)
+                return;
+
+            int count = 0;
+            bool overflow = false;
+            maximumEmissiveRange = 0f;
+            foreach (GIEmissiveContributor contributor in GIEmissiveContributor.ActiveContributors)
+            {
+                if (contributor == null || !contributor.TryBuildGpuData(out EmissiveContributorGpuData data))
+                    continue;
+                if (count >= maximumEmissiveContributors)
+                {
+                    overflow = true;
+                    continue;
+                }
+
+                emissiveUploadData[count++] = data;
+                maximumEmissiveRange = Mathf.Max(maximumEmissiveRange, contributor.InfluenceRange);
+            }
+
+            if (count > 0)
+                emissiveContributorBuffer.SetData(emissiveUploadData, 0, 0, count);
+            activeEmissiveContributors = count;
+            emissiveUploadDirty = false;
+
+            if (overflow && !emissiveOverflowWarningIssued)
+            {
+                UnityEngine.Debug.LogWarning(
+                    $"Radiance Clipmap supports {maximumEmissiveContributors} emissive contributors; extra sources are ignored.",
+                    this);
+                emissiveOverflowWarningIssued = true;
+            }
+            else if (!overflow)
+            {
+                emissiveOverflowWarningIssued = false;
+            }
+        }
+
         private static float MaxAbsDelta(Vector3 value, Vector3 previous) =>
             Mathf.Max(Mathf.Abs(value.x - previous.x),
                 Mathf.Max(Mathf.Abs(value.y - previous.y), Mathf.Abs(value.z - previous.z)));
@@ -812,6 +907,8 @@ namespace DynamicGI.Radiance
             originMovesThisFrame = 0;
             computeDispatchesThisFrame = 0;
             lightingRefreshesThisFrame = 0;
+            emissiveChangesThisFrame = pendingEmissiveChanges;
+            pendingEmissiveChanges = 0;
             updateCpuMilliseconds = 0.0;
         }
 
@@ -830,8 +927,14 @@ namespace DynamicGI.Radiance
             cascades.Clear();
             queryPositionBuffer?.Dispose();
             queryResultBuffer?.Dispose();
+            emissiveContributorBuffer?.Dispose();
             queryPositionBuffer = null;
             queryResultBuffer = null;
+            emissiveContributorBuffer = null;
+            emissiveUploadData = Array.Empty<EmissiveContributorGpuData>();
+            activeEmissiveContributors = 0;
+            maximumEmissiveRange = 0f;
+            emissiveUploadDirty = true;
             lastDebugProbeCount = 0;
             lastDebugProbeStride = 0;
         }
