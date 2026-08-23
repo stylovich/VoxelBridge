@@ -28,7 +28,8 @@ namespace DynamicGI.Rendering
 
         [Header("Indirect provider")]
         [SerializeField] private IndirectLightingProviderMode providerMode = IndirectLightingProviderMode.ExistingPlusDynamic;
-        [SerializeField, Min(0f)] private float dynamicGIStrength = 1f;
+        [Tooltip("Existing Plus Dynamic is a coexistence blend and normally needs about 0.15-0.35. Dynamic Only can start at 1.")]
+        [SerializeField, Min(0f)] private float dynamicGIStrength = 0.25f;
         [SerializeField, Range(0f, 1f)] private float occlusionStrength = 0.5f;
         [SerializeField, Range(0f, 2f)] private float indirectSaturation = 1f;
         [SerializeField, Min(0f)] private float indirectIntensity = 1f;
@@ -64,6 +65,28 @@ namespace DynamicGI.Rendering
         public float HdrpAlbedoWeight => hdrpAlbedoWeight;
         public bool ScreenSpaceReplacementDarkening => screenSpaceReplacementDarkening;
         public float ReplacementDarkeningStrength => replacementDarkeningStrength;
+
+        public void ApplyExistingPlusDynamicPreset()
+        {
+            providerMode = IndirectLightingProviderMode.ExistingPlusDynamic;
+            dynamicGIStrength = 0.25f;
+            indirectIntensity = 1f;
+            screenSpaceBridgeEnabled = true;
+            screenSpaceReplacementDarkening = false;
+            PublishNow();
+        }
+
+        public void ApplyDynamicOnlyPreviewPreset()
+        {
+            providerMode = IndirectLightingProviderMode.DynamicOnly;
+            dynamicGIStrength = 1f;
+            occlusionStrength = 1f;
+            indirectIntensity = 1f;
+            screenSpaceBridgeEnabled = true;
+            screenSpaceReplacementDarkening = true;
+            replacementDarkeningStrength = 1f;
+            PublishNow();
+        }
 
         public void Configure(
             IndirectLightingProviderMode mode,

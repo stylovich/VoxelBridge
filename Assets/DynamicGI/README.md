@@ -31,6 +31,11 @@ recently rebuilt regions, the camera neighborhood, resolution/statistics, occupi
 voxels, and empty voxels. Occupied/empty cubes are generated with a compute pass and
 rendered with GPU instancing; no voxel GameObjects are created.
 
+GPU-instanced Geometry, Sky Visibility, and Radiance debug cubes target the active
+Scene-view camera by default. They never enter Game cameras unless the component's
+`Render Instances In Game View` option is enabled explicitly. This prevents a probe
+grid or its automatic debug exposure from being mistaken for material lighting.
+
 The custom inspector includes **Occupied**, **Empty**, **Both**, and **Voxels Off**
 presets. Its live readout reports the field resolution and the debug sample stride.
 A stride greater than one means the visualization was spatially subsampled to respect
@@ -533,8 +538,14 @@ is disabled by default so forward opaque materials remain valid.
 
 Radiance values use a normalized display-linear/pre-exposed convention: the default
 Sun mapping produces values near one rather than HDRP lux. The bridge therefore does
-not apply HDRP's exposure multiplier a second time. `strength=1` and `intensity=1` are
-the calibrated TestGI defaults; large 100–1000 multipliers are no longer expected.
+not apply HDRP's exposure multiplier a second time. The field contains diffuse
+irradiance, so the stock-material bridge applies the Lambert `1 / pi` conversion before
+adding it to camera color. `DynamicOnly` starts at `strength=1`, `intensity=1`;
+`ExistingPlusDynamic` normally starts around `strength=0.15–0.35` because it is adding
+on top of Unity/APV indirect. Large 100–1000 multipliers are no longer expected.
+The `DynamicGIShaderGlobals` inspector provides `APV Coexistence` and
+`Dynamic Replacement Preview` presets so switching provider modes does not accidentally
+carry the replacement strength into the additive mode.
 
 Run **Tools > Dynamic GI > Phase 10 > Configure TestGI Material Sampling**, then use
 **Validate TestGI Material Sampling**, or run headlessly:
@@ -551,12 +562,36 @@ inspects the serialized HDRP pass/shader wiring. TestGI setup selects the explic
 `DynamicOnly` stock-material preview with geometry-aware sampling and replacement
 darkening; switch back to `ExistingPlusDynamic` for APV coexistence.
 
+Phase-10 setup also selects a clean lighting-preview debug preset: numeric probe values
+remain available, while instanced probe cubes, cascade/brick bounds, dirty regions, and
+slice wire planes are hidden. This distinction is important because the debug cubes
+are intentionally block-shaped and can reach high alpha under automatic exposure;
+they are not the result sampled by scene materials.
+
 Two additional Phase-10 diagnostics reproduce the original low-energy/leak regression:
 the surface diagnostic compares raw, bias-only, geometry-aware, exterior, and
 ceiling/wall-edge samples under east Sun. The bridge-scale diagnostic renders the
 camera with the bridge disabled, additive-only, and replacement-preview states; it
 measures both the linear GI delta at `strength=1`, `intensity=1` and the accessibility
 darkening.
+
+### Current quality boundary and Radiance Cascades direction
+
+The current `WorldRadianceClipmap` is a spatial clipmap with six axis-aligned irradiance
+lobes and bounded neighbor propagation. Despite the cascade name, it is not yet the
+angular/spatial interval hierarchy used by a full Radiance Cascades implementation.
+
+The [`Radiance Cascades 3D` Shadertoy](https://www.shadertoy.com/view/X3XfRM) and its
+[compute-based reference port](https://github.com/uziiDevelopment/providentia-cascades)
+are useful architectural references:
+it places dense probes on known surfaces, increases angular resolution as probe spacing
+becomes coarser, ray-traces a separate distance interval per cascade, stores hit
+distance for visibility weighting, and merges parent cascades. Its fixed surface atlas
+does not transfer directly to arbitrary Unity meshes or a modifiable voxel city, but
+three ideas fit this project well: directional ray bins beyond six lobes, hit-distance
+visibility rather than binary sample rejection, and in-frame parent-cascade merging.
+The Geometry Field, contributor contract, invalidation, and temporal scheduling can be
+retained while that radiance representation evolves.
 
 ## Data layout
 

@@ -35,6 +35,8 @@ namespace DynamicGI.Debugging
 
         [Header("Selected cascade probes")]
         [SerializeField] private bool showRadianceProbes = true;
+        [Tooltip("When disabled, probe cubes are restricted to the active Scene view and never contaminate gameplay cameras.")]
+        [SerializeField] private bool renderInstancesInGameView;
         [SerializeField] private RadianceDebugDirection displayedDirection = RadianceDebugDirection.Average;
         [SerializeField] private RadianceDebugSource displayedSource = RadianceDebugSource.Resolved;
         [SerializeField, Min(0f)] private float debugRadius;
@@ -152,7 +154,8 @@ namespace DynamicGI.Debugging
                 return;
             selectedCascade = Mathf.Clamp(selectedCascade, 0, Mathf.Max(0, radianceClipmap.CascadeCount - 1));
             UpdateDetailedQuery();
-            if (!showRadianceProbes || debugMaterial == null || indirectArgumentsBuffer == null)
+            bool needsSamples = showRadianceProbes || showNumericValues || automaticExposure;
+            if (!needsSamples)
                 return;
 
             Vector3 center = ResolveDebugCenter();
@@ -171,17 +174,21 @@ namespace DynamicGI.Debugging
 
             if (!radianceClipmap.TryGetCascade(selectedCascade, out RadianceCascade cascade))
                 return;
-            indirectArguments[0].InstanceCount = (uint)count;
-            indirectArgumentsBuffer.SetData(indirectArguments);
-            debugMaterial.SetBuffer(SamplesId, debugSampleBuffer);
-            debugMaterial.SetFloat(ScaleId, cascade.ProbeSpacing * probeScale);
-            debugMaterial.SetFloat("_Exposure", EffectiveExposure);
-            debugMaterial.SetFloat("_MinimumAlpha", minimumAlpha);
+            if (showRadianceProbes && debugMaterial != null && indirectArgumentsBuffer != null &&
+                DynamicGIDebugRenderUtility.TryResolveCamera(renderInstancesInGameView, out Camera debugCamera))
+            {
+                indirectArguments[0].InstanceCount = (uint)count;
+                indirectArgumentsBuffer.SetData(indirectArguments);
+                debugMaterial.SetBuffer(SamplesId, debugSampleBuffer);
+                debugMaterial.SetFloat(ScaleId, cascade.ProbeSpacing * probeScale);
+                debugMaterial.SetFloat("_Exposure", EffectiveExposure);
+                debugMaterial.SetFloat("_MinimumAlpha", minimumAlpha);
 #pragma warning disable 618
-            Graphics.DrawMeshInstancedIndirect(
-                cubeMesh, 0, debugMaterial, cascade.WorldBounds, indirectArgumentsBuffer,
-                0, null, ShadowCastingMode.Off, false, gameObject.layer, null, LightProbeUsage.Off);
+                Graphics.DrawMeshInstancedIndirect(
+                    cubeMesh, 0, debugMaterial, cascade.WorldBounds, indirectArgumentsBuffer,
+                    0, null, ShadowCastingMode.Off, false, gameObject.layer, debugCamera, LightProbeUsage.Off);
 #pragma warning restore 618
+            }
 
             if ((showNumericValues || automaticExposure) && !numericReadbackPending &&
                 Time.realtimeSinceStartupAsDouble >= nextNumericTime)

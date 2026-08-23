@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Runtime.InteropServices;
 using DynamicGI.Contributors;
+using DynamicGI.Debugging;
 using DynamicGI.Geometry;
 using DynamicGI.Occlusion;
 using DynamicGI.Radiance;
@@ -79,6 +81,8 @@ namespace DynamicGI.Editor
             pass.Configure(compositeShader, true, false);
             volume.customPasses.Add(pass);
 
+            ConfigureCleanLightingPreview(scene);
+
             EditorUtility.SetDirty(root);
             EditorUtility.SetDirty(controls);
             EditorUtility.SetDirty(volume);
@@ -89,7 +93,7 @@ namespace DynamicGI.Editor
             Debug.Log(
                 "DYNAMIC_GI_PHASE10_TESTGI_CONFIGURED | provider=DynamicOnly preview | strength=1 intensity=1 | " +
                 "surfaceSampling=geometry-aware/24 DDA steps | HDRP bridge=accessibility darkening then additive | " +
-                "note=stock-material darkening is approximate; material provider remains exact");
+                "debug=numeric labels without probe cubes/bounds | note=stock-material darkening is approximate; material provider remains exact");
         }
 
         [MenuItem("Tools/Dynamic GI/Phase 10/Validate TestGI Material Sampling")]
@@ -107,6 +111,7 @@ namespace DynamicGI.Editor
             Transform sampleMarker = FindNamedTransform(scene, "Propagation Mid Probe Marker");
 
             ValidateBridge(volume, controls);
+            ValidateCleanLightingPreview(scene);
             geometry.RebuildAll();
             geometry.ProcessAllDirtyNow();
             sky.RebuildAll();
@@ -468,6 +473,29 @@ namespace DynamicGI.Editor
             }
         }
 
+        [MenuItem("Tools/Dynamic GI/Phase 10/Capture Clean TestGI Lighting Preview")]
+        public static void CaptureCleanTestGILightingPreview()
+        {
+            Scene scene = EditorSceneManager.OpenScene(ScenePath, OpenSceneMode.Single);
+            Camera camera = FindSingle<Camera>(scene);
+            Color[] pixels = CaptureLinearCamera(camera);
+            Texture2D preview = new(640, 360, TextureFormat.RGBA32, false, false);
+            try
+            {
+                preview.SetPixels(pixels);
+                preview.Apply(false, false);
+                string directory = Path.GetFullPath(Path.Combine(Application.dataPath, "../Library/DynamicGI"));
+                Directory.CreateDirectory(directory);
+                string path = Path.Combine(directory, "TestGI-Phase10-Clean.png");
+                File.WriteAllBytes(path, preview.EncodeToPNG());
+                Debug.Log($"DYNAMIC_GI_PHASE10_CLEAN_CAPTURE | {path}");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(preview);
+            }
+        }
+
         private static Color[] CaptureLinearCamera(Camera camera)
         {
             RenderTexture previousTarget = camera.targetTexture;
@@ -583,6 +611,109 @@ namespace DynamicGI.Editor
         private static float LuminanceColor(Color value) => value.r * 0.2126f + value.g * 0.7152f + value.b * 0.0722f;
         private static string Format(Vector3 value) => $"({value.x:0.0000},{value.y:0.0000},{value.z:0.0000})";
         private static string Format(Vector4 value) => Format((Vector3)value);
+
+        private static void ConfigureCleanLightingPreview(Scene scene)
+        {
+            GeometryFieldDebug[] geometryDebug = FindComponents<GeometryFieldDebug>(scene);
+            for (int i = 0; i < geometryDebug.Length; i++)
+            {
+                SetBools(
+                    geometryDebug[i],
+                    ("showFieldBounds", false),
+                    ("showActiveBricks", false),
+                    ("showRecentlyRebuiltRegions", false),
+                    ("showCameraNeighborhood", false),
+                    ("showOccupiedVoxels", false),
+                    ("showEmptyVoxels", false));
+            }
+
+            SkyVisibilityDebug[] skyDebug = FindComponents<SkyVisibilityDebug>(scene);
+            for (int i = 0; i < skyDebug.Length; i++)
+            {
+                SetBools(
+                    skyDebug[i],
+                    ("showFieldBounds", false),
+                    ("showDirtyTiles", false),
+                    ("showRecentlyUpdatedTiles", false),
+                    ("showCameraNeighborhood", false),
+                    ("showVisibilitySamples", false));
+            }
+
+            RadianceFieldDebug[] localRadianceDebug = FindComponents<RadianceFieldDebug>(scene);
+            for (int i = 0; i < localRadianceDebug.Length; i++)
+            {
+                SetBools(
+                    localRadianceDebug[i],
+                    ("showFieldBounds", false),
+                    ("showDirtyTiles", false),
+                    ("showRecentlyUpdatedTiles", false),
+                    ("showCameraNeighborhood", false),
+                    ("showProbeGizmos", false),
+                    ("showSunDirection", false),
+                    ("showRadianceProbes", false));
+            }
+
+            RadianceClipmapDebug[] clipmapDebug = FindComponents<RadianceClipmapDebug>(scene);
+            for (int i = 0; i < clipmapDebug.Length; i++)
+            {
+                SetBools(
+                    clipmapDebug[i],
+                    ("showAllCascadeBounds", false),
+                    ("showDirtyTiles", false),
+                    ("showRecentlyUpdatedTiles", false),
+                    ("showTrackingTarget", false),
+                    ("showRadianceProbes", false),
+                    ("showNumericValues", true),
+                    ("showNumericSlicePlanes", false));
+            }
+        }
+
+        private static void ValidateCleanLightingPreview(Scene scene)
+        {
+            GeometryFieldDebug[] geometryDebug = FindComponents<GeometryFieldDebug>(scene);
+            SkyVisibilityDebug[] skyDebug = FindComponents<SkyVisibilityDebug>(scene);
+            RadianceFieldDebug[] localRadianceDebug = FindComponents<RadianceFieldDebug>(scene);
+            RadianceClipmapDebug[] clipmapDebug = FindComponents<RadianceClipmapDebug>(scene);
+
+            for (int i = 0; i < geometryDebug.Length; i++)
+                AssertSerializedBool(geometryDebug[i], "renderInstancesInGameView", false);
+            for (int i = 0; i < skyDebug.Length; i++)
+                AssertSerializedBool(skyDebug[i], "renderInstancesInGameView", false);
+            for (int i = 0; i < localRadianceDebug.Length; i++)
+                AssertSerializedBool(localRadianceDebug[i], "renderInstancesInGameView", false);
+            for (int i = 0; i < clipmapDebug.Length; i++)
+            {
+                AssertSerializedBool(clipmapDebug[i], "renderInstancesInGameView", false);
+                AssertSerializedBool(clipmapDebug[i], "showAllCascadeBounds", false);
+                AssertSerializedBool(clipmapDebug[i], "showRadianceProbes", false);
+                AssertSerializedBool(clipmapDebug[i], "showNumericValues", true);
+                AssertSerializedBool(clipmapDebug[i], "showNumericSlicePlanes", false);
+            }
+        }
+
+        private static void AssertSerializedBool(Component component, string name, bool expected)
+        {
+            SerializedProperty property = new SerializedObject(component).FindProperty(name);
+            if (property == null || property.boolValue != expected)
+            {
+                throw new InvalidOperationException(
+                    $"Clean lighting preview expected {component.GetType().Name}.{name}={expected}.");
+            }
+        }
+
+        private static void SetBools(Component component, params (string Name, bool Value)[] values)
+        {
+            SerializedObject serialized = new(component);
+            for (int i = 0; i < values.Length; i++)
+            {
+                SerializedProperty property = serialized.FindProperty(values[i].Name);
+                if (property == null)
+                    throw new InvalidOperationException($"{component.GetType().Name} is missing serialized field '{values[i].Name}'.");
+                property.boolValue = values[i].Value;
+            }
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+            EditorUtility.SetDirty(component);
+        }
 
         private static T FindSingle<T>(Scene scene, string rootName = null) where T : Component
         {

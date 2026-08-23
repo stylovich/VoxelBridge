@@ -49,10 +49,11 @@ Shader "Hidden/DynamicGI/HDRPComposite"
             surfaceTint = lerp(1.0.xxx, gbufferAlbedo, saturate(_DynamicGI_HDRPAlbedoWeight));
         }
 
-        // The prototype field is already normalized to display-linear, pre-exposed
-        // energy (for example 130 klux maps to roughly 1.3 before transport). Applying
-        // HDRP exposure again made useful values require an arbitrary 100-1000x gain.
-        return float4(dynamicIndirect * surfaceTint, 0.0);
+        // The field stores diffuse irradiance. Convert it to outgoing Lambertian
+        // radiance before adding it to camera color. Omitting 1/pi made a strength of
+        // one roughly three times too bright even before surface-albedo integration.
+        const float inversePi = 0.31830988618;
+        return float4(dynamicIndirect * surfaceTint * inversePi, 0.0);
     }
 
     float4 DynamicGIReplacementDarkening(Varyings varyings) : SV_Target

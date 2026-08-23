@@ -33,6 +33,8 @@ namespace DynamicGI.Debugging
 
         [Header("Probe visualization")]
         [SerializeField] private bool showRadianceProbes = true;
+        [Tooltip("When disabled, probe cubes are restricted to the active Scene view and never contaminate gameplay cameras.")]
+        [SerializeField] private bool renderInstancesInGameView;
         [SerializeField] private RadianceDebugDirection displayedDirection = RadianceDebugDirection.Average;
         [SerializeField, Min(0f)] private float cameraRadius = 7f;
         [SerializeField, Range(256, 65536)] private int maximumProbeInstances = 8192;
@@ -120,7 +122,8 @@ namespace DynamicGI.Debugging
 
             Vector3 center = ResolveDebugCenter();
             UpdateDetailedQuery();
-            if (!showRadianceProbes || debugMaterial == null || indirectArgumentsBuffer == null)
+            bool needsSamples = showRadianceProbes || showNumericValues;
+            if (!needsSamples)
                 return;
 
             if (!radianceField.BuildDebugSamples(
@@ -134,28 +137,31 @@ namespace DynamicGI.Debugging
                 return;
             }
 
-            indirectArguments[0].InstanceCount = (uint)sampleCount;
-            indirectArgumentsBuffer.SetData(indirectArguments);
-            debugMaterial.SetBuffer(SamplesId, debugSampleBuffer);
-            debugMaterial.SetFloat(ScaleId, radianceField.ProbeSpacing * probeScale);
-            debugMaterial.SetFloat("_Exposure", exposure);
-            debugMaterial.SetFloat("_MinimumAlpha", minimumAlpha);
-
+            if (showRadianceProbes && debugMaterial != null && indirectArgumentsBuffer != null &&
+                DynamicGIDebugRenderUtility.TryResolveCamera(renderInstancesInGameView, out Camera debugCamera))
+            {
+                indirectArguments[0].InstanceCount = (uint)sampleCount;
+                indirectArgumentsBuffer.SetData(indirectArguments);
+                debugMaterial.SetBuffer(SamplesId, debugSampleBuffer);
+                debugMaterial.SetFloat(ScaleId, radianceField.ProbeSpacing * probeScale);
+                debugMaterial.SetFloat("_Exposure", exposure);
+                debugMaterial.SetFloat("_MinimumAlpha", minimumAlpha);
 #pragma warning disable 618
-            Graphics.DrawMeshInstancedIndirect(
-                cubeMesh,
-                0,
-                debugMaterial,
-                radianceField.FieldBounds,
-                indirectArgumentsBuffer,
-                0,
-                null,
-                ShadowCastingMode.Off,
-                false,
-                gameObject.layer,
-                null,
-                LightProbeUsage.Off);
+                Graphics.DrawMeshInstancedIndirect(
+                    cubeMesh,
+                    0,
+                    debugMaterial,
+                    radianceField.FieldBounds,
+                    indirectArgumentsBuffer,
+                    0,
+                    null,
+                    ShadowCastingMode.Off,
+                    false,
+                    gameObject.layer,
+                    debugCamera,
+                    LightProbeUsage.Off);
 #pragma warning restore 618
+            }
 
             if (showNumericValues && !numericReadbackPending && Time.realtimeSinceStartupAsDouble >= nextNumericReadbackTime)
             {

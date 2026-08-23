@@ -30,6 +30,8 @@ namespace DynamicGI.Debugging
 
         [Header("Visibility samples")]
         [SerializeField] private bool showVisibilitySamples = true;
+        [Tooltip("When disabled, visibility instances are restricted to the active Scene view and never contaminate gameplay cameras.")]
+        [SerializeField] private bool renderInstancesInGameView;
         [SerializeField, Min(0f)] private float cameraRadius = 8f;
         [SerializeField, Range(256, 262144)] private int maximumSampleInstances = 32768;
         [SerializeField, Range(0.05f, 0.8f)] private float sampleScale = 0.22f;
@@ -105,6 +107,8 @@ namespace DynamicGI.Debugging
             UpdateGpuQuery(debugCenter);
             if (!showVisibilitySamples || debugSampleBuffer == null || indirectArgumentsBuffer == null || debugMaterial == null)
                 return;
+            if (!DynamicGIDebugRenderUtility.TryResolveCamera(renderInstancesInGameView, out Camera debugCamera))
+                return;
 
             if (!skyVisibilityField.BuildDebugInstances(debugSampleBuffer, maximumSampleInstances, debugCenter, cameraRadius))
                 return;
@@ -128,7 +132,7 @@ namespace DynamicGI.Debugging
                 ShadowCastingMode.Off,
                 false,
                 gameObject.layer,
-                null,
+                debugCamera,
                 LightProbeUsage.Off);
 #pragma warning restore 618
         }

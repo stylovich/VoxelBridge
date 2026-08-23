@@ -30,6 +30,8 @@ namespace DynamicGI.Debugging
         [Header("Voxel instancing")]
         [SerializeField] private bool showOccupiedVoxels = true;
         [SerializeField] private bool showEmptyVoxels;
+        [Tooltip("When disabled, voxel instances are restricted to the active Scene view and never contaminate gameplay cameras.")]
+        [SerializeField] private bool renderInstancesInGameView;
         [SerializeField, Min(0f)] private float cameraRadius = 12f;
         [SerializeField, Range(256, 262144)] private int maximumVoxelInstances = 32768;
         [SerializeField, Range(0.1f, 1f)] private float voxelScale = 0.88f;
@@ -104,6 +106,8 @@ namespace DynamicGI.Debugging
 
             if ((!showOccupiedVoxels && !showEmptyVoxels) || debugVoxelBuffer == null || indirectArgumentsBuffer == null || debugMaterial == null)
                 return;
+            if (!DynamicGIDebugRenderUtility.TryResolveCamera(renderInstancesInGameView, out Camera debugCamera))
+                return;
 
             int mode = showOccupiedVoxels && showEmptyVoxels ? 2 : (showOccupiedVoxels ? 0 : 1);
             if (!geometryField.BuildDebugVoxelInstances(debugVoxelBuffer, maximumVoxelInstances, mode, debugCenter, cameraRadius))
@@ -127,7 +131,7 @@ namespace DynamicGI.Debugging
                 ShadowCastingMode.Off,
                 false,
                 gameObject.layer,
-                null,
+                debugCamera,
                 LightProbeUsage.Off);
 #pragma warning restore 618
         }
