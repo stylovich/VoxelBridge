@@ -1,4 +1,4 @@
-# This repository intentionally tracks only the portable DynamicGI module.
+# This repository intentionally tracks only the portable DynamicGI and VoxelBridge modules.
 # The Polygon environment, scenes, imported packages, generated data, and Unity
 # caches belong to the local laboratory and are deliberately excluded.
 *
@@ -14,6 +14,9 @@
 !/Assets/DynamicGI.meta
 !/Assets/DynamicGI/
 !/Assets/DynamicGI/**
+!/Assets/VoxelBridge.meta
+!/Assets/VoxelBridge/
+!/Assets/VoxelBridge/**
 
 # Record the editor version used to validate the module without carrying the
 # rest of the project-specific settings into another project.
