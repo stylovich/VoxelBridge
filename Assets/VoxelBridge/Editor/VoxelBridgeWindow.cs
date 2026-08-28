@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using UnityEditor;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
@@ -13,6 +14,7 @@ namespace LocalModels.VoxelBridge
         private const string MagicaVoxelPathKey = "LocalModels.VoxelBridge.MagicaVoxelPath";
 
         private UnityEngine.Object source;
+        private VoxelStyleProfile styleProfile;
         private int resolution = 64;
         private int padding = 1;
         private bool fillInterior = true;
@@ -28,6 +30,10 @@ namespace LocalModels.VoxelBridge
         private UnityEngine.Object directVoxAsset;
         private GameObject returnedObj;
         private TextAsset metadataAsset;
+        private UnityEngine.Object manualParentVox;
+        private int manualTargetLod = 1;
+        private VoxelLodGenerationMode manualGenerationMode = VoxelLodGenerationMode.ReduceParent;
+        private TextAsset lodSetManifest;
         private ReturnAxis returnAxis = ReturnAxis.MagicaVoxelDefault;
         private string prefabFolder = "Assets/VoxelBridgeImports";
 
@@ -89,6 +95,8 @@ namespace LocalModels.VoxelBridge
             EditorGUILayout.Space(8);
             DrawExportSection();
             EditorGUILayout.Space(18);
+            DrawLodSection();
+            EditorGUILayout.Space(18);
             DrawDirectVoxSection();
             EditorGUILayout.Space(18);
             DrawReturnSection();
@@ -99,7 +107,7 @@ namespace LocalModels.VoxelBridge
         {
             EditorGUILayout.LabelField("Voxel Bridge", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox(
-                "Convierte mallas de Unity a .vox para retocarlas en MagicaVoxel. La salida usa Z como eje vertical y una paleta personalizada de hasta 255 colores.",
+                "Convierte mallas a una escala voxel física consistente, genera LODs editables en MagicaVoxel y prepara un prefab LOD para Unity.",
                 MessageType.Info);
         }
 
@@ -108,6 +116,41 @@ namespace LocalModels.VoxelBridge
             EditorGUILayout.LabelField("1. Unity → MagicaVoxel", EditorStyles.boldLabel);
             source = EditorGUILayout.ObjectField(new GUIContent("Modelo", "GameObject, prefab, FBX/OBJ o Mesh"),
                 source, typeof(UnityEngine.Object), true);
+            styleProfile = (VoxelStyleProfile)EditorGUILayout.ObjectField(
+                new GUIContent("Perfil voxel", "Unidad física, LODs, chunks y transiciones compartidos"),
+                styleProfile, typeof(VoxelStyleProfile), false);
+            if (styleProfile == null)
+            {
+                EditorGUILayout.HelpBox(
+                    "Crea o asigna un perfil para generar modelos con vóxeles y LODs consistentes.",
+                    MessageType.Warning);
+                if (GUILayout.Button("Crear perfil voxel predeterminado")) CreateDefaultProfile();
+            }
+            else if (!styleProfile.TryValidate(out string profileError))
+            {
+                EditorGUILayout.HelpBox(profileError, MessageType.Error);
+            }
+            else
+            {
+                string levels = string.Join(", ", System.Linq.Enumerable.Range(0, styleProfile.LodCount)
+                    .Select(i => $"LOD{i}=x{styleProfile.GetLodMultiplier(i)} " +
+                                 $"({styleProfile.BaseVoxelSize * styleProfile.GetLodMultiplier(i):0.###} m)"));
+                EditorGUILayout.HelpBox(
+                    $"Unidad base: {styleProfile.BaseVoxelSize:0.###} m · Chunk: {styleProfile.ChunkCellSize} celdas\n{levels}",
+                    MessageType.Info);
+            }
+
+            bool canGenerateLods = source != null && IsSupported(source) && styleProfile != null &&
+                                   styleProfile.TryValidate(out _) && IsAssetFolder(exportFolder) &&
+                                   IsAssetFolder(prefabFolder);
+            using (new EditorGUI.DisabledScope(!canGenerateLods))
+            {
+                if (GUILayout.Button("Generar LODs automáticos + prefab", GUILayout.Height(36)))
+                    GenerateAutomaticLods();
+            }
+
+            EditorGUILayout.Space(8);
+            EditorGUILayout.LabelField("Conversión individual/legada", EditorStyles.miniBoldLabel);
             resolution = EditorGUILayout.IntSlider(new GUIContent("Resolución", "Vóxeles en el eje más largo"),
                 resolution, 8, 256);
             padding = EditorGUILayout.IntSlider(new GUIContent("Margen", "Vóxeles vacíos alrededor del modelo"),
@@ -130,6 +173,10 @@ namespace LocalModels.VoxelBridge
             exportFolder = EditorGUILayout.TextField("Carpeta de salida", exportFolder);
             if (GUILayout.Button("…", GUILayout.Width(30))) PickAssetFolder(ref exportFolder);
             EditorGUILayout.EndHorizontal();
+            EditorGUILayout.BeginHorizontal();
+            prefabFolder = EditorGUILayout.TextField("Carpeta de prefabs", prefabFolder);
+            if (GUILayout.Button("…", GUILayout.Width(30))) PickAssetFolder(ref prefabFolder);
+            EditorGUILayout.EndHorizontal();
 
             bool settingsValid = source != null && IsSupported(source) && IsAssetFolder(exportFolder) &&
                                  resolution > padding * 2;
@@ -151,9 +198,59 @@ namespace LocalModels.VoxelBridge
             }
         }
 
+        private void DrawLodSection()
+        {
+            EditorGUILayout.LabelField("2. LOD manual", EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox(
+                "Duplica el LOD anterior para una simplificación artística libre o genera directamente la rejilla física correspondiente al nuevo nivel.",
+                MessageType.Info);
+            manualParentVox = EditorGUILayout.ObjectField("LOD padre (.vox)", manualParentVox,
+                typeof(UnityEngine.Object), false);
+            int firstTargetLod = 1;
+            if (VoxelImporterIntegration.IsVoxAsset(manualParentVox) &&
+                VoxelImporterIntegration.TryLoadMetadata(AssetDatabase.GetAssetPath(manualParentVox),
+                    out VoxelBridgeMetadata parentMetadata, out _))
+                firstTargetLod = parentMetadata.lodIndex + 1;
+            bool hasManualTarget = styleProfile != null && firstTargetLod < styleProfile.LodCount;
+            if (hasManualTarget)
+            {
+                string[] labels = System.Linq.Enumerable.Range(firstTargetLod,
+                        styleProfile.LodCount - firstTargetLod)
+                    .Select(i => $"LOD {i} · x{styleProfile.GetLodMultiplier(i)}")
+                    .ToArray();
+                int selected = Mathf.Clamp(manualTargetLod - firstTargetLod, 0, labels.Length - 1);
+                selected = EditorGUILayout.Popup("LOD destino", selected, labels);
+                manualTargetLod = selected + firstTargetLod;
+            }
+            else if (VoxelImporterIntegration.IsVoxAsset(manualParentVox) && styleProfile != null)
+                EditorGUILayout.HelpBox("El LOD padre ya es el último nivel definido en el perfil.", MessageType.Warning);
+            manualGenerationMode = (VoxelLodGenerationMode)EditorGUILayout.Popup(
+                "Punto de partida", manualGenerationMode == VoxelLodGenerationMode.DuplicateParent ? 0 : 1,
+                new[] { "Duplicar anterior (libre)", "Reducir a resolución objetivo" }) == 0
+                ? VoxelLodGenerationMode.DuplicateParent
+                : VoxelLodGenerationMode.ReduceParent;
+
+            bool canGenerateManual = hasManualTarget && styleProfile.TryValidate(out _) &&
+                                     VoxelImporterIntegration.IsVoxAsset(manualParentVox) &&
+                                     IsAssetFolder(prefabFolder);
+            using (new EditorGUI.DisabledScope(!canGenerateManual))
+            {
+                if (GUILayout.Button("Crear LOD manual y actualizar prefab", GUILayout.Height(32)))
+                    GenerateManualLod();
+            }
+
+            EditorGUILayout.Space(8);
+            lodSetManifest = (TextAsset)EditorGUILayout.ObjectField("Manifiesto .voxset", lodSetManifest,
+                typeof(TextAsset), false);
+            using (new EditorGUI.DisabledScope(lodSetManifest == null || !IsAssetFolder(prefabFolder)))
+            {
+                if (GUILayout.Button("Reconstruir prefab LOD")) RebuildLodPrefab();
+            }
+        }
+
         private void DrawDirectVoxSection()
         {
-            EditorGUILayout.LabelField("2. .vox directo en Unity (recomendado)", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("3. .vox directo en Unity", EditorStyles.boldLabel);
             if (!VoxelImporterIntegration.IsInstalled)
             {
                 EditorGUILayout.HelpBox(
@@ -189,7 +286,7 @@ namespace LocalModels.VoxelBridge
 
         private void DrawReturnSection()
         {
-            EditorGUILayout.LabelField("3. MagicaVoxel OBJ → Unity (alternativa)", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("4. MagicaVoxel OBJ → Unity (alternativa)", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox(
                 "En MagicaVoxel usa Export → obj y guarda el OBJ dentro de Assets. Selecciona ese modelo y el archivo .voxelbridge.json generado en el paso anterior.",
                 MessageType.Info);
@@ -198,13 +295,123 @@ namespace LocalModels.VoxelBridge
             returnAxis = (ReturnAxis)EditorGUILayout.Popup(new GUIContent("Ejes del OBJ",
                     "El valor predeterminado compensa la conversión Z-up de MagicaVoxel al OBJ Y-up"),
                 (int)returnAxis, new[] { "MagicaVoxel predeterminado", "Ya alineado con Unity" });
-            EditorGUILayout.BeginHorizontal();
-            prefabFolder = EditorGUILayout.TextField("Carpeta de prefabs", prefabFolder);
-            if (GUILayout.Button("…", GUILayout.Width(30))) PickAssetFolder(ref prefabFolder);
-            EditorGUILayout.EndHorizontal();
+            EditorGUILayout.LabelField("Carpeta de prefabs", prefabFolder, EditorStyles.miniLabel);
             using (new EditorGUI.DisabledScope(returnedObj == null || metadataAsset == null || !IsAssetFolder(prefabFolder)))
             {
                 if (GUILayout.Button("Crear prefab alineado", GUILayout.Height(30))) CreateRoundTripPrefab();
+            }
+        }
+
+        private void CreateDefaultProfile()
+        {
+            const string settingsFolder = "Assets/VoxelBridgeSettings";
+            const string profilePath = settingsFolder + "/VoxelStyleProfile.asset";
+            EnsureAssetFolder(settingsFolder);
+            styleProfile = AssetDatabase.LoadAssetAtPath<VoxelStyleProfile>(profilePath);
+            if (styleProfile == null)
+            {
+                styleProfile = CreateInstance<VoxelStyleProfile>();
+                AssetDatabase.CreateAsset(styleProfile, profilePath);
+                AssetDatabase.SaveAssets();
+            }
+            Selection.activeObject = styleProfile;
+            EditorGUIUtility.PingObject(styleProfile);
+        }
+
+        private VoxelLodBuildOptions CreateLodOptions()
+        {
+            return new VoxelLodBuildOptions
+            {
+                ColorMode = colorMode,
+                SingleColor = singleColor,
+                AlphaCutoff = alphaCutoff,
+                ExportFolder = exportFolder,
+                PrefabFolder = prefabFolder
+            };
+        }
+
+        private void GenerateAutomaticLods()
+        {
+            try
+            {
+                VoxelLodBuildResult result = VoxelLodPipeline.GenerateAutomatic(
+                    source, styleProfile, CreateLodOptions(),
+                    (progress, message) => EditorUtility.DisplayCancelableProgressBar(
+                        "Voxel Bridge · LOD automático", message, progress));
+                lodSetManifest = AssetDatabase.LoadAssetAtPath<TextAsset>(result.ManifestAssetPath);
+                if (result.VoxAssetPaths.Length > 0)
+                {
+                    directVoxAsset = AssetDatabase.LoadMainAssetAtPath(result.VoxAssetPaths[0]);
+                    manualParentVox = directVoxAsset;
+                    manualTargetLod = Mathf.Min(1, styleProfile.LodCount - 1);
+                    lastVoxPath = AssetPathToAbsolute(result.VoxAssetPaths[0]);
+                }
+                UnityEngine.Object prefab = AssetDatabase.LoadMainAssetAtPath(result.PrefabAssetPath);
+                Selection.activeObject = prefab;
+                EditorGUIUtility.PingObject(prefab);
+                status = $"Familia LOD creada: {result.VoxAssetPaths.Length} niveles · {result.PrefabAssetPath}";
+            }
+            catch (OperationCanceledException)
+            {
+                status = "Generación LOD cancelada.";
+            }
+            catch (Exception exception)
+            {
+                status = "Error: " + exception.Message;
+                Debug.LogException(exception);
+                EditorUtility.DisplayDialog("Voxel Bridge", status, "Cerrar");
+            }
+            finally
+            {
+                EditorUtility.ClearProgressBar();
+            }
+        }
+
+        private void GenerateManualLod()
+        {
+            try
+            {
+                string parentPath = AssetDatabase.GetAssetPath(manualParentVox);
+                VoxelLodBuildResult result = VoxelLodPipeline.GenerateManual(
+                    parentPath, styleProfile, manualTargetLod, manualGenerationMode, CreateLodOptions());
+                lodSetManifest = AssetDatabase.LoadAssetAtPath<TextAsset>(result.ManifestAssetPath);
+                directVoxAsset = AssetDatabase.LoadMainAssetAtPath(result.VoxAssetPaths[0]);
+                manualParentVox = directVoxAsset;
+                manualTargetLod = Mathf.Min(manualTargetLod + 1, styleProfile.LodCount - 1);
+                lastVoxPath = AssetPathToAbsolute(result.VoxAssetPaths[0]);
+                UnityEngine.Object prefab = AssetDatabase.LoadMainAssetAtPath(result.PrefabAssetPath);
+                Selection.activeObject = prefab;
+                EditorGUIUtility.PingObject(prefab);
+                status = $"LOD {manualTargetLod} creado y prefab actualizado: {result.PrefabAssetPath}";
+            }
+            catch (Exception exception)
+            {
+                status = "Error: " + exception.Message;
+                Debug.LogException(exception);
+                EditorUtility.DisplayDialog("Voxel Bridge", status, "Cerrar");
+            }
+            finally
+            {
+                EditorUtility.ClearProgressBar();
+            }
+        }
+
+        private void RebuildLodPrefab()
+        {
+            try
+            {
+                string manifestPath = AssetDatabase.GetAssetPath(lodSetManifest);
+                string prefabPath = VoxelLodPipeline.RebuildPrefab(manifestPath, prefabFolder);
+                UnityEngine.Object prefab = AssetDatabase.LoadMainAssetAtPath(prefabPath);
+                Selection.activeObject = prefab;
+                EditorGUIUtility.PingObject(prefab);
+                status = $"Prefab LOD reconstruido: {prefabPath}";
+            }
+            catch (Exception exception)
+            {
+                status = "Error: " + exception.Message;
+                Debug.LogException(exception);
+                EditorUtility.DisplayDialog("Voxel Bridge", status, "Cerrar");
             }
         }
 

@@ -1,0 +1,411 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using UnityEditor;
+using UnityEngine;
+using Object = UnityEngine.Object;
+
+namespace LocalModels.VoxelBridge
+{
+    internal sealed class VoxelLodBuildOptions
+    {
+        public VoxelColorMode ColorMode;
+        public Color32 SingleColor;
+        public float AlphaCutoff;
+        public string ExportFolder;
+        public string PrefabFolder;
+    }
+
+    internal readonly struct VoxelLodBuildResult
+    {
+        public readonly string ManifestAssetPath;
+        public readonly string PrefabAssetPath;
+        public readonly string[] VoxAssetPaths;
+
+        public VoxelLodBuildResult(string manifestAssetPath, string prefabAssetPath, string[] voxAssetPaths)
+        {
+            ManifestAssetPath = manifestAssetPath;
+            PrefabAssetPath = prefabAssetPath;
+            VoxAssetPaths = voxAssetPaths;
+        }
+    }
+
+    internal static class VoxelLodPipeline
+    {
+        public static VoxelLodBuildResult GenerateAutomatic(
+            Object source, VoxelStyleProfile profile, VoxelLodBuildOptions options,
+            Func<float, string, bool> cancelProgress = null)
+        {
+            ValidateProfileAndOptions(profile, options);
+            string familyId = Guid.NewGuid().ToString("N");
+            string safeName = MakeSafeFileName(source.name);
+            EnsureAssetFolder(options.ExportFolder);
+            string familyFolder = AssetDatabase.GenerateUniqueAssetPath(
+                $"{NormalizeAssetPath(options.ExportFolder)}/{safeName}_VoxelLOD");
+            EnsureAssetFolder(familyFolder);
+            string manifestAssetPath = $"{familyFolder}/{safeName}.voxset.json";
+            string profilePath = AssetDatabase.GetAssetPath(profile);
+            var entries = new List<VoxelLodEntry>();
+            var voxPaths = new List<string>();
+
+            for (int lodIndex = 0; lodIndex < profile.LodCount; lodIndex++)
+            {
+                int multiplier = profile.GetLodMultiplier(lodIndex);
+                float progressBase = (float)lodIndex / profile.LodCount;
+                var settings = new VoxelizationSettings
+                {
+                    VoxelSize = profile.BaseVoxelSize * multiplier,
+                    ChunkCellSize = profile.ChunkCellSize,
+                    Padding = profile.Padding,
+                    FillInterior = profile.FillInterior,
+                    ColorMode = options.ColorMode,
+                    SingleColor = options.SingleColor,
+                    AlphaCutoff = options.AlphaCutoff
+                };
+                VoxelizationResult result = MeshVoxelizer.Voxelize(source, settings, (p, message) =>
+                    cancelProgress != null && cancelProgress(
+                        progressBase + p / profile.LodCount,
+                        $"LOD {lodIndex}: {message}"));
+                string voxPath = $"{familyFolder}/{safeName}_LOD{lodIndex}.vox";
+                WriteGrid(voxPath, result.Grid, result.SourceBounds, source.name,
+                    AssetDatabase.GetAssetPath(source), familyId, manifestAssetPath, lodIndex, multiplier,
+                    VoxelLodGenerationMode.SourceMesh, null, profile);
+                entries.Add(new VoxelLodEntry
+                {
+                    lodIndex = lodIndex,
+                    multiplier = multiplier,
+                    generationMode = VoxelLodGenerationMode.SourceMesh,
+                    voxAssetPath = voxPath
+                });
+                voxPaths.Add(voxPath);
+            }
+
+            var manifest = new VoxelLodSetManifest
+            {
+                familyId = familyId,
+                sourceName = source.name,
+                sourceAssetPath = AssetDatabase.GetAssetPath(source),
+                baseVoxelSize = profile.BaseVoxelSize,
+                chunkCellSize = profile.ChunkCellSize,
+                profileAssetPath = profilePath,
+                lods = entries.ToArray()
+            };
+            WriteJsonAsset(manifestAssetPath, manifest);
+            ImportGeneratedVox(voxPaths);
+            string prefabPath = BuildPrefab(manifest, options.PrefabFolder);
+            manifest.prefabAssetPath = prefabPath;
+            WriteJsonAsset(manifestAssetPath, manifest);
+            AssetDatabase.ImportAsset(manifestAssetPath, ImportAssetOptions.ForceSynchronousImport);
+            return new VoxelLodBuildResult(manifestAssetPath, prefabPath, voxPaths.ToArray());
+        }
+
+        public static VoxelLodBuildResult GenerateManual(
+            string parentVoxAssetPath, VoxelStyleProfile profile, int targetLodIndex,
+            VoxelLodGenerationMode mode, VoxelLodBuildOptions options)
+        {
+            ValidateProfileAndOptions(profile, options);
+            if (mode == VoxelLodGenerationMode.SourceMesh)
+                throw new ArgumentException("El modo manual debe duplicar o reducir el LOD anterior.", nameof(mode));
+            if (!VoxelImporterIntegration.TryLoadMetadata(parentVoxAssetPath,
+                    out VoxelBridgeMetadata parent, out string error))
+                throw new InvalidDataException(error);
+            if (targetLodIndex <= parent.lodIndex || targetLodIndex >= profile.LodCount)
+                throw new ArgumentOutOfRangeException(nameof(targetLodIndex),
+                    "El LOD de destino debe ser posterior al LOD padre y existir en el perfil.");
+
+            string manifestPath = parent.lodSetAssetPath;
+            VoxelLodSetManifest manifest;
+            if (!string.IsNullOrWhiteSpace(manifestPath) && TryReadJsonAsset(manifestPath, out manifest))
+            {
+                if (manifest.familyId != parent.familyId)
+                    throw new InvalidDataException("El manifiesto no pertenece a la misma familia LOD.");
+            }
+            else
+            {
+                string folder = Path.GetDirectoryName(parentVoxAssetPath)?.Replace('\\', '/') ?? "Assets";
+                manifestPath = AssetDatabase.GenerateUniqueAssetPath(
+                    $"{folder}/{MakeSafeFileName(parent.sourceName)}.voxset.json");
+                manifest = new VoxelLodSetManifest
+                {
+                    familyId = string.IsNullOrWhiteSpace(parent.familyId) ? Guid.NewGuid().ToString("N") : parent.familyId,
+                    sourceName = parent.sourceName,
+                    sourceAssetPath = parent.sourceAssetPath,
+                    baseVoxelSize = parent.baseVoxelSize > 0f ? parent.baseVoxelSize : profile.BaseVoxelSize,
+                    chunkCellSize = parent.chunkCellSize > 0 ? parent.chunkCellSize : profile.ChunkCellSize,
+                    profileAssetPath = AssetDatabase.GetAssetPath(profile),
+                    lods = new[]
+                    {
+                        new VoxelLodEntry
+                        {
+                            lodIndex = parent.lodIndex,
+                            multiplier = Mathf.Max(1, parent.lodMultiplier),
+                            generationMode = parent.lodGenerationMode,
+                            voxAssetPath = parentVoxAssetPath
+                        }
+                    }
+                };
+            }
+
+            string folderPath = Path.GetDirectoryName(parentVoxAssetPath)?.Replace('\\', '/') ?? "Assets";
+            string targetPath = AssetDatabase.GenerateUniqueAssetPath(
+                $"{folderPath}/{MakeSafeFileName(parent.sourceName)}_LOD{targetLodIndex}.vox");
+            int targetMultiplier;
+            if (mode == VoxelLodGenerationMode.DuplicateParent)
+            {
+                File.Copy(AssetPathToAbsolute(parentVoxAssetPath), AssetPathToAbsolute(targetPath));
+                VoxelBridgeMetadata copy = JsonUtility.FromJson<VoxelBridgeMetadata>(JsonUtility.ToJson(parent));
+                copy.familyId = manifest.familyId;
+                copy.lodSetAssetPath = manifestPath;
+                copy.lodIndex = targetLodIndex;
+                copy.lodGenerationMode = mode;
+                copy.parentVoxAssetPath = parentVoxAssetPath;
+                WriteJsonAsset(VoxelImporterIntegration.GetMetadataAssetPath(targetPath), copy);
+                targetMultiplier = Mathf.Max(1, parent.lodMultiplier);
+            }
+            else
+            {
+                targetMultiplier = profile.GetLodMultiplier(targetLodIndex);
+                VoxelGrid parentGrid = VoxelVolumeReader.Read(AssetPathToAbsolute(parentVoxAssetPath), parent);
+                VoxelGrid reduced = VoxelGridDownsampler.Downsample(parentGrid,
+                    profile.BaseVoxelSize * targetMultiplier, profile.Padding, profile.ChunkCellSize);
+                Bounds sourceBounds = BoundsFromMetadataOrGrid(parent, parentGrid);
+                WriteGrid(targetPath, reduced, sourceBounds, parent.sourceName, parent.sourceAssetPath,
+                    manifest.familyId, manifestPath, targetLodIndex, targetMultiplier, mode,
+                    parentVoxAssetPath, profile);
+            }
+
+            var entries = new List<VoxelLodEntry>(manifest.lods ?? Array.Empty<VoxelLodEntry>());
+            entries.RemoveAll(entry => entry.lodIndex == targetLodIndex);
+            entries.Add(new VoxelLodEntry
+            {
+                lodIndex = targetLodIndex,
+                multiplier = targetMultiplier,
+                generationMode = mode,
+                voxAssetPath = targetPath
+            });
+            entries.Sort((a, b) => a.lodIndex.CompareTo(b.lodIndex));
+            manifest.lods = entries.ToArray();
+            manifest.profileAssetPath = AssetDatabase.GetAssetPath(profile);
+            WriteJsonAsset(manifestPath, manifest);
+            ImportGeneratedVox(new[] { targetPath });
+            string prefabPath = BuildPrefab(manifest, options.PrefabFolder);
+            manifest.prefabAssetPath = prefabPath;
+            WriteJsonAsset(manifestPath, manifest);
+            AssetDatabase.ImportAsset(manifestPath, ImportAssetOptions.ForceSynchronousImport);
+            return new VoxelLodBuildResult(manifestPath, prefabPath, new[] { targetPath });
+        }
+
+        public static string RebuildPrefab(string manifestAssetPath, string prefabFolder)
+        {
+            if (!TryReadJsonAsset(manifestAssetPath, out VoxelLodSetManifest manifest))
+                throw new InvalidDataException("El manifiesto LOD no es válido.");
+            string prefabPath = BuildPrefab(manifest, prefabFolder);
+            manifest.prefabAssetPath = prefabPath;
+            WriteJsonAsset(manifestAssetPath, manifest);
+            AssetDatabase.ImportAsset(manifestAssetPath, ImportAssetOptions.ForceSynchronousImport);
+            return prefabPath;
+        }
+
+        private static void WriteGrid(string voxAssetPath, VoxelGrid grid, Bounds sourceBounds,
+            string sourceName, string sourceAssetPath, string familyId, string manifestAssetPath,
+            int lodIndex, int lodMultiplier, VoxelLodGenerationMode mode, string parentVoxAssetPath,
+            VoxelStyleProfile profile)
+        {
+            QuantizedVoxels quantized = VoxelColorQuantizer.Quantize(grid);
+            VoxWriteResult writeResult = VoxelChunkedVoxWriter.Write(
+                AssetPathToAbsolute(voxAssetPath), grid, quantized, profile.ChunkCellSize);
+            CalculateOccupiedBounds(grid, out Vector3Int occupiedMin, out Vector3Int occupiedSize);
+            bool normalizedBySceneGraph = writeResult.UsesSceneGraph;
+            var metadata = new VoxelBridgeMetadata
+            {
+                sourceName = sourceName,
+                sourceAssetPath = sourceAssetPath,
+                resolution = Mathf.Max(grid.Size.x, Mathf.Max(grid.Size.y, grid.Size.z)),
+                padding = profile.Padding,
+                fillInterior = profile.FillInterior,
+                hideInternalCavities = profile.HideInternalCavities,
+                voxelSize = grid.VoxelSize,
+                gridOrigin = grid.Origin,
+                unityGridSize = grid.Size,
+                voxGridSize = new Vector3Int(grid.Size.x, grid.Size.z, grid.Size.y),
+                voxelCount = grid.CountOccupied(),
+                paletteColorCount = quantized.Palette.Length,
+                familyId = familyId,
+                lodSetAssetPath = manifestAssetPath,
+                lodIndex = lodIndex,
+                lodMultiplier = lodMultiplier,
+                lodGenerationMode = mode,
+                parentVoxAssetPath = parentVoxAssetPath,
+                baseVoxelSize = profile.BaseVoxelSize,
+                chunkCellSize = profile.ChunkCellSize,
+                sourceBoundsMin = sourceBounds.min,
+                sourceBoundsMax = sourceBounds.max,
+                importGridOrigin = normalizedBySceneGraph
+                    ? grid.Origin + (Vector3)occupiedMin * grid.VoxelSize
+                    : grid.Origin,
+                importGridSize = normalizedBySceneGraph ? occupiedSize : grid.Size,
+                chunks = writeResult.Chunks
+            };
+            WriteJsonAsset(VoxelImporterIntegration.GetMetadataAssetPath(voxAssetPath), metadata);
+        }
+
+        private static void ImportGeneratedVox(IEnumerable<string> voxPaths)
+        {
+            AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+            foreach (string path in voxPaths)
+            {
+                if (!VoxelImporterIntegration.ApplyAndReimport(path, out string message, forceReimport: true))
+                    Debug.LogWarning($"Voxel Bridge no pudo configurar '{path}': {message}");
+            }
+            AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+        }
+
+        private static string BuildPrefab(VoxelLodSetManifest manifest, string prefabFolder)
+        {
+            EnsureAssetFolder(prefabFolder);
+            VoxelLodEntry[] entries = (manifest.lods ?? Array.Empty<VoxelLodEntry>())
+                .Where(entry => !string.IsNullOrWhiteSpace(entry.voxAssetPath))
+                .OrderBy(entry => entry.lodIndex)
+                .ToArray();
+            if (entries.Length == 0) throw new InvalidDataException("El manifiesto no contiene niveles LOD.");
+
+            VoxelStyleProfile profile = string.IsNullOrEmpty(manifest.profileAssetPath)
+                ? null
+                : AssetDatabase.LoadAssetAtPath<VoxelStyleProfile>(manifest.profileAssetPath);
+            var root = new GameObject(MakeSafeFileName(manifest.sourceName) + "_VoxelLOD");
+            try
+            {
+                var lods = new LOD[entries.Length];
+                for (int i = 0; i < entries.Length; i++)
+                {
+                    VoxelLodEntry entry = entries[i];
+                    GameObject imported = AssetDatabase.LoadAssetAtPath<GameObject>(entry.voxAssetPath);
+                    if (imported == null)
+                        throw new InvalidDataException($"'{entry.voxAssetPath}' no produjo un GameObject importado.");
+                    GameObject child = Object.Instantiate(imported);
+                    child.name = $"LOD{entry.lodIndex}_x{entry.multiplier}";
+                    child.transform.SetParent(root.transform, false);
+                    Renderer[] renderers = child.GetComponentsInChildren<Renderer>(true);
+                    if (renderers.Length == 0)
+                        throw new InvalidDataException($"El LOD {entry.lodIndex} no contiene renderers.");
+                    float height = profile != null
+                        ? profile.GetLodScreenHeight(entry.lodIndex)
+                        : Mathf.Max(0.01f, 0.6f * Mathf.Pow(0.5f, entry.lodIndex));
+                    lods[i] = new LOD(height, renderers);
+                }
+                var group = root.AddComponent<LODGroup>();
+                group.fadeMode = LODFadeMode.None;
+                group.SetLODs(lods);
+                group.RecalculateBounds();
+
+                string path = IsReusablePrefabPath(manifest.prefabAssetPath)
+                    ? NormalizeAssetPath(manifest.prefabAssetPath)
+                    : AssetDatabase.GenerateUniqueAssetPath(
+                        $"{NormalizeAssetPath(prefabFolder)}/{MakeSafeFileName(root.name)}.prefab");
+                PrefabUtility.SaveAsPrefabAsset(root, path);
+                return path;
+            }
+            finally
+            {
+                Object.DestroyImmediate(root);
+            }
+        }
+
+        private static Bounds BoundsFromMetadataOrGrid(VoxelBridgeMetadata metadata, VoxelGrid grid)
+        {
+            if ((metadata.sourceBoundsMax - metadata.sourceBoundsMin).sqrMagnitude > 1e-12f)
+                return new Bounds((metadata.sourceBoundsMin + metadata.sourceBoundsMax) * 0.5f,
+                    metadata.sourceBoundsMax - metadata.sourceBoundsMin);
+            return new Bounds(grid.Origin + (Vector3)grid.Size * grid.VoxelSize * 0.5f,
+                (Vector3)grid.Size * grid.VoxelSize);
+        }
+
+        private static void CalculateOccupiedBounds(VoxelGrid grid, out Vector3Int min, out Vector3Int size)
+        {
+            min = new Vector3Int(int.MaxValue, int.MaxValue, int.MaxValue);
+            Vector3Int max = new(int.MinValue, int.MinValue, int.MinValue);
+            for (int i = 0; i < grid.Occupied.Length; i++)
+            {
+                if (!grid.Occupied[i]) continue;
+                grid.Coordinates(i, out int x, out int y, out int z);
+                var position = new Vector3Int(x, y, z);
+                min = Vector3Int.Min(min, position);
+                max = Vector3Int.Max(max, position);
+            }
+            if (min.x == int.MaxValue) throw new InvalidOperationException("La rejilla no contiene vóxeles.");
+            size = max - min + Vector3Int.one;
+        }
+
+        private static void ValidateProfileAndOptions(VoxelStyleProfile profile, VoxelLodBuildOptions options)
+        {
+            if (profile == null) throw new ArgumentNullException(nameof(profile));
+            if (!profile.TryValidate(out string error)) throw new InvalidOperationException(error);
+            if (options == null) throw new ArgumentNullException(nameof(options));
+            if (!IsAssetFolder(options.ExportFolder) || !IsAssetFolder(options.PrefabFolder))
+                throw new ArgumentException("Las carpetas de salida deben estar dentro de Assets.");
+        }
+
+        private static bool TryReadJsonAsset<T>(string assetPath, out T value) where T : class
+        {
+            value = null;
+            if (string.IsNullOrWhiteSpace(assetPath)) return false;
+            string absolute = AssetPathToAbsolute(assetPath);
+            if (!File.Exists(absolute)) return false;
+            value = JsonUtility.FromJson<T>(File.ReadAllText(absolute));
+            return value != null;
+        }
+
+        private static void WriteJsonAsset<T>(string assetPath, T value)
+        {
+            string absolute = AssetPathToAbsolute(assetPath);
+            string directory = Path.GetDirectoryName(absolute);
+            if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
+            File.WriteAllText(absolute, JsonUtility.ToJson(value, true));
+        }
+
+        internal static void EnsureAssetFolder(string path)
+        {
+            path = NormalizeAssetPath(path);
+            if (!IsAssetFolder(path)) throw new ArgumentException("La carpeta debe estar dentro de Assets.");
+            if (AssetDatabase.IsValidFolder(path)) return;
+            string[] parts = path.Split('/');
+            string current = parts[0];
+            for (int i = 1; i < parts.Length; i++)
+            {
+                string next = current + "/" + parts[i];
+                if (!AssetDatabase.IsValidFolder(next)) AssetDatabase.CreateFolder(current, parts[i]);
+                current = next;
+            }
+        }
+
+        internal static string AssetPathToAbsolute(string assetPath)
+        {
+            string projectRoot = Directory.GetParent(Application.dataPath)?.FullName
+                                 ?? throw new InvalidOperationException("No se encontró la raíz del proyecto.");
+            return Path.GetFullPath(Path.Combine(projectRoot, assetPath));
+        }
+
+        internal static bool IsAssetFolder(string path)
+        {
+            path = NormalizeAssetPath(path);
+            return path == "Assets" || path.StartsWith("Assets/", StringComparison.Ordinal);
+        }
+
+        internal static string NormalizeAssetPath(string path) =>
+            (path ?? string.Empty).Trim().Replace('\\', '/').TrimEnd('/');
+
+        private static bool IsReusablePrefabPath(string path)
+        {
+            path = NormalizeAssetPath(path);
+            return path.StartsWith("Assets/", StringComparison.Ordinal) &&
+                   path.EndsWith(".prefab", StringComparison.OrdinalIgnoreCase);
+        }
+
+        internal static string MakeSafeFileName(string value)
+        {
+            foreach (char invalid in Path.GetInvalidFileNameChars()) value = value.Replace(invalid, '_');
+            return string.IsNullOrWhiteSpace(value) ? "VoxelModel" : value;
+        }
+    }
+}

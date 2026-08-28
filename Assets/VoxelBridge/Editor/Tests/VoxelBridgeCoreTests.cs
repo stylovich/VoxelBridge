@@ -1,4 +1,5 @@
 using System.IO;
+using System.Linq;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
@@ -87,6 +88,88 @@ namespace LocalModels.VoxelBridge.Tests
         }
 
         [Test]
+        public void PhysicalGridPlanner_AlignsOriginAndUsesRequestedVoxelSize()
+        {
+            var bounds = new Bounds(new Vector3(0.37f, 1.11f, -0.44f),
+                new Vector3(2.13f, 0.91f, 3.07f));
+
+            VoxelGridPlan plan = VoxelGridPlanner.Create(bounds, 0.1f, 1, 128);
+
+            Assert.That(plan.VoxelSize, Is.EqualTo(0.1f).Within(1e-6f));
+            Assert.That(Mathf.Abs(plan.Origin.x / 0.1f - Mathf.Round(plan.Origin.x / 0.1f)),
+                Is.LessThan(1e-4f));
+            Assert.That(Mathf.Abs(plan.Origin.y / 0.1f - Mathf.Round(plan.Origin.y / 0.1f)),
+                Is.LessThan(1e-4f));
+            Assert.That(Mathf.Abs(plan.Origin.z / 0.1f - Mathf.Round(plan.Origin.z / 0.1f)),
+                Is.LessThan(1e-4f));
+            Assert.That(plan.Origin.x, Is.LessThanOrEqualTo(bounds.min.x - 0.099f));
+            Assert.That(plan.Origin.y, Is.LessThanOrEqualTo(bounds.min.y - 0.099f));
+            Assert.That(plan.Origin.z, Is.LessThanOrEqualTo(bounds.min.z - 0.099f));
+        }
+
+        [Test]
+        public void ChunkedVoxWriterAndReader_RoundTripGlobalVoxelCoordinates()
+        {
+            var grid = new VoxelGrid(new Vector3Int(35, 9, 7), new Vector3(-1.2f, 0.3f, 2.1f), 0.1f);
+            int[] occupied =
+            {
+                grid.Index(0, 0, 0), grid.Index(15, 4, 2), grid.Index(16, 4, 2),
+                grid.Index(34, 8, 6)
+            };
+            Color32[] colors =
+            {
+                new(255, 0, 0, 255), new(0, 255, 0, 255),
+                new(0, 0, 255, 255), new(255, 255, 0, 255)
+            };
+            for (int i = 0; i < occupied.Length; i++)
+            {
+                grid.Occupied[occupied[i]] = true;
+                grid.Colors[occupied[i]] = colors[i];
+            }
+            QuantizedVoxels quantized = VoxelColorQuantizer.Quantize(grid);
+            string path = Path.Combine(Path.GetTempPath(), "VoxelBridgeChunkRoundTrip.vox");
+            try
+            {
+                VoxWriteResult write = VoxelChunkedVoxWriter.Write(path, grid, quantized, 16);
+                var metadata = new VoxelBridgeMetadata
+                {
+                    voxelSize = grid.VoxelSize,
+                    gridOrigin = grid.Origin,
+                    unityGridSize = grid.Size,
+                    chunks = write.Chunks
+                };
+
+                VoxelGrid restored = VoxelVolumeReader.Read(path, metadata);
+
+                Assert.That(write.UsesSceneGraph, Is.True);
+                Assert.That(write.Chunks.Length, Is.EqualTo(3));
+                Assert.That(restored.CountOccupied(), Is.EqualTo(occupied.Length));
+                foreach (int index in occupied) Assert.That(restored.Occupied[index], Is.True);
+            }
+            finally
+            {
+                if (File.Exists(path)) File.Delete(path);
+            }
+        }
+
+        [Test]
+        public void Downsampler_UsesLargerAlignedCellsAndPreservesOccupiedGroups()
+        {
+            var source = new VoxelGrid(new Vector3Int(8, 4, 4), Vector3.zero, 0.1f);
+            for (int x = 0; x < 4; x++)
+            {
+                int index = source.Index(x, 1, 1);
+                source.Occupied[index] = true;
+                source.Colors[index] = new Color32(120, 80, 40, 255);
+            }
+
+            VoxelGrid reduced = VoxelGridDownsampler.Downsample(source, 0.2f, 0, 128);
+
+            Assert.That(reduced.VoxelSize, Is.EqualTo(0.2f).Within(1e-6f));
+            Assert.That(reduced.CountOccupied(), Is.EqualTo(2));
+        }
+
+        [Test]
         public void VoxelImporterPatch_AppliesOnceAndThenReportsAlreadyApplied()
         {
             string source = CreateUnpatchedVoxelImporterFixture();
@@ -162,6 +245,94 @@ namespace LocalModels.VoxelBridge.Tests
 
             if (checkedTriangles == 0)
                 Assert.Ignore("No hay mallas .vox generadas; Voxel Importer es una integración opcional.");
+        }
+
+        [Test]
+        public void AutomaticLodPipeline_CreatesChunkedVoxFamilyAndLodPrefab()
+        {
+            if (!VoxelImporterIntegration.IsInstalled)
+                Assert.Ignore("Voxel Importer es opcional y no está instalado.");
+
+            const string testRoot = "Assets/VoxelBridgeTestOutput";
+            GameObject root = null;
+            VoxelStyleProfile profile = null;
+            try
+            {
+                root = new GameObject("PipelineCube");
+                GameObject cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                cube.transform.SetParent(root.transform, false);
+                cube.transform.localScale = new Vector3(4f, 2f, 2f);
+                profile = ScriptableObject.CreateInstance<VoxelStyleProfile>();
+                var serializedProfile = new SerializedObject(profile);
+                serializedProfile.FindProperty("baseVoxelSize").floatValue = 0.25f;
+                serializedProfile.FindProperty("chunkCellSize").intValue = 16;
+                serializedProfile.FindProperty("padding").intValue = 1;
+                serializedProfile.FindProperty("fillInterior").boolValue = true;
+                SerializedProperty multipliers = serializedProfile.FindProperty("lodMultipliers");
+                multipliers.arraySize = 2;
+                multipliers.GetArrayElementAtIndex(0).intValue = 1;
+                multipliers.GetArrayElementAtIndex(1).intValue = 2;
+                serializedProfile.ApplyModifiedPropertiesWithoutUndo();
+
+                var options = new VoxelLodBuildOptions
+                {
+                    ColorMode = VoxelColorMode.SingleColor,
+                    SingleColor = new Color32(180, 120, 60, 255),
+                    AlphaCutoff = 0.1f,
+                    ExportFolder = testRoot + "/Exports",
+                    PrefabFolder = testRoot + "/Prefabs"
+                };
+
+                VoxelLodBuildResult build = VoxelLodPipeline.GenerateAutomatic(root, profile, options);
+
+                Assert.That(build.VoxAssetPaths.Length, Is.EqualTo(2));
+                Assert.That(File.Exists(VoxelLodPipeline.AssetPathToAbsolute(build.ManifestAssetPath)), Is.True);
+                Assert.That(VoxelImporterIntegration.TryLoadMetadata(build.VoxAssetPaths[0],
+                    out VoxelBridgeMetadata lod0, out string error), Is.True, error);
+                Assert.That(lod0.voxelSize, Is.EqualTo(0.25f).Within(1e-6f));
+                Assert.That(lod0.chunks.Length, Is.GreaterThan(1));
+                GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(build.PrefabAssetPath);
+                Assert.That(prefab, Is.Not.Null);
+                Assert.That(prefab.GetComponent<LODGroup>().lodCount, Is.EqualTo(2));
+                Renderer[] chunkRenderers = prefab.transform.GetChild(0)
+                    .GetComponentsInChildren<Renderer>(true);
+                Assert.That(chunkRenderers.Length, Is.GreaterThan(1));
+                Bounds renderedBounds = chunkRenderers[0].bounds;
+                for (int i = 1; i < chunkRenderers.Length; i++)
+                    renderedBounds.Encapsulate(chunkRenderers[i].bounds);
+                string chunkDiagnostics = string.Join(" | ", chunkRenderers.Select(renderer =>
+                    $"{renderer.name}: pos={renderer.transform.position}, bounds={renderer.bounds}"));
+                Assert.That(renderedBounds.size.x, Is.EqualTo(4f).Within(0.51f), chunkDiagnostics);
+                Assert.That(renderedBounds.size.y, Is.EqualTo(2f).Within(0.51f));
+                Assert.That(renderedBounds.size.z, Is.EqualTo(2f).Within(0.51f));
+
+                VoxelLodBuildResult duplicate = VoxelLodPipeline.GenerateManual(
+                    build.VoxAssetPaths[0], profile, 1, VoxelLodGenerationMode.DuplicateParent, options);
+                Assert.That(VoxelImporterIntegration.TryLoadMetadata(duplicate.VoxAssetPaths[0],
+                    out VoxelBridgeMetadata duplicateMetadata, out error), Is.True, error);
+                Assert.That(duplicateMetadata.lodGenerationMode,
+                    Is.EqualTo(VoxelLodGenerationMode.DuplicateParent));
+                Assert.That(duplicateMetadata.voxelSize, Is.EqualTo(0.25f).Within(1e-6f));
+                Assert.That(duplicateMetadata.lodMultiplier, Is.EqualTo(1));
+                Assert.That(duplicate.PrefabAssetPath, Is.EqualTo(build.PrefabAssetPath));
+
+                VoxelLodBuildResult reduced = VoxelLodPipeline.GenerateManual(
+                    build.VoxAssetPaths[0], profile, 1, VoxelLodGenerationMode.ReduceParent, options);
+                Assert.That(VoxelImporterIntegration.TryLoadMetadata(reduced.VoxAssetPaths[0],
+                    out VoxelBridgeMetadata reducedMetadata, out error), Is.True, error);
+                Assert.That(reducedMetadata.lodGenerationMode,
+                    Is.EqualTo(VoxelLodGenerationMode.ReduceParent));
+                Assert.That(reducedMetadata.voxelSize, Is.EqualTo(0.5f).Within(1e-6f));
+                Assert.That(reducedMetadata.lodMultiplier, Is.EqualTo(2));
+                Assert.That(reducedMetadata.voxelCount, Is.LessThan(lod0.voxelCount));
+                Assert.That(reduced.PrefabAssetPath, Is.EqualTo(build.PrefabAssetPath));
+            }
+            finally
+            {
+                if (root != null) Object.DestroyImmediate(root);
+                if (profile != null) Object.DestroyImmediate(profile);
+                AssetDatabase.DeleteAsset(testRoot);
+            }
         }
 
         [Test]

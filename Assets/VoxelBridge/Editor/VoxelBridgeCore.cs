@@ -13,10 +13,26 @@ namespace LocalModels.VoxelBridge
         SingleColor
     }
 
+    internal enum VoxelLodGenerationMode
+    {
+        SourceMesh,
+        DuplicateParent,
+        ReduceParent
+    }
+
+    [Serializable]
+    internal sealed class VoxelChunkMetadata
+    {
+        public int modelIndex;
+        public Vector3Int gridOffset;
+        public Vector3Int gridSize;
+        public int voxelCount;
+    }
+
     [Serializable]
     internal sealed class VoxelBridgeMetadata
     {
-        public int formatVersion = 2;
+        public int formatVersion = 3;
         public string sourceName;
         public string sourceAssetPath;
         public int resolution;
@@ -30,6 +46,42 @@ namespace LocalModels.VoxelBridge
         public string axisMapping = "VOX(x,y,z) = UnityGrid(x,z,y)";
         public int voxelCount;
         public int paletteColorCount;
+        public string familyId;
+        public string lodSetAssetPath;
+        public int lodIndex;
+        public int lodMultiplier = 1;
+        public VoxelLodGenerationMode lodGenerationMode;
+        public string parentVoxAssetPath;
+        public float baseVoxelSize;
+        public int chunkCellSize = 256;
+        public Vector3 sourceBoundsMin;
+        public Vector3 sourceBoundsMax;
+        public Vector3 importGridOrigin;
+        public Vector3Int importGridSize;
+        public VoxelChunkMetadata[] chunks;
+    }
+
+    [Serializable]
+    internal sealed class VoxelLodEntry
+    {
+        public int lodIndex;
+        public int multiplier = 1;
+        public VoxelLodGenerationMode generationMode;
+        public string voxAssetPath;
+    }
+
+    [Serializable]
+    internal sealed class VoxelLodSetManifest
+    {
+        public int formatVersion = 1;
+        public string familyId;
+        public string sourceName;
+        public string sourceAssetPath;
+        public float baseVoxelSize;
+        public int chunkCellSize;
+        public string profileAssetPath;
+        public string prefabAssetPath;
+        public VoxelLodEntry[] lods;
     }
 
     internal sealed class VoxelGrid

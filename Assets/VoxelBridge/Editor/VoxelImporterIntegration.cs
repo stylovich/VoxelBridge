@@ -84,7 +84,7 @@ namespace LocalModels.VoxelBridge
                 return false;
             }
 
-            if (metadata == null || metadata.formatVersion < 1 || metadata.formatVersion > 2 ||
+            if (metadata == null || metadata.formatVersion < 1 || metadata.formatVersion > 3 ||
                 metadata.voxelSize <= 0f || float.IsNaN(metadata.voxelSize) || float.IsInfinity(metadata.voxelSize) ||
                 metadata.unityGridSize.x <= 0 || metadata.unityGridSize.y <= 0 || metadata.unityGridSize.z <= 0)
             {
@@ -99,8 +99,14 @@ namespace LocalModels.VoxelBridge
         {
             if (metadata == null) throw new ArgumentNullException(nameof(metadata));
             float voxelSize = metadata.voxelSize;
-            Vector3Int size = metadata.unityGridSize;
-            Vector3 origin = metadata.gridOrigin;
+            Vector3Int size = metadata.formatVersion >= 3 && metadata.importGridSize.x > 0 &&
+                              metadata.importGridSize.y > 0 && metadata.importGridSize.z > 0
+                ? metadata.importGridSize
+                : metadata.unityGridSize;
+            Vector3 origin = metadata.formatVersion >= 3 && metadata.importGridSize.x > 0 &&
+                             metadata.importGridSize.y > 0 && metadata.importGridSize.z > 0
+                ? metadata.importGridOrigin
+                : metadata.gridOrigin;
             if (voxelSize <= 0f || size.x <= 0 || size.y <= 0 || size.z <= 0)
                 throw new ArgumentException("Los metadatos no contienen una rejilla válida.", nameof(metadata));
 
@@ -177,7 +183,21 @@ namespace LocalModels.VoxelBridge
             changed |= SetField(type, importer, "combineFaces", true);
             changed |= SetField(type, importer, "shareSameFace", true);
             changed |= SetField(type, importer, "ignoreCavity", ShouldIgnoreCavity(metadata));
+            if (metadata.formatVersion >= 3)
+                changed |= SetEnumField(type, importer, "meshMode",
+                    metadata.chunks != null && metadata.chunks.Length > 1 ? 1 : 0);
             return changed;
+        }
+
+        private static bool SetEnumField(Type type, object target, string name, int value)
+        {
+            FieldInfo field = type.GetField(name, PublicInstance);
+            if (field == null || !field.FieldType.IsEnum || !Enum.IsDefined(field.FieldType, value)) return false;
+            object desired = Enum.ToObject(field.FieldType, value);
+            object current = field.GetValue(target);
+            if (Equals(current, desired)) return false;
+            field.SetValue(target, desired);
+            return true;
         }
 
         private static bool SetField<T>(Type type, object target, string name, T value)

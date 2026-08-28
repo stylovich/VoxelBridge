@@ -8,6 +8,8 @@ namespace LocalModels.VoxelBridge
     internal sealed class VoxelizationSettings
     {
         public int Resolution = 64;
+        public float VoxelSize;
+        public int ChunkCellSize = 256;
         public int Padding = 1;
         public bool FillInterior = true;
         public VoxelColorMode ColorMode = VoxelColorMode.MaterialAndTexture;
@@ -39,9 +41,11 @@ namespace LocalModels.VoxelBridge
             Func<float, string, bool> cancelProgress = null)
         {
             if (source == null) throw new ArgumentNullException(nameof(source));
-            settings.Resolution = Mathf.Clamp(settings.Resolution, 8, 256);
             settings.Padding = Mathf.Clamp(settings.Padding, 0, 8);
-            if (settings.Resolution <= settings.Padding * 2)
+            bool physicalSizeMode = settings.VoxelSize > 0f;
+            if (!physicalSizeMode)
+                settings.Resolution = Mathf.Clamp(settings.Resolution, 8, 256);
+            if (!physicalSizeMode && settings.Resolution <= settings.Padding * 2)
                 throw new ArgumentException("La resolución debe ser mayor que el padding de ambos lados.");
 
             List<MeshSource> sources = ExtractMeshes(source);
@@ -55,13 +59,27 @@ namespace LocalModels.VoxelBridge
                 if (longest <= 1e-6f)
                     throw new InvalidOperationException("El modelo no tiene volumen utilizable.");
 
-                int interiorResolution = settings.Resolution - settings.Padding * 2;
-                float voxelSize = longest / interiorResolution;
-                Vector3Int size = new Vector3Int(
-                    Mathf.Clamp(Mathf.CeilToInt(bounds.size.x / voxelSize - 1e-5f) + settings.Padding * 2, 1, 256),
-                    Mathf.Clamp(Mathf.CeilToInt(bounds.size.y / voxelSize - 1e-5f) + settings.Padding * 2, 1, 256),
-                    Mathf.Clamp(Mathf.CeilToInt(bounds.size.z / voxelSize - 1e-5f) + settings.Padding * 2, 1, 256));
-                Vector3 origin = bounds.min - Vector3.one * (settings.Padding * voxelSize);
+                float voxelSize;
+                Vector3Int size;
+                Vector3 origin;
+                if (physicalSizeMode)
+                {
+                    VoxelGridPlan plan = VoxelGridPlanner.Create(
+                        bounds, settings.VoxelSize, settings.Padding, settings.ChunkCellSize);
+                    voxelSize = plan.VoxelSize;
+                    size = plan.Size;
+                    origin = plan.Origin;
+                }
+                else
+                {
+                    int interiorResolution = settings.Resolution - settings.Padding * 2;
+                    voxelSize = longest / interiorResolution;
+                    size = new Vector3Int(
+                        Mathf.Clamp(Mathf.CeilToInt(bounds.size.x / voxelSize - 1e-5f) + settings.Padding * 2, 1, 256),
+                        Mathf.Clamp(Mathf.CeilToInt(bounds.size.y / voxelSize - 1e-5f) + settings.Padding * 2, 1, 256),
+                        Mathf.Clamp(Mathf.CeilToInt(bounds.size.z / voxelSize - 1e-5f) + settings.Padding * 2, 1, 256));
+                    origin = bounds.min - Vector3.one * (settings.Padding * voxelSize);
+                }
                 var grid = new VoxelGrid(size, origin, voxelSize);
                 var bestDistances = new float[grid.Occupied.Length];
                 for (int i = 0; i < bestDistances.Length; i++) bestDistances[i] = float.PositiveInfinity;
@@ -117,6 +135,24 @@ namespace LocalModels.VoxelBridge
 
                 cancelProgress?.Invoke(1f, "Voxelización terminada");
                 return new VoxelizationResult { Grid = grid, SourceBounds = bounds, TriangleCount = triangleTotal };
+            }
+            finally
+            {
+                foreach (MeshSource meshSource in sources)
+                    if (meshSource.OwnsMesh && meshSource.Mesh != null)
+                        UnityEngine.Object.DestroyImmediate(meshSource.Mesh);
+            }
+        }
+
+        internal static Bounds GetSourceBounds(UnityEngine.Object source)
+        {
+            if (source == null) throw new ArgumentNullException(nameof(source));
+            List<MeshSource> sources = ExtractMeshes(source);
+            try
+            {
+                if (sources.Count == 0)
+                    throw new InvalidOperationException("El objeto seleccionado no contiene mallas.");
+                return CalculateBounds(sources);
             }
             finally
             {
