@@ -15,6 +15,7 @@ namespace LocalModels.VoxelBridge
             "Assets/VoxelBridgeSettings/VoxelImpostorProfile.asset";
 
         private Object source;
+        private GameObject batchParent;
         private VoxelStyleProfile styleProfile;
         private VoxelImpostorProfile impostorProfile;
         [SerializeField] private VoxelImpostorQuality impostorQuality = VoxelImpostorQuality.Medium;
@@ -56,6 +57,19 @@ namespace LocalModels.VoxelBridge
         [MenuItem("Assets/Voxel Bridge/Generar modelo físico y LODs", true)]
         private static bool ValidateOpenFromSelection() =>
             VoxelBridgeSourceSelection.IsSupported(Selection.activeObject);
+
+        [MenuItem("GameObject/Voxel Bridge/Generar hijos como familias voxel y LOD", false, 48)]
+        private static void OpenBatchFromHierarchy()
+        {
+            var window = GetOrCreateWindow();
+            window.batchParent = Selection.activeGameObject;
+            window.Show();
+            window.Focus();
+        }
+
+        [MenuItem("GameObject/Voxel Bridge/Generar hijos como familias voxel y LOD", true)]
+        private static bool ValidateOpenBatchFromHierarchy() =>
+            Selection.activeGameObject != null && Selection.activeGameObject.transform.childCount > 0;
 
         [MenuItem("Assets/Voxel Bridge/Editar LODs de la familia", false, 2101)]
         private static void OpenFamilyFromSelection()
@@ -205,6 +219,33 @@ namespace LocalModels.VoxelBridge
             }
             if (source != null && !VoxelBridgeSourceSelection.IsSupported(source))
                 EditorGUILayout.HelpBox("Selecciona un GameObject, prefab, FBX/OBJ o Mesh.", MessageType.Warning);
+
+            EditorGUILayout.Space(12);
+            EditorGUILayout.LabelField("Generación por lotes", EditorStyles.miniBoldLabel);
+            EditorGUILayout.HelpBox(
+                "Convierte cada hijo directo del padre en una familia independiente. Cada familia incluye las mallas de todos los descendientes de ese hijo, incluso si están inactivos. Los hijos vacíos se omiten.",
+                MessageType.Info);
+            batchParent = (GameObject)EditorGUILayout.ObjectField(
+                new GUIContent("Objeto padre", "Objeto de escena o prefab cuyos hijos directos se procesarán por separado"),
+                batchParent, typeof(GameObject), true);
+            GameObject[] batchSources = VoxelLodPipeline.GetAutomaticBatchSources(batchParent);
+            int directChildCount = batchParent != null ? batchParent.transform.childCount : 0;
+            if (batchParent != null)
+            {
+                int skippedCount = directChildCount - batchSources.Length;
+                EditorGUILayout.HelpBox(
+                    $"{batchSources.Length} familia(s) para generar · {skippedCount} hijo(s) sin mallas se omitirán.",
+                    batchSources.Length > 0 ? MessageType.None : MessageType.Warning);
+            }
+
+            bool canGenerateBatch = batchSources.Length > 0 && styleProfile != null &&
+                                    styleProfile.TryValidate(out _) &&
+                                    VoxelLodPipeline.IsAssetFolder(exportFolder);
+            using (new EditorGUI.DisabledScope(!canGenerateBatch))
+            {
+                if (GUILayout.Button("Generar familias de todos los hijos", GUILayout.Height(38)))
+                    GenerateAutomaticBatch();
+            }
         }
 
         private void DrawColorSettings()
@@ -537,6 +578,63 @@ namespace LocalModels.VoxelBridge
             {
                 EditorUtility.ClearProgressBar();
             }
+        }
+
+        private void GenerateAutomaticBatch()
+        {
+            try
+            {
+                VoxelLodBatchBuildResult result = VoxelLodPipeline.GenerateAutomaticBatch(
+                    batchParent, styleProfile, CreateLodOptions(),
+                    (progress, message) => EditorUtility.DisplayCancelableProgressBar(
+                        "Voxel Bridge · Generación por lotes", message, progress));
+
+                foreach (VoxelLodBatchItemResult failed in result.Items.Where(item => !item.Succeeded))
+                    Debug.LogWarning($"Voxel Bridge omitió '{failed.Source.name}': {failed.Error}", failed.Source);
+
+                VoxelLodBatchItemResult lastSuccess = result.Items.LastOrDefault(item => item.Succeeded);
+                if (lastSuccess != null)
+                {
+                    ApplyAutomaticBuildResult(lastSuccess.BuildResult);
+                    SelectAndPing(lastPrefabAsset);
+                }
+
+                int pendingCount = result.CandidateCount - result.Items.Length;
+                string completion = result.Cancelled
+                    ? $"Lote cancelado; quedan {pendingCount} familia(s) sin procesar."
+                    : "Lote terminado.";
+                status = $"{completion} {result.SucceededCount} familia(s) creadas y " +
+                         $"{result.FailedCount} con errores.";
+                if (result.SucceededCount == 0 && result.FailedCount > 0)
+                    EditorUtility.DisplayDialog("Voxel Bridge · Lote con errores", status +
+                        " Revisa la Console para ver el detalle de cada objeto.", "Cerrar");
+            }
+            catch (OperationCanceledException)
+            {
+                status = "Generación por lotes cancelada.";
+            }
+            catch (Exception exception)
+            {
+                ShowException(exception);
+            }
+            finally
+            {
+                EditorUtility.ClearProgressBar();
+            }
+        }
+
+        private void ApplyAutomaticBuildResult(VoxelLodBuildResult result)
+        {
+            lodSetManifest = AssetDatabase.LoadAssetAtPath<TextAsset>(result.ManifestAssetPath);
+            if (result.VoxAssetPaths.Length > 0)
+            {
+                lastVoxAssetPath = result.VoxAssetPaths[0];
+                lastVoxAsset = AssetDatabase.LoadMainAssetAtPath(lastVoxAssetPath);
+                manualParentVox = lastVoxAsset;
+                manualTargetLod = Mathf.Min(1, styleProfile.LodCount - 1);
+            }
+            lastPrefabAsset = AssetDatabase.LoadMainAssetAtPath(result.PrefabAssetPath);
+            lastImpostorAsset = null;
         }
 
         private void GenerateManualLod()

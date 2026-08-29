@@ -30,8 +30,103 @@ namespace LocalModels.VoxelBridge
         }
     }
 
+    internal sealed class VoxelLodBatchItemResult
+    {
+        public readonly GameObject Source;
+        public readonly VoxelLodBuildResult BuildResult;
+        public readonly string Error;
+
+        public bool Succeeded => string.IsNullOrEmpty(Error);
+
+        public VoxelLodBatchItemResult(
+            GameObject source, VoxelLodBuildResult buildResult, string error = null)
+        {
+            Source = source;
+            BuildResult = buildResult;
+            Error = error;
+        }
+    }
+
+    internal sealed class VoxelLodBatchBuildResult
+    {
+        public readonly VoxelLodBatchItemResult[] Items;
+        public readonly int CandidateCount;
+        public readonly bool Cancelled;
+
+        public int SucceededCount => Items.Count(item => item.Succeeded);
+        public int FailedCount => Items.Length - SucceededCount;
+
+        public VoxelLodBatchBuildResult(
+            IEnumerable<VoxelLodBatchItemResult> items, int candidateCount, bool cancelled)
+        {
+            Items = items.ToArray();
+            CandidateCount = candidateCount;
+            Cancelled = cancelled;
+        }
+    }
+
     internal static class VoxelLodPipeline
     {
+        internal static GameObject[] GetAutomaticBatchSources(GameObject parent)
+        {
+            if (parent == null) return Array.Empty<GameObject>();
+
+            var sources = new List<GameObject>();
+            for (int childIndex = 0; childIndex < parent.transform.childCount; childIndex++)
+            {
+                GameObject child = parent.transform.GetChild(childIndex).gameObject;
+                bool hasMesh = child.GetComponentsInChildren<MeshFilter>(true)
+                    .Any(filter => filter.sharedMesh != null);
+                bool hasSkinnedMesh = child.GetComponentsInChildren<SkinnedMeshRenderer>(true)
+                    .Any(renderer => renderer.sharedMesh != null);
+                if (hasMesh || hasSkinnedMesh) sources.Add(child);
+            }
+            return sources.ToArray();
+        }
+
+        public static VoxelLodBatchBuildResult GenerateAutomaticBatch(
+            GameObject parent, VoxelStyleProfile profile, VoxelLodBuildOptions options,
+            Func<float, string, bool> cancelProgress = null)
+        {
+            ValidateProfileAndOptions(profile, options);
+            if (parent == null) throw new ArgumentNullException(nameof(parent));
+
+            GameObject[] sources = GetAutomaticBatchSources(parent);
+            if (sources.Length == 0)
+                throw new InvalidOperationException(
+                    "El objeto padre no contiene hijos directos con mallas para voxelizar.");
+
+            var items = new List<VoxelLodBatchItemResult>();
+            for (int sourceIndex = 0; sourceIndex < sources.Length; sourceIndex++)
+            {
+                GameObject current = sources[sourceIndex];
+                float progressBase = (float)sourceIndex / sources.Length;
+                if (cancelProgress != null && cancelProgress(progressBase,
+                        $"Modelo {sourceIndex + 1} de {sources.Length}: preparando {current.name}"))
+                    return new VoxelLodBatchBuildResult(items, sources.Length, true);
+
+                try
+                {
+                    VoxelLodBuildResult build = GenerateAutomatic(
+                        current, profile, options, (progress, message) =>
+                            cancelProgress != null && cancelProgress(
+                                progressBase + progress / sources.Length,
+                                $"Modelo {sourceIndex + 1} de {sources.Length} · {current.name}: {message}"));
+                    items.Add(new VoxelLodBatchItemResult(current, build));
+                }
+                catch (OperationCanceledException)
+                {
+                    return new VoxelLodBatchBuildResult(items, sources.Length, true);
+                }
+                catch (Exception exception)
+                {
+                    items.Add(new VoxelLodBatchItemResult(current, default, exception.Message));
+                }
+            }
+
+            return new VoxelLodBatchBuildResult(items, sources.Length, false);
+        }
+
         public static VoxelLodBuildResult GenerateAutomatic(
             Object source, VoxelStyleProfile profile, VoxelLodBuildOptions options,
             Func<float, string, bool> cancelProgress = null)

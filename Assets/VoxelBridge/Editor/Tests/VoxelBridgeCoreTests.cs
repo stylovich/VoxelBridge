@@ -366,6 +366,105 @@ namespace LocalModels.VoxelBridge.Tests
         }
 
         [Test]
+        public void AutomaticBatchSources_UsesDirectChildrenAsFamiliesAndIncludesNestedMeshes()
+        {
+            var parent = new GameObject("BatchParent");
+            try
+            {
+                var nestedFamily = new GameObject("NestedFamily");
+                nestedFamily.transform.SetParent(parent.transform, false);
+                GameObject nestedCube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                nestedCube.name = "NestedGeometry";
+                nestedCube.transform.SetParent(nestedFamily.transform, false);
+
+                var inactiveFamily = new GameObject("InactiveFamily");
+                inactiveFamily.transform.SetParent(parent.transform, false);
+                GameObject inactiveCube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                inactiveCube.transform.SetParent(inactiveFamily.transform, false);
+                inactiveFamily.SetActive(false);
+
+                var emptyFamily = new GameObject("EmptyFamily");
+                emptyFamily.transform.SetParent(parent.transform, false);
+
+                GameObject[] sources = VoxelLodPipeline.GetAutomaticBatchSources(parent);
+
+                Assert.That(sources, Is.EqualTo(new[] { nestedFamily, inactiveFamily }));
+                Assert.That(sources.Contains(nestedCube), Is.False);
+                Assert.That(sources.Contains(emptyFamily), Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(parent);
+            }
+        }
+
+        [Test]
+        public void AutomaticBatch_ContinuesAfterOneChildFailsAndCreatesOtherFamilies()
+        {
+            if (!VoxelImporterIntegration.IsInstalled)
+                Assert.Ignore("Voxel Importer es opcional y no está instalado.");
+
+            const string testRoot = "Assets/VoxelBridgeBatchTestOutput";
+            GameObject parent = null;
+            Mesh invalidMesh = null;
+            VoxelStyleProfile profile = null;
+            try
+            {
+                parent = new GameObject("BatchParent");
+                var invalid = new GameObject("InvalidMesh");
+                invalid.transform.SetParent(parent.transform, false);
+                invalidMesh = new Mesh { name = "InvalidMesh" };
+                invalid.AddComponent<MeshFilter>().sharedMesh = invalidMesh;
+
+                GameObject valid = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                valid.name = "ValidCube";
+                valid.transform.SetParent(parent.transform, false);
+
+                profile = ScriptableObject.CreateInstance<VoxelStyleProfile>();
+                var serializedProfile = new SerializedObject(profile);
+                serializedProfile.FindProperty("baseVoxelSize").floatValue = 0.5f;
+                serializedProfile.FindProperty("chunkCellSize").intValue = 16;
+                serializedProfile.FindProperty("padding").intValue = 1;
+                SerializedProperty multipliers = serializedProfile.FindProperty("lodMultipliers");
+                multipliers.arraySize = 1;
+                multipliers.GetArrayElementAtIndex(0).intValue = 1;
+                serializedProfile.ApplyModifiedPropertiesWithoutUndo();
+
+                var options = new VoxelLodBuildOptions
+                {
+                    ColorMode = VoxelColorMode.SingleColor,
+                    SingleColor = new Color32(120, 180, 220, 255),
+                    AlphaCutoff = 0.1f,
+                    ExportFolder = testRoot + "/Exports"
+                };
+
+                VoxelLodBatchBuildResult batch =
+                    VoxelLodPipeline.GenerateAutomaticBatch(parent, profile, options);
+
+                Assert.That(batch.Cancelled, Is.False);
+                Assert.That(batch.CandidateCount, Is.EqualTo(2));
+                Assert.That(batch.Items, Has.Length.EqualTo(2));
+                Assert.That(batch.SucceededCount, Is.EqualTo(1));
+                Assert.That(batch.FailedCount, Is.EqualTo(1));
+                Assert.That(batch.Items[0].Source, Is.EqualTo(invalid));
+                Assert.That(batch.Items[0].Succeeded, Is.False);
+                Assert.That(batch.Items[0].Error, Does.Contain("vértices"));
+                Assert.That(batch.Items[1].Source, Is.EqualTo(valid));
+                Assert.That(batch.Items[1].Succeeded, Is.True);
+                Assert.That(batch.Items[1].BuildResult.VoxAssetPaths, Has.Length.EqualTo(1));
+                Assert.That(AssetDatabase.LoadAssetAtPath<GameObject>(
+                    batch.Items[1].BuildResult.PrefabAssetPath), Is.Not.Null);
+            }
+            finally
+            {
+                if (parent != null) Object.DestroyImmediate(parent);
+                if (invalidMesh != null) Object.DestroyImmediate(invalidMesh);
+                if (profile != null) Object.DestroyImmediate(profile);
+                AssetDatabase.DeleteAsset(testRoot);
+            }
+        }
+
+        [Test]
         public void AutomaticLodPipeline_CreatesChunkedVoxFamilyAndLodPrefab()
         {
             if (!VoxelImporterIntegration.IsInstalled)

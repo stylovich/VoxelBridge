@@ -10,6 +10,8 @@ Herramienta de Editor para convertir mallas de Unity a `.vox`, mantener una esca
 4. Define multiplicadores LOD estrictamente crecientes y en potencias de dos, por ejemplo `1, 2, 4, 8`.
 5. Selecciona un FBX, OBJ, prefab u objeto de escena y pulsa `Generar familia .vox + prefab LOD`.
 
+Para convertir varios modelos de una vez, usa `Generación por lotes` en la misma sección y asigna un objeto padre. Cada hijo directo que contenga una malla —en sí mismo o en cualquiera de sus descendientes— se procesa como una familia independiente con el mismo perfil voxel, color y carpeta de salida. Los descendientes inactivos también forman parte de la geometría; los hijos directos sin mallas se omiten. Si un modelo falla, el lote informa el error en la Console y continúa con los demás. También puedes seleccionar el padre en la jerarquía y usar `GameObject > Voxel Bridge > Generar hijos como familias voxel y LOD`.
+
 Cada LOD automático se voxeliza de nuevo desde la malla fuente: LOD0 usa la unidad base, LOD1 usa `base × 2`, LOD2 `base × 4`, etc. Las rejillas se alinean al mismo lattice físico para evitar cambios arbitrarios de tamaño o posición entre assets y niveles.
 
 La familia generada contiene:
