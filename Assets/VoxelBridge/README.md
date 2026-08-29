@@ -4,11 +4,11 @@ Herramienta de Editor para convertir mallas de Unity a `.vox`, mantener una esca
 
 ## Flujo recomendado: perfil físico + LODs
 
-1. Abre `Tools > Voxel Bridge > Mesh a MagicaVoxel`.
+1. Abre `Tools > Voxel Bridge > Modelos físicos y LODs`.
 2. Crea un `VoxelStyleProfile` desde la ventana o mediante `Create > Voxel Bridge > Perfil de estilo voxel`.
 3. Define `Base Voxel Size` en unidades de Unity. Para vóxeles de 10 cm usa `0.1`.
 4. Define multiplicadores LOD estrictamente crecientes y en potencias de dos, por ejemplo `1, 2, 4, 8`.
-5. Selecciona un FBX, OBJ, prefab u objeto de escena y pulsa `Generar LODs automáticos + prefab`.
+5. Selecciona un FBX, OBJ, prefab u objeto de escena y pulsa `Generar familia .vox + prefab LOD`.
 
 Cada LOD automático se voxeliza de nuevo desde la malla fuente: LOD0 usa la unidad base, LOD1 usa `base × 2`, LOD2 `base × 4`, etc. Las rejillas se alinean al mismo lattice físico para evitar cambios arbitrarios de tamaño o posición entre assets y niveles.
 
@@ -20,6 +20,8 @@ La familia generada contiene:
 - un prefab estable con `LODGroup`, un hijo por LOD y todos sus renderers de chunk.
 
 Regenerar o sustituir un LOD actualiza el mismo prefab indicado por el manifiesto; no crea copias sucesivas del prefab.
+
+Unity muestra los `.vox` con el icono y la representación de un `GameObject` porque Voxel Importer genera sus mallas durante la importación. El archivo del disco sigue siendo `.vox`; no se reemplaza por el prefab. La sección `Resultados` muestra por separado la ruta del `.vox` editable y el prefab que debe colocarse en escena.
 
 ## LOD manual
 
@@ -38,14 +40,14 @@ Con Voxel Importer, un `.vox` con varios chunks se importa en modo `Individual`:
 
 Actualmente la salida está dividida en chunks, pero la fase de voxelización mantiene una rejilla densa global para que el relleno interior y las fronteras entre chunks sean correctos. Existe un límite de seguridad de 80 millones de celdas. Si se supera, aumenta `Base Voxel Size` o divide el asset fuente. Una futura voxelización por bloques podría retirar este límite sin cambiar el formato generado.
 
-## Conversión individual/legada
+## Conversión puntual por resolución
 
-La conversión por resolución fija se conserva para pruebas o assets aislados:
+La conversión por resolución fija tiene una interfaz independiente en `Tools > Voxel Bridge > Conversión por resolución` y sirve para pruebas o assets aislados:
 
 1. Selecciona la fuente.
 2. Elige una resolución para el eje más largo.
 3. Deja `Rellenar interior` activo para modelos cerrados. Desactívalo para láminas o superficies que deban permanecer huecas.
-4. Pulsa `Convertir a .vox`.
+4. Pulsa `Convertir a un archivo .vox`.
 
 La herramienta genera dos archivos:
 
@@ -63,11 +65,11 @@ Si `Assets/VoxelImporter` está instalado, conserva el `.vox` como asset de Unit
 - `Combine Voxel Faces` y `Share Same Face`;
 - `Ignore Cavity` cuando `Ocultar cavidades cerradas` está activo.
 
-Para corregir un `.vox` creado antes de esta integración, selecciónalo y usa `Assets > Voxel Bridge > Aplicar escala al .vox`, o asígnalo en la sección 2 de la ventana y pulsa `Aplicar metadatos y reimportar`. También puedes resincronizar todos los generados con `Tools > Voxel Bridge > Sincronizar todos los .vox`.
+La interfaz de retorno está separada en `Tools > Voxel Bridge > VOX a Unity`. Allí puedes asignar un `.vox`, comprobar su ruta física, aplicar escala y pivote desde el sidecar, seleccionar el modelo importado o abrirlo en MagicaVoxel. También puedes resincronizar todos los generados con `Tools > Voxel Bridge > Sincronizar todos los .vox`.
 
 Voxel Bridge necesita corregir las normales que Voxel Importer genera cuando `Import Scale` contiene ejes negativos. Después de instalar o actualizar Voxel Importer usa `Tools > Voxel Bridge > Compatibilidad > Aplicar parche de normales de Voxel Importer`. La acción es idempotente y reimporta automáticamente los `.vox` generados. Si una versión nueva cambia el código esperado, Voxel Bridge no modifica el asset y muestra un warning para que el conflicto se revise manualmente.
 
-Para editar cualquier `.vox`, selecciónalo en Project y usa `Assets > Voxel Bridge > Abrir en MagicaVoxel`. La primera vez se solicitará la ubicación de `MagicaVoxel.exe`; Voxel Bridge recordará esa ruta para las siguientes aperturas. El mismo botón está disponible en la sección 3 de la ventana.
+Para editar cualquier `.vox`, selecciónalo en Project y usa `Assets > Voxel Bridge > Abrir en MagicaVoxel`. La primera vez se solicitará la ubicación de `MagicaVoxel.exe`; Voxel Bridge recordará esa ruta para las siguientes aperturas. El mismo botón está disponible en las tres interfaces cuando existe una salida `.vox` válida.
 
 Voxel Importer genera mallas normales durante la importación. El juego usa esas mallas; no dibuja millones de cubos ni mantiene vóxeles editables en runtime. Por ello, conservar los `.vox` directamente es el flujo más corto y mantiene la actualización automática al guardar desde MagicaVoxel. Para producción se usa el prefab generado, cuyos renderers provienen de esos `.vox`.
 
@@ -75,9 +77,9 @@ Voxel Importer genera mallas normales durante la importación. El juego usa esas
 
 1. En MagicaVoxel guarda los cambios y usa `Export > obj`.
 2. Guarda el OBJ y sus texturas dentro de una carpeta bajo `Assets`.
-3. En la cuarta sección de Voxel Bridge asigna el OBJ importado y el `.voxelbridge.json` correspondiente.
+3. Abre `Tools > Voxel Bridge > VOX a Unity` y, en la sección alternativa de OBJ, asigna el modelo importado y el `.voxelbridge.json` correspondiente.
 4. Mantén `MagicaVoxel Default` salvo que hayas cambiado los ejes de exportación en `config.txt`.
-5. Pulsa `Crear prefab alineado`.
+5. Pulsa `Crear prefab desde OBJ`.
 
 El prefab conserva el pivote local y escala cada unidad del OBJ al tamaño del vóxel original. Si se cambiaron las opciones `io_*` de MagicaVoxel, usa `Already Unity Aligned` o ajusta la rotación del hijo una vez creado.
 
