@@ -77,6 +77,32 @@ namespace LocalModels.VoxelBridge.Tests
         }
 
         [Test]
+        public void VoxelImporterTransform_DoesNotRecenterSceneGraphTwice()
+        {
+            var metadata = new VoxelBridgeMetadata
+            {
+                formatVersion = 3,
+                voxelSize = 0.025f,
+                gridOrigin = new Vector3(-1.125f, -0.05f, -1.875f),
+                unityGridSize = new Vector3Int(89, 97, 157),
+                importGridOrigin = new Vector3(-1.1f, -0.025f, -1.85f),
+                importGridSize = new Vector3Int(87, 95, 155),
+                chunks = new[]
+                {
+                    new VoxelChunkMetadata { gridOffset = Vector3Int.zero },
+                    new VoxelChunkMetadata { gridOffset = new Vector3Int(0, 0, 128) }
+                }
+            };
+
+            VoxelImporterTransform transform = VoxelImporterIntegration.CalculateTransform(metadata);
+
+            Assert.That(VoxelImporterIntegration.UsesSceneGraph(metadata), Is.True);
+            Assert.That(transform.ImportOffset.x, Is.EqualTo(44f).Within(1e-4f));
+            Assert.That(transform.ImportOffset.y, Is.EqualTo(-2f).Within(1e-4f));
+            Assert.That(transform.ImportOffset.z, Is.EqualTo(74f).Within(1e-4f));
+        }
+
+        [Test]
         public void CavitySetting_IsEnabledForLegacyMetadataAndRespectsVersionTwo()
         {
             Assert.That(VoxelImporterIntegration.ShouldIgnoreCavity(
@@ -323,14 +349,21 @@ namespace LocalModels.VoxelBridge.Tests
                 Renderer[] chunkRenderers = prefab.transform.GetChild(0)
                     .GetComponentsInChildren<Renderer>(true);
                 Assert.That(chunkRenderers.Length, Is.GreaterThan(1));
-                Bounds renderedBounds = chunkRenderers[0].bounds;
-                for (int i = 1; i < chunkRenderers.Length; i++)
-                    renderedBounds.Encapsulate(chunkRenderers[i].bounds);
+                Bounds renderedBounds = CalculateBounds(chunkRenderers);
                 string chunkDiagnostics = string.Join(" | ", chunkRenderers.Select(renderer =>
                     $"{renderer.name}: pos={renderer.transform.position}, bounds={renderer.bounds}"));
                 Assert.That(renderedBounds.size.x, Is.EqualTo(4f).Within(0.51f), chunkDiagnostics);
                 Assert.That(renderedBounds.size.y, Is.EqualTo(2f).Within(0.51f));
                 Assert.That(renderedBounds.size.z, Is.EqualTo(2f).Within(0.51f));
+                Bounds coarseBounds = CalculateBounds(prefab.transform.GetChild(1)
+                    .GetComponentsInChildren<Renderer>(true));
+                float centerTolerance = profile.BaseVoxelSize * profile.GetLodMultiplier(1) + 1e-4f;
+                Assert.That(Mathf.Abs(renderedBounds.center.x - coarseBounds.center.x),
+                    Is.LessThanOrEqualTo(centerTolerance), chunkDiagnostics);
+                Assert.That(Mathf.Abs(renderedBounds.center.y - coarseBounds.center.y),
+                    Is.LessThanOrEqualTo(centerTolerance), chunkDiagnostics);
+                Assert.That(Mathf.Abs(renderedBounds.center.z - coarseBounds.center.z),
+                    Is.LessThanOrEqualTo(centerTolerance), chunkDiagnostics);
 
                 string prefabGuid = AssetDatabase.AssetPathToGUID(build.PrefabAssetPath);
                 string separatePrefabFolder = testRoot + "/SeparatePrefabs";
@@ -443,6 +476,14 @@ namespace LocalModels.VoxelBridge.Tests
                 index += value.Length;
             }
             return count;
+        }
+
+        private static Bounds CalculateBounds(Renderer[] renderers)
+        {
+            Assert.That(renderers, Is.Not.Empty);
+            Bounds bounds = renderers[0].bounds;
+            for (int i = 1; i < renderers.Length; i++) bounds.Encapsulate(renderers[i].bounds);
+            return bounds;
         }
     }
 }

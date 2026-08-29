@@ -99,6 +99,7 @@ namespace LocalModels.VoxelBridge
         {
             if (metadata == null) throw new ArgumentNullException(nameof(metadata));
             float voxelSize = metadata.voxelSize;
+            bool usesSceneGraph = UsesSceneGraph(metadata);
             Vector3Int size = metadata.formatVersion >= 3 && metadata.importGridSize.x > 0 &&
                               metadata.importGridSize.y > 0 && metadata.importGridSize.z > 0
                 ? metadata.importGridSize
@@ -111,14 +112,31 @@ namespace LocalModels.VoxelBridge
                 throw new ArgumentException("Los metadatos no contienen una rejilla válida.", nameof(metadata));
 
             // Voxel Importer converts VOX coordinates to Unity by swapping Y/Z, inverting X/Z,
-            // and centering those two axes. Two negative scale components undo that 180° turn
-            // without changing handedness. The offset then restores Voxel Bridge's source pivot.
+            // and centering those two axes for a single model. Scene graphs instead derive
+            // localOffset from their node translations, so applying the model centering again
+            // displaces a chunked asset by half of its occupied extent.
             Vector3 importScale = new Vector3(-voxelSize, voxelSize, -voxelSize);
-            Vector3 importOffset = new Vector3(
-                -size.x * 0.5f - origin.x / voxelSize,
-                origin.y / voxelSize,
-                -size.z * 0.5f - origin.z / voxelSize);
+            Vector3 importOffset = usesSceneGraph
+                ? new Vector3(
+                    -origin.x / voxelSize,
+                    metadata.gridOrigin.y / voxelSize,
+                    -origin.z / voxelSize)
+                : new Vector3(
+                    -size.x * 0.5f - origin.x / voxelSize,
+                    origin.y / voxelSize,
+                    -size.z * 0.5f - origin.z / voxelSize);
             return new VoxelImporterTransform(importScale, importOffset);
+        }
+
+        internal static bool UsesSceneGraph(VoxelBridgeMetadata metadata)
+        {
+            if (metadata == null || metadata.formatVersion < 3) return false;
+            if (metadata.unityGridSize.x > 256 || metadata.unityGridSize.y > 256 ||
+                metadata.unityGridSize.z > 256)
+                return true;
+            VoxelChunkMetadata[] chunks = metadata.chunks;
+            if (chunks == null || chunks.Length == 0) return false;
+            return chunks.Length > 1 || chunks[0].gridOffset != Vector3Int.zero;
         }
 
         internal static bool ShouldIgnoreCavity(VoxelBridgeMetadata metadata)

@@ -23,6 +23,8 @@ Regenerar o sustituir un LOD actualiza el mismo prefab indicado por el manifiest
 
 Cada modelo queda completamente agrupado en `Assets/VoxelBridgeExports/Nombre_VoxelLOD/`: los `.vox`, sidecars, manifiesto y prefab viven juntos. Si una familia anterior tiene el prefab en `VoxelBridgeImports`, asigna su `.voxset.json` en `LOD manual` y pulsa `Reconstruir prefab desde manifiesto`; Voxel Bridge lo mueve junto a sus `.vox` conservando el GUID y las referencias existentes.
 
+`Reconstruir prefab desde manifiesto` también resincroniza la escala, el pivote y la transformación de importación de todos los `.vox` de la familia. Úsalo para aplicar correcciones de compatibilidad a familias ya generadas sin volver a voxelizar el modelo fuente.
+
 También puedes hacer clic derecho sobre el prefab, cualquiera de sus `.vox` o el manifiesto y elegir `Voxel Bridge > Editar LODs de la familia`. La ventana muestra cada nivel con accesos para seleccionarlo, abrirlo directamente en MagicaVoxel o usarlo como padre del siguiente LOD manual.
 
 El GameObject raíz y su archivo prefab usan solamente el nombre del modelo original; la carpeta conserva el sufijo `_VoxelLOD` para identificar la familia. En la jerarquía, haz clic derecho sobre un hijo de cualquier nivel y elige `Voxel Bridge > Editar este LOD en MagicaVoxel` para abrir exactamente su `.vox`. La opción `Editar LODs de la familia` abre la lista completa desde cualquier objeto perteneciente al `LODGroup`.

@@ -200,6 +200,12 @@ namespace LocalModels.VoxelBridge
         {
             if (!TryReadJsonAsset(manifestAssetPath, out VoxelLodSetManifest manifest))
                 throw new InvalidDataException("El manifiesto LOD no es válido.");
+            foreach (VoxelLodEntry entry in manifest.lods ?? Array.Empty<VoxelLodEntry>())
+            {
+                if (!VoxelImporterIntegration.ApplyAndReimport(
+                        entry.voxAssetPath, out string message, forceReimport: true))
+                    Debug.LogWarning($"Voxel Bridge no pudo resincronizar '{entry.voxAssetPath}': {message}");
+            }
             string familyFolder = Path.GetDirectoryName(manifestAssetPath)?.Replace('\\', '/') ?? "Assets";
             string prefabPath = BuildPrefab(manifest, familyFolder);
             manifest.prefabAssetPath = prefabPath;
