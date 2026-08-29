@@ -17,11 +17,13 @@ La familia generada contiene:
 - un `.vox` editable por cada LOD;
 - un sidecar `.voxelbridge.json` por cada `.vox` con escala, pivote, rejilla y chunks;
 - un manifiesto `.voxset.json` que relaciona toda la familia;
-- una subcarpeta propia dentro de `Carpeta de prefabs`, con un prefab estable que contiene el `LODGroup`, un hijo por LOD y todos sus renderers de chunk.
+- un prefab estable en esa misma carpeta, con el `LODGroup`, un hijo por LOD y todos sus renderers de chunk.
 
 Regenerar o sustituir un LOD actualiza el mismo prefab indicado por el manifiesto; no crea copias sucesivas del prefab.
 
-Cada modelo queda agrupado de esta forma: `Assets/VoxelBridgeImports/Nombre_VoxelLOD/Nombre_VoxelLOD.prefab`. Si una familia anterior tiene el prefab suelto directamente en `VoxelBridgeImports`, asigna su `.voxset.json` en `LOD manual` y pulsa `Reconstruir prefab desde manifiesto`; Voxel Bridge lo mueve a una subcarpeta conservando el GUID y las referencias existentes.
+Cada modelo queda completamente agrupado en `Assets/VoxelBridgeExports/Nombre_VoxelLOD/`: los `.vox`, sidecars, manifiesto y prefab viven juntos. Si una familia anterior tiene el prefab en `VoxelBridgeImports`, asigna su `.voxset.json` en `LOD manual` y pulsa `Reconstruir prefab desde manifiesto`; Voxel Bridge lo mueve junto a sus `.vox` conservando el GUID y las referencias existentes.
+
+También puedes hacer clic derecho sobre el prefab, cualquiera de sus `.vox` o el manifiesto y elegir `Voxel Bridge > Editar LODs de la familia`. La ventana muestra cada nivel con accesos para seleccionarlo, abrirlo directamente en MagicaVoxel o usarlo como padre del siguiente LOD manual.
 
 Unity muestra los `.vox` con el icono y la representación de un `GameObject` porque Voxel Importer genera sus mallas durante la importación. El archivo del disco sigue siendo `.vox`; no se reemplaza por el prefab. La sección `Resultados` muestra por separado la ruta del `.vox` editable y el prefab que debe colocarse en escena.
 

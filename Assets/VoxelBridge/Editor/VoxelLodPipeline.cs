@@ -14,7 +14,6 @@ namespace LocalModels.VoxelBridge
         public Color32 SingleColor;
         public float AlphaCutoff;
         public string ExportFolder;
-        public string PrefabFolder;
     }
 
     internal readonly struct VoxelLodBuildResult
@@ -93,7 +92,7 @@ namespace LocalModels.VoxelBridge
             };
             WriteJsonAsset(manifestAssetPath, manifest);
             ImportGeneratedVox(voxPaths);
-            string prefabPath = BuildPrefab(manifest, options.PrefabFolder);
+            string prefabPath = BuildPrefab(manifest, familyFolder);
             manifest.prefabAssetPath = prefabPath;
             WriteJsonAsset(manifestAssetPath, manifest);
             AssetDatabase.ImportAsset(manifestAssetPath, ImportAssetOptions.ForceSynchronousImport);
@@ -189,22 +188,73 @@ namespace LocalModels.VoxelBridge
             manifest.profileAssetPath = AssetDatabase.GetAssetPath(profile);
             WriteJsonAsset(manifestPath, manifest);
             ImportGeneratedVox(new[] { targetPath });
-            string prefabPath = BuildPrefab(manifest, options.PrefabFolder);
+            string familyFolder = Path.GetDirectoryName(manifestPath)?.Replace('\\', '/') ?? "Assets";
+            string prefabPath = BuildPrefab(manifest, familyFolder);
             manifest.prefabAssetPath = prefabPath;
             WriteJsonAsset(manifestPath, manifest);
             AssetDatabase.ImportAsset(manifestPath, ImportAssetOptions.ForceSynchronousImport);
             return new VoxelLodBuildResult(manifestPath, prefabPath, new[] { targetPath });
         }
 
-        public static string RebuildPrefab(string manifestAssetPath, string prefabFolder)
+        public static string RebuildPrefab(string manifestAssetPath)
         {
             if (!TryReadJsonAsset(manifestAssetPath, out VoxelLodSetManifest manifest))
                 throw new InvalidDataException("El manifiesto LOD no es válido.");
-            string prefabPath = BuildPrefab(manifest, prefabFolder);
+            string familyFolder = Path.GetDirectoryName(manifestAssetPath)?.Replace('\\', '/') ?? "Assets";
+            string prefabPath = BuildPrefab(manifest, familyFolder);
             manifest.prefabAssetPath = prefabPath;
             WriteJsonAsset(manifestAssetPath, manifest);
             AssetDatabase.ImportAsset(manifestAssetPath, ImportAssetOptions.ForceSynchronousImport);
             return prefabPath;
+        }
+
+        internal static bool TryFindManifestForAsset(
+            string assetPath, out string manifestAssetPath, out VoxelLodSetManifest manifest)
+        {
+            manifestAssetPath = null;
+            manifest = null;
+            assetPath = NormalizeAssetPath(assetPath);
+            if (string.IsNullOrEmpty(assetPath)) return false;
+
+            if (assetPath.EndsWith(".voxset.json", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!TryReadJsonAsset(assetPath, out manifest)) return false;
+                manifestAssetPath = assetPath;
+                return true;
+            }
+
+            if (assetPath.EndsWith(".vox", StringComparison.OrdinalIgnoreCase) &&
+                VoxelImporterIntegration.TryLoadMetadata(assetPath,
+                    out VoxelBridgeMetadata metadata, out _) &&
+                TryReadJsonAsset(metadata.lodSetAssetPath, out manifest))
+            {
+                manifestAssetPath = NormalizeAssetPath(metadata.lodSetAssetPath);
+                return true;
+            }
+
+            string folder = NormalizeAssetPath(Path.GetDirectoryName(assetPath));
+            if (!IsAssetFolder(folder) || !AssetDatabase.IsValidFolder(folder)) return false;
+            foreach (string guid in AssetDatabase.FindAssets("t:TextAsset", new[] { folder }))
+            {
+                string candidate = NormalizeAssetPath(AssetDatabase.GUIDToAssetPath(guid));
+                if (!candidate.EndsWith(".voxset.json", StringComparison.OrdinalIgnoreCase) ||
+                    !NormalizeAssetPath(Path.GetDirectoryName(candidate))
+                        .Equals(folder, StringComparison.Ordinal) ||
+                    !TryReadJsonAsset(candidate, out VoxelLodSetManifest candidateManifest))
+                    continue;
+
+                bool isPrefab = NormalizeAssetPath(candidateManifest.prefabAssetPath)
+                    .Equals(assetPath, StringComparison.Ordinal);
+                bool isLod = (candidateManifest.lods ?? Array.Empty<VoxelLodEntry>())
+                    .Any(entry => NormalizeAssetPath(entry.voxAssetPath)
+                        .Equals(assetPath, StringComparison.Ordinal));
+                if (!isPrefab && !isLod) continue;
+                manifestAssetPath = candidate;
+                manifest = candidateManifest;
+                return true;
+            }
+
+            return false;
         }
 
         private static void WriteGrid(string voxAssetPath, VoxelGrid grid, Bounds sourceBounds,
@@ -261,9 +311,9 @@ namespace LocalModels.VoxelBridge
             AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
         }
 
-        private static string BuildPrefab(VoxelLodSetManifest manifest, string prefabFolder)
+        private static string BuildPrefab(VoxelLodSetManifest manifest, string familyFolder)
         {
-            EnsureAssetFolder(prefabFolder);
+            EnsureAssetFolder(familyFolder);
             VoxelLodEntry[] entries = (manifest.lods ?? Array.Empty<VoxelLodEntry>())
                 .Where(entry => !string.IsNullOrWhiteSpace(entry.voxAssetPath))
                 .OrderBy(entry => entry.lodIndex)
@@ -299,7 +349,7 @@ namespace LocalModels.VoxelBridge
                 group.SetLODs(lods);
                 group.RecalculateBounds();
 
-                string path = ResolvePrefabAssetPath(manifest, prefabFolder, root.name);
+                string path = ResolvePrefabAssetPath(manifest, familyFolder, root.name);
                 PrefabUtility.SaveAsPrefabAsset(root, path);
                 return path;
             }
@@ -339,8 +389,8 @@ namespace LocalModels.VoxelBridge
             if (profile == null) throw new ArgumentNullException(nameof(profile));
             if (!profile.TryValidate(out string error)) throw new InvalidOperationException(error);
             if (options == null) throw new ArgumentNullException(nameof(options));
-            if (!IsAssetFolder(options.ExportFolder) || !IsAssetFolder(options.PrefabFolder))
-                throw new ArgumentException("Las carpetas de salida deben estar dentro de Assets.");
+            if (!IsAssetFolder(options.ExportFolder))
+                throw new ArgumentException("La carpeta de salida debe estar dentro de Assets.");
         }
 
         private static bool TryReadJsonAsset<T>(string assetPath, out T value) where T : class
@@ -400,39 +450,28 @@ namespace LocalModels.VoxelBridge
         }
 
         private static string ResolvePrefabAssetPath(
-            VoxelLodSetManifest manifest, string prefabRootFolder, string prefabName)
+            VoxelLodSetManifest manifest, string familyFolder, string prefabName)
         {
-            prefabRootFolder = NormalizeAssetPath(prefabRootFolder);
+            familyFolder = NormalizeAssetPath(familyFolder);
             prefabName = MakeSafeFileName(prefabName);
-            if (IsReusablePrefabPath(manifest.prefabAssetPath))
+            string desiredPath = $"{familyFolder}/{prefabName}.prefab";
+            if (IsReusablePrefabPath(manifest.prefabAssetPath) &&
+                AssetDatabase.LoadMainAssetAtPath(manifest.prefabAssetPath) != null)
             {
                 string existingPath = NormalizeAssetPath(manifest.prefabAssetPath);
                 string existingFolder = NormalizeAssetPath(Path.GetDirectoryName(existingPath));
-                bool isLooseInRoot = existingFolder.Equals(prefabRootFolder, StringComparison.Ordinal);
-                if (!isLooseInRoot)
-                {
-                    EnsureAssetFolder(existingFolder);
-                    return existingPath;
-                }
+                if (existingFolder.Equals(familyFolder, StringComparison.Ordinal)) return existingPath;
 
-                string organizedFolder = AssetDatabase.GenerateUniqueAssetPath(
-                    $"{prefabRootFolder}/{prefabName}");
-                EnsureAssetFolder(organizedFolder);
-                string organizedPath = $"{organizedFolder}/{prefabName}.prefab";
-                if (AssetDatabase.LoadMainAssetAtPath(existingPath) != null)
-                {
-                    string moveError = AssetDatabase.MoveAsset(existingPath, organizedPath);
-                    if (!string.IsNullOrEmpty(moveError))
-                        throw new IOException(
-                            $"No se pudo organizar el prefab existente en su subcarpeta: {moveError}");
-                }
-                return organizedPath;
+                if (AssetDatabase.LoadMainAssetAtPath(desiredPath) != null)
+                    desiredPath = AssetDatabase.GenerateUniqueAssetPath(desiredPath);
+                string moveError = AssetDatabase.MoveAsset(existingPath, desiredPath);
+                if (!string.IsNullOrEmpty(moveError))
+                    throw new IOException(
+                        $"No se pudo mover el prefab a la carpeta de su familia: {moveError}");
+                return desiredPath;
             }
 
-            string familyFolder = AssetDatabase.GenerateUniqueAssetPath(
-                $"{prefabRootFolder}/{prefabName}");
-            EnsureAssetFolder(familyFolder);
-            return $"{familyFolder}/{prefabName}.prefab";
+            return AssetDatabase.GenerateUniqueAssetPath(desiredPath);
         }
 
         internal static string MakeSafeFileName(string value)
