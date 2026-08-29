@@ -25,6 +25,8 @@ Cada modelo queda completamente agrupado en `Assets/VoxelBridgeExports/Nombre_Vo
 
 También puedes hacer clic derecho sobre el prefab, cualquiera de sus `.vox` o el manifiesto y elegir `Voxel Bridge > Editar LODs de la familia`. La ventana muestra cada nivel con accesos para seleccionarlo, abrirlo directamente en MagicaVoxel o usarlo como padre del siguiente LOD manual.
 
+El GameObject raíz y su archivo prefab usan solamente el nombre del modelo original; la carpeta conserva el sufijo `_VoxelLOD` para identificar la familia. En la jerarquía, haz clic derecho sobre un hijo de cualquier nivel y elige `Voxel Bridge > Editar este LOD en MagicaVoxel` para abrir exactamente su `.vox`. La opción `Editar LODs de la familia` abre la lista completa desde cualquier objeto perteneciente al `LODGroup`.
+
 Unity muestra los `.vox` con el icono y la representación de un `GameObject` porque Voxel Importer genera sus mallas durante la importación. El archivo del disco sigue siendo `.vox`; no se reemplaza por el prefab. La sección `Resultados` muestra por separado la ruta del `.vox` editable y el prefab que debe colocarse en escena.
 
 ## LOD manual

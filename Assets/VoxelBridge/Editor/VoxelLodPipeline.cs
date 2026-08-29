@@ -323,7 +323,8 @@ namespace LocalModels.VoxelBridge
             VoxelStyleProfile profile = string.IsNullOrEmpty(manifest.profileAssetPath)
                 ? null
                 : AssetDatabase.LoadAssetAtPath<VoxelStyleProfile>(manifest.profileAssetPath);
-            var root = new GameObject(MakeSafeFileName(manifest.sourceName) + "_VoxelLOD");
+            string modelName = MakeSafeFileName(manifest.sourceName);
+            var root = new GameObject(modelName);
             try
             {
                 var lods = new LOD[entries.Length];
@@ -349,7 +350,7 @@ namespace LocalModels.VoxelBridge
                 group.SetLODs(lods);
                 group.RecalculateBounds();
 
-                string path = ResolvePrefabAssetPath(manifest, familyFolder, root.name);
+                string path = ResolvePrefabAssetPath(manifest, familyFolder, modelName);
                 PrefabUtility.SaveAsPrefabAsset(root, path);
                 return path;
             }
@@ -459,8 +460,7 @@ namespace LocalModels.VoxelBridge
                 AssetDatabase.LoadMainAssetAtPath(manifest.prefabAssetPath) != null)
             {
                 string existingPath = NormalizeAssetPath(manifest.prefabAssetPath);
-                string existingFolder = NormalizeAssetPath(Path.GetDirectoryName(existingPath));
-                if (existingFolder.Equals(familyFolder, StringComparison.Ordinal)) return existingPath;
+                if (existingPath.Equals(desiredPath, StringComparison.Ordinal)) return existingPath;
 
                 if (AssetDatabase.LoadMainAssetAtPath(desiredPath) != null)
                     desiredPath = AssetDatabase.GenerateUniqueAssetPath(desiredPath);

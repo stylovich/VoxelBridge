@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using UnityEditor;
+using UnityEditor.SceneManagement;
 using UnityEngine;
 using Object = UnityEngine.Object;
 
@@ -64,6 +65,34 @@ namespace LocalModels.VoxelBridge
         private static bool ValidateOpenFamilyFromSelection() =>
             Selection.activeObject != null && VoxelLodPipeline.TryFindManifestForAsset(
                 AssetDatabase.GetAssetPath(Selection.activeObject), out _, out _);
+
+        [MenuItem("GameObject/Voxel Bridge/Editar este LOD en MagicaVoxel", false, 49)]
+        private static void EditHierarchyLod()
+        {
+            if (TryResolveHierarchyLod(Selection.activeGameObject,
+                    out Object voxAsset, out _, out _))
+                MagicaVoxelLauncher.OpenAsset(voxAsset);
+        }
+
+        [MenuItem("GameObject/Voxel Bridge/Editar este LOD en MagicaVoxel", true)]
+        private static bool ValidateEditHierarchyLod() =>
+            TryResolveHierarchyLod(Selection.activeGameObject, out _, out _, out _);
+
+        [MenuItem("GameObject/Voxel Bridge/Editar LODs de la familia", false, 50)]
+        private static void OpenHierarchyFamily()
+        {
+            if (!TryResolveHierarchyFamily(Selection.activeGameObject,
+                    out string prefabAssetPath, out _, out _))
+                return;
+            var window = GetOrCreateWindow();
+            window.TryLoadFamilyFromAsset(AssetDatabase.LoadMainAssetAtPath(prefabAssetPath));
+            window.Show();
+            window.Focus();
+        }
+
+        [MenuItem("GameObject/Voxel Bridge/Editar LODs de la familia", true)]
+        private static bool ValidateOpenHierarchyFamily() =>
+            TryResolveHierarchyFamily(Selection.activeGameObject, out _, out _, out _);
 
         private void OnEnable()
         {
@@ -389,6 +418,63 @@ namespace LocalModels.VoxelBridge
                 styleProfile = AssetDatabase.LoadAssetAtPath<VoxelStyleProfile>(manifest.profileAssetPath);
             status = $"Familia cargada: {manifest.sourceName}.";
             return true;
+        }
+
+        internal static bool TryResolveHierarchyLod(
+            GameObject selected, out Object voxAsset, out string voxAssetPath, out int lodIndex)
+        {
+            voxAsset = null;
+            voxAssetPath = null;
+            lodIndex = -1;
+            if (!TryResolveHierarchyFamily(selected, out _,
+                    out VoxelLodSetManifest manifest, out LODGroup lodGroup) ||
+                selected.transform == lodGroup.transform)
+                return false;
+
+            VoxelLodEntry[] entries = (manifest.lods ?? Array.Empty<VoxelLodEntry>())
+                .OrderBy(entry => entry.lodIndex)
+                .ToArray();
+            LOD[] unityLods = lodGroup.GetLODs();
+            int count = Mathf.Min(entries.Length, unityLods.Length);
+            for (int i = 0; i < count; i++)
+            {
+                bool containsSelection = unityLods[i].renderers.Any(renderer => renderer != null &&
+                    (renderer.transform == selected.transform ||
+                     renderer.transform.IsChildOf(selected.transform) ||
+                     selected.transform.IsChildOf(renderer.transform)));
+                if (!containsSelection) continue;
+
+                voxAssetPath = entries[i].voxAssetPath;
+                voxAsset = AssetDatabase.LoadMainAssetAtPath(voxAssetPath);
+                lodIndex = entries[i].lodIndex;
+                return voxAsset != null;
+            }
+
+            return false;
+        }
+
+        private static bool TryResolveHierarchyFamily(
+            GameObject selected, out string prefabAssetPath,
+            out VoxelLodSetManifest manifest, out LODGroup lodGroup)
+        {
+            prefabAssetPath = null;
+            manifest = null;
+            lodGroup = selected != null ? selected.GetComponentInParent<LODGroup>(true) : null;
+            if (lodGroup == null) return false;
+
+            Object originalRoot = PrefabUtility.GetCorrespondingObjectFromOriginalSource(lodGroup.gameObject);
+            if (originalRoot != null) prefabAssetPath = AssetDatabase.GetAssetPath(originalRoot);
+            if (string.IsNullOrEmpty(prefabAssetPath))
+            {
+                var prefabStage = PrefabStageUtility.GetCurrentPrefabStage();
+                if (prefabStage != null && selected.scene == prefabStage.scene)
+                    prefabAssetPath = prefabStage.assetPath;
+            }
+            if (string.IsNullOrEmpty(prefabAssetPath))
+                prefabAssetPath = AssetDatabase.GetAssetPath(lodGroup.gameObject);
+
+            return VoxelLodPipeline.TryFindManifestForAsset(
+                prefabAssetPath, out _, out manifest);
         }
 
         private void ShowException(Exception exception)

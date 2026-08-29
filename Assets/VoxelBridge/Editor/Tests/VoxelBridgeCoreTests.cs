@@ -255,6 +255,7 @@ namespace LocalModels.VoxelBridge.Tests
 
             const string testRoot = "Assets/VoxelBridgeTestOutput";
             GameObject root = null;
+            GameObject prefabInstance = null;
             VoxelStyleProfile profile = null;
             try
             {
@@ -292,6 +293,8 @@ namespace LocalModels.VoxelBridge.Tests
                 Assert.That(lod0.chunks.Length, Is.GreaterThan(1));
                 GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(build.PrefabAssetPath);
                 Assert.That(prefab, Is.Not.Null);
+                Assert.That(prefab.name, Is.EqualTo("PipelineCube"));
+                Assert.That(build.PrefabAssetPath, Does.EndWith("/PipelineCube.prefab"));
                 string familyFolder = VoxelLodPipeline.NormalizeAssetPath(
                     Path.GetDirectoryName(build.ManifestAssetPath));
                 Assert.That(VoxelLodPipeline.NormalizeAssetPath(
@@ -306,6 +309,16 @@ namespace LocalModels.VoxelBridge.Tests
                 Assert.That(VoxelLodPipeline.TryFindManifestForAsset(build.VoxAssetPaths[0],
                     out string foundFromVox, out _), Is.True);
                 Assert.That(foundFromVox, Is.EqualTo(build.ManifestAssetPath));
+                prefabInstance = PrefabUtility.InstantiatePrefab(prefab) as GameObject;
+                Assert.That(prefabInstance, Is.Not.Null);
+                Assert.That(prefabInstance.name, Is.EqualTo("PipelineCube"));
+                GameObject lod0Object = prefabInstance.transform.GetChild(0).gameObject;
+                Assert.That(VoxelBridgeWindow.TryResolveHierarchyLod(lod0Object,
+                    out Object resolvedLodAsset, out string resolvedLodPath, out int resolvedLodIndex),
+                    Is.True);
+                Assert.That(resolvedLodAsset, Is.Not.Null);
+                Assert.That(resolvedLodPath, Is.EqualTo(build.VoxAssetPaths[0]));
+                Assert.That(resolvedLodIndex, Is.EqualTo(0));
                 Assert.That(prefab.GetComponent<LODGroup>().lodCount, Is.EqualTo(2));
                 Renderer[] chunkRenderers = prefab.transform.GetChild(0)
                     .GetComponentsInChildren<Renderer>(true);
@@ -360,6 +373,7 @@ namespace LocalModels.VoxelBridge.Tests
             }
             finally
             {
+                if (prefabInstance != null) Object.DestroyImmediate(prefabInstance);
                 if (root != null) Object.DestroyImmediate(root);
                 if (profile != null) Object.DestroyImmediate(profile);
                 AssetDatabase.DeleteAsset(testRoot);
