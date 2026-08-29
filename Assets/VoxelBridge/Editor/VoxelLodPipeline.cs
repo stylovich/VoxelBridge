@@ -299,10 +299,7 @@ namespace LocalModels.VoxelBridge
                 group.SetLODs(lods);
                 group.RecalculateBounds();
 
-                string path = IsReusablePrefabPath(manifest.prefabAssetPath)
-                    ? NormalizeAssetPath(manifest.prefabAssetPath)
-                    : AssetDatabase.GenerateUniqueAssetPath(
-                        $"{NormalizeAssetPath(prefabFolder)}/{MakeSafeFileName(root.name)}.prefab");
+                string path = ResolvePrefabAssetPath(manifest, prefabFolder, root.name);
                 PrefabUtility.SaveAsPrefabAsset(root, path);
                 return path;
             }
@@ -400,6 +397,42 @@ namespace LocalModels.VoxelBridge
             path = NormalizeAssetPath(path);
             return path.StartsWith("Assets/", StringComparison.Ordinal) &&
                    path.EndsWith(".prefab", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string ResolvePrefabAssetPath(
+            VoxelLodSetManifest manifest, string prefabRootFolder, string prefabName)
+        {
+            prefabRootFolder = NormalizeAssetPath(prefabRootFolder);
+            prefabName = MakeSafeFileName(prefabName);
+            if (IsReusablePrefabPath(manifest.prefabAssetPath))
+            {
+                string existingPath = NormalizeAssetPath(manifest.prefabAssetPath);
+                string existingFolder = NormalizeAssetPath(Path.GetDirectoryName(existingPath));
+                bool isLooseInRoot = existingFolder.Equals(prefabRootFolder, StringComparison.Ordinal);
+                if (!isLooseInRoot)
+                {
+                    EnsureAssetFolder(existingFolder);
+                    return existingPath;
+                }
+
+                string organizedFolder = AssetDatabase.GenerateUniqueAssetPath(
+                    $"{prefabRootFolder}/{prefabName}");
+                EnsureAssetFolder(organizedFolder);
+                string organizedPath = $"{organizedFolder}/{prefabName}.prefab";
+                if (AssetDatabase.LoadMainAssetAtPath(existingPath) != null)
+                {
+                    string moveError = AssetDatabase.MoveAsset(existingPath, organizedPath);
+                    if (!string.IsNullOrEmpty(moveError))
+                        throw new IOException(
+                            $"No se pudo organizar el prefab existente en su subcarpeta: {moveError}");
+                }
+                return organizedPath;
+            }
+
+            string familyFolder = AssetDatabase.GenerateUniqueAssetPath(
+                $"{prefabRootFolder}/{prefabName}");
+            EnsureAssetFolder(familyFolder);
+            return $"{familyFolder}/{prefabName}.prefab";
         }
 
         internal static string MakeSafeFileName(string value)

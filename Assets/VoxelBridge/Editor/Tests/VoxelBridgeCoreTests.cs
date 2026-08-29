@@ -293,6 +293,11 @@ namespace LocalModels.VoxelBridge.Tests
                 Assert.That(lod0.chunks.Length, Is.GreaterThan(1));
                 GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(build.PrefabAssetPath);
                 Assert.That(prefab, Is.Not.Null);
+                string prefabFamilyFolder = VoxelLodPipeline.NormalizeAssetPath(
+                    Path.GetDirectoryName(build.PrefabAssetPath));
+                Assert.That(prefabFamilyFolder, Is.Not.EqualTo(options.PrefabFolder));
+                Assert.That(prefabFamilyFolder, Does.StartWith(options.PrefabFolder + "/"));
+                Assert.That(AssetDatabase.IsValidFolder(prefabFamilyFolder), Is.True);
                 Assert.That(prefab.GetComponent<LODGroup>().lodCount, Is.EqualTo(2));
                 Renderer[] chunkRenderers = prefab.transform.GetChild(0)
                     .GetComponentsInChildren<Renderer>(true);
@@ -306,6 +311,23 @@ namespace LocalModels.VoxelBridge.Tests
                 Assert.That(renderedBounds.size.y, Is.EqualTo(2f).Within(0.51f));
                 Assert.That(renderedBounds.size.z, Is.EqualTo(2f).Within(0.51f));
 
+                string prefabGuid = AssetDatabase.AssetPathToGUID(build.PrefabAssetPath);
+                string loosePrefabPath = options.PrefabFolder + "/PipelineCube_VoxelLOD.prefab";
+                Assert.That(AssetDatabase.MoveAsset(build.PrefabAssetPath, loosePrefabPath), Is.Empty);
+                string manifestAbsolute = VoxelLodPipeline.AssetPathToAbsolute(build.ManifestAssetPath);
+                VoxelLodSetManifest looseManifest = JsonUtility.FromJson<VoxelLodSetManifest>(
+                    File.ReadAllText(manifestAbsolute));
+                looseManifest.prefabAssetPath = loosePrefabPath;
+                File.WriteAllText(manifestAbsolute, JsonUtility.ToJson(looseManifest, true));
+                AssetDatabase.ImportAsset(build.ManifestAssetPath, ImportAssetOptions.ForceSynchronousImport);
+                string organizedPrefabPath = VoxelLodPipeline.RebuildPrefab(
+                    build.ManifestAssetPath, options.PrefabFolder);
+                Assert.That(organizedPrefabPath, Is.Not.EqualTo(loosePrefabPath));
+                Assert.That(VoxelLodPipeline.NormalizeAssetPath(Path.GetDirectoryName(organizedPrefabPath)),
+                    Does.StartWith(options.PrefabFolder + "/"));
+                Assert.That(AssetDatabase.AssetPathToGUID(organizedPrefabPath), Is.EqualTo(prefabGuid));
+                Assert.That(AssetDatabase.LoadMainAssetAtPath(loosePrefabPath), Is.Null);
+
                 VoxelLodBuildResult duplicate = VoxelLodPipeline.GenerateManual(
                     build.VoxAssetPaths[0], profile, 1, VoxelLodGenerationMode.DuplicateParent, options);
                 Assert.That(VoxelImporterIntegration.TryLoadMetadata(duplicate.VoxAssetPaths[0],
@@ -314,7 +336,7 @@ namespace LocalModels.VoxelBridge.Tests
                     Is.EqualTo(VoxelLodGenerationMode.DuplicateParent));
                 Assert.That(duplicateMetadata.voxelSize, Is.EqualTo(0.25f).Within(1e-6f));
                 Assert.That(duplicateMetadata.lodMultiplier, Is.EqualTo(1));
-                Assert.That(duplicate.PrefabAssetPath, Is.EqualTo(build.PrefabAssetPath));
+                Assert.That(duplicate.PrefabAssetPath, Is.EqualTo(organizedPrefabPath));
 
                 VoxelLodBuildResult reduced = VoxelLodPipeline.GenerateManual(
                     build.VoxAssetPaths[0], profile, 1, VoxelLodGenerationMode.ReduceParent, options);
@@ -325,7 +347,7 @@ namespace LocalModels.VoxelBridge.Tests
                 Assert.That(reducedMetadata.voxelSize, Is.EqualTo(0.5f).Within(1e-6f));
                 Assert.That(reducedMetadata.lodMultiplier, Is.EqualTo(2));
                 Assert.That(reducedMetadata.voxelCount, Is.LessThan(lod0.voxelCount));
-                Assert.That(reduced.PrefabAssetPath, Is.EqualTo(build.PrefabAssetPath));
+                Assert.That(reduced.PrefabAssetPath, Is.EqualTo(organizedPrefabPath));
             }
             finally
             {
