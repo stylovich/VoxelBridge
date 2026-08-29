@@ -71,6 +71,19 @@ namespace LocalModels.VoxelBridge
     }
 
     [Serializable]
+    internal sealed class VoxelImpostorEntry
+    {
+        public string assetPath;
+        public string profileAssetPath;
+        public VoxelImpostorQuality quality;
+        public string amplifyVersion;
+        public int sourceLodIndex;
+        public float cullScreenHeight;
+        public bool crossFade;
+        public float fadeTransitionWidth;
+    }
+
+    [Serializable]
     internal sealed class VoxelLodSetManifest
     {
         public int formatVersion = 1;
@@ -82,6 +95,7 @@ namespace LocalModels.VoxelBridge
         public string profileAssetPath;
         public string prefabAssetPath;
         public VoxelLodEntry[] lods;
+        public VoxelImpostorEntry impostor;
     }
 
     internal sealed class VoxelGrid

@@ -31,6 +31,23 @@ El GameObject raíz y su archivo prefab usan solamente el nombre del modelo orig
 
 Unity muestra los `.vox` con el icono y la representación de un `GameObject` porque Voxel Importer genera sus mallas durante la importación. El archivo del disco sigue siendo `.vox`; no se reemplaza por el prefab. La sección `Resultados` muestra por separado la ruta del `.vox` editable y el prefab que debe colocarse en escena.
 
+## Impostor final y perfiles de calidad
+
+Con Amplify Impostors 1.0.4 instalado, la sección `Impostor final` hornea todos los chunks de LOD0 y añade el billboard resultante como último nivel del `LODGroup`. La herramienta utiliza una sola configuración central en `Assets/VoxelBridgeSettings/VoxelImpostorProfile.asset`; para cada modelo solo se elige un nivel de la lista:
+
+- `Bajo · Rendimiento`: HemiOctahedron, atlas 512, 8×8 vistas, padding 12, 6 vértices, descarte 0.01 y Cross Fade desactivado. Úsalo para props pequeños o muy lejanos que no se observen desde abajo.
+- `Medio · Equilibrado`: Octahedron, atlas 1024, 12×12 vistas, padding 32, 8 vértices, descarte 0.005 y Cross Fade 0.15. Es el valor recomendado para la mayoría de vehículos y props.
+- `Alto · Gran distancia`: Octahedron, atlas 2048, 16×16 vistas, padding 48, 12 vértices, descarte 0.0015 y Cross Fade 0.25. Está pensado para vehículos voladores, objetos móviles importantes y modelos que pueden verse desde cualquier dirección.
+- `Arquitectura · Fondo`: HemiOctahedron, atlas 2048, 16×16 vistas, padding 48, 10 vértices, descarte 0.0005 y Cross Fade 0.30. Concentra las capturas en el hemisferio superior para edificios, estructuras y siluetas del skyline que no se observan desde abajo.
+
+El manifiesto de cada familia guarda el perfil seleccionado y la ventana lo recupera al abrir nuevamente su prefab, `.vox` o `.voxset.json`. `Editar valores` abre la configuración central para ajustar los cuatro perfiles del proyecto; su Inspector también permite restaurar todos los valores recomendados con Undo.
+
+Para vehículos terrestres usa `Medio` en tráfico o elementos secundarios y `Alto` cuando su silueta sea importante o la cámara tenga libertad vertical. Los vehículos voladores deben usar `Alto`, porque necesitan capturas de todo el objeto y pueden verse desde abajo. El movimiento no requiere otro tipo de asset, pero hace más visible el cambio angular: valida el Cross Fade con la velocidad máxima de cámara y vehículo.
+
+Los grupos decorativos menores de un metro normalmente no justifican una cadena larga. Si LOD1 deja menos de unas 5-6 celdas en el eje principal, usa solamente LOD0 y después impostor o descarte; si todavía conserva una silueta reconocible, usa LOD0 → LOD1 → impostor/descarte. Para objetos únicos que desaparecen pronto suele ser más barato omitir el impostor. Resérvalo para grupos completos —por ejemplo un conjunto de basura o cajas— que se repitan muchas veces o deban seguir visibles a distancia. El impostor siempre se añade después del último LOD voxel definido por el `VoxelStyleProfile`, así que un perfil voxel de uno o dos niveles produce directamente esos dos flujos.
+
+Al reducir la cantidad de LODs también ajusta `Lod Screen Heights`: los valores generales 0.6/0.3 harían que un prop pequeño cambie o desaparezca demasiado cerca. Como punto de partida, usa `{ 0.05 }` para LOD0 → impostor y `{ 0.15, 0.04 }` para LOD0 → LOD1 → impostor; el perfil de impostor Bajo terminará de descartarlo en 0.01. Si omites el impostor, usa aproximadamente 0.01 como altura final de descarte y comprueba el resultado con la cámara real.
+
 ## LOD manual
 
 Asigna el `.vox` del LOD padre en la sección `LOD manual` y elige uno de estos puntos de partida:

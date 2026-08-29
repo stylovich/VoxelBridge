@@ -6,8 +6,100 @@ using UnityEngine;
 
 namespace LocalModels.VoxelBridge.Tests
 {
+    internal sealed class VoxelBridgeFakeImpostorAsset : ScriptableObject
+    {
+        public Mesh Mesh;
+        public Material Material;
+    }
+
     internal sealed class VoxelBridgeCoreTests
     {
+        [Test]
+        public void ImpostorProfile_DefaultSettingsFitAfterLastVoxelLod()
+        {
+            VoxelImpostorProfile profile = ScriptableObject.CreateInstance<VoxelImpostorProfile>();
+            try
+            {
+                foreach (VoxelImpostorQuality quality in new[]
+                         {
+                             VoxelImpostorQuality.Low,
+                             VoxelImpostorQuality.Medium,
+                             VoxelImpostorQuality.High,
+                             VoxelImpostorQuality.Architecture
+                         })
+                {
+                    Assert.That(profile.TryValidate(quality, 0.05f, out string error),
+                        Is.True, $"{quality}: {error}");
+                    Assert.That(profile.GetSettings(quality).CullScreenHeight, Is.LessThan(0.05f));
+                }
+
+                VoxelImpostorSettings low = profile.GetSettings(VoxelImpostorQuality.Low);
+                VoxelImpostorSettings medium = profile.GetSettings(VoxelImpostorQuality.Medium);
+                VoxelImpostorSettings high = profile.GetSettings(VoxelImpostorQuality.High);
+                VoxelImpostorSettings architecture =
+                    profile.GetSettings(VoxelImpostorQuality.Architecture);
+                Assert.That(low.TextureResolution, Is.EqualTo(512));
+                Assert.That(medium.TextureResolution, Is.EqualTo(1024));
+                Assert.That(high.TextureResolution, Is.EqualTo(2048));
+                Assert.That(architecture.TextureResolution, Is.EqualTo(2048));
+                Assert.That(low.Frames, Is.LessThan(medium.Frames));
+                Assert.That(medium.Frames, Is.LessThan(high.Frames));
+                Assert.That(low.CrossFade, Is.False);
+                Assert.That(medium.CrossFade, Is.True);
+                Assert.That(high.CullScreenHeight, Is.LessThan(medium.CullScreenHeight));
+                Assert.That(architecture.ImpostorType,
+                    Is.EqualTo(VoxelImpostorType.HemiOctahedron));
+                Assert.That(architecture.MaxVertices, Is.EqualTo(10));
+                Assert.That(architecture.CullScreenHeight, Is.EqualTo(0.0005f).Within(1e-7f));
+                Assert.That(architecture.FadeTransitionWidth, Is.EqualTo(0.3f).Within(1e-6f));
+            }
+            finally
+            {
+                Object.DestroyImmediate(profile);
+            }
+        }
+
+        [Test]
+        public void ImpostorProfile_RejectsCullAtVoxelTransition()
+        {
+            VoxelImpostorProfile profile = ScriptableObject.CreateInstance<VoxelImpostorProfile>();
+            try
+            {
+                var serialized = new SerializedObject(profile);
+                serialized.FindProperty("medium").FindPropertyRelative("cullScreenHeight")
+                    .floatValue = 0.05f;
+                serialized.ApplyModifiedPropertiesWithoutUndo();
+
+                Assert.That(profile.TryValidate(
+                    VoxelImpostorQuality.Medium, 0.05f, out string error), Is.False);
+                Assert.That(error, Does.Contain("menor que la transición"));
+            }
+            finally
+            {
+                Object.DestroyImmediate(profile);
+            }
+        }
+
+        [Test]
+        public void ImpostorProfile_UnspecifiedQualityFallsBackToMedium()
+        {
+            VoxelImpostorProfile profile = ScriptableObject.CreateInstance<VoxelImpostorProfile>();
+            try
+            {
+                VoxelImpostorSettings unspecified =
+                    profile.GetSettings(VoxelImpostorQuality.Unspecified);
+                VoxelImpostorSettings medium = profile.GetSettings(VoxelImpostorQuality.Medium);
+
+                Assert.That(unspecified, Is.SameAs(medium));
+                Assert.That(VoxelImpostorProfile.GetQualityName(
+                    VoxelImpostorQuality.Unspecified), Is.EqualTo("Medio · Equilibrado"));
+            }
+            finally
+            {
+                Object.DestroyImmediate(profile);
+            }
+        }
+
         [Test]
         public void TriangleBoxIntersection_DetectsHitAndMiss()
         {
@@ -365,6 +457,64 @@ namespace LocalModels.VoxelBridge.Tests
                 Assert.That(Mathf.Abs(renderedBounds.center.z - coarseBounds.center.z),
                     Is.LessThanOrEqualTo(centerTolerance), chunkDiagnostics);
 
+                string impostorFolder = familyFolder + "/Impostor";
+                VoxelLodPipeline.EnsureAssetFolder(impostorFolder);
+                string impostorAssetPath = impostorFolder + "/PipelineCube_Impostor.asset";
+                var impostorData = ScriptableObject.CreateInstance<VoxelBridgeFakeImpostorAsset>();
+                var impostorMesh = new Mesh { name = "PipelineCube_Impostor" };
+                impostorMesh.vertices = new[]
+                {
+                    new Vector3(-2f, -1f, 0f), new Vector3(-2f, 1f, 0f),
+                    new Vector3(2f, 1f, 0f), new Vector3(2f, -1f, 0f)
+                };
+                impostorMesh.triangles = new[] { 0, 1, 2, 0, 2, 3 };
+                impostorMesh.RecalculateNormals();
+                impostorMesh.RecalculateBounds();
+                Shader shader = Shader.Find("HDRP/Lit") ?? Shader.Find("Hidden/InternalErrorShader");
+                Assert.That(shader, Is.Not.Null);
+                var impostorMaterial = new Material(shader) { name = "PipelineCube_Impostor" };
+                impostorData.Mesh = impostorMesh;
+                impostorData.Material = impostorMaterial;
+                AssetDatabase.CreateAsset(impostorData, impostorAssetPath);
+                AssetDatabase.AddObjectToAsset(impostorMesh, impostorData);
+                AssetDatabase.AddObjectToAsset(impostorMaterial, impostorData);
+                EditorUtility.SetDirty(impostorData);
+                AssetDatabase.SaveAssets();
+
+                Assert.That(VoxelLodPipeline.TryReadManifest(
+                    build.ManifestAssetPath, out VoxelLodSetManifest manifestWithImpostor), Is.True);
+                manifestWithImpostor.impostor = new VoxelImpostorEntry
+                {
+                    assetPath = impostorAssetPath,
+                    quality = VoxelImpostorQuality.High,
+                    amplifyVersion = AmplifyImpostorIntegration.SupportedVersion,
+                    sourceLodIndex = 0,
+                    cullScreenHeight = 0.01f,
+                    crossFade = true,
+                    fadeTransitionWidth = 0.15f
+                };
+                VoxelLodPipeline.SaveManifest(build.ManifestAssetPath, manifestWithImpostor);
+                Assert.That(VoxelLodPipeline.TryReadManifest(
+                    build.ManifestAssetPath, out VoxelLodSetManifest savedImpostorManifest), Is.True);
+                Assert.That(savedImpostorManifest.impostor.quality,
+                    Is.EqualTo(VoxelImpostorQuality.High));
+                Assert.That(VoxelLodPipeline.RebuildPrefab(build.ManifestAssetPath),
+                    Is.EqualTo(build.PrefabAssetPath));
+                prefab = AssetDatabase.LoadAssetAtPath<GameObject>(build.PrefabAssetPath);
+                LODGroup prefabLodGroup = prefab.GetComponent<LODGroup>();
+                Assert.That(prefabLodGroup.lodCount, Is.EqualTo(3));
+                Assert.That(prefabLodGroup.fadeMode, Is.EqualTo(LODFadeMode.CrossFade));
+                LOD[] lodsWithImpostor = prefabLodGroup.GetLODs();
+                Assert.That(lodsWithImpostor[1].screenRelativeTransitionHeight,
+                    Is.EqualTo(0.3f).Within(1e-6f));
+                Assert.That(lodsWithImpostor[2].screenRelativeTransitionHeight,
+                    Is.EqualTo(0.01f).Within(1e-6f));
+                Assert.That(lodsWithImpostor[2].renderers, Has.Length.EqualTo(1));
+                Assert.That(lodsWithImpostor[2].renderers[0].gameObject.name, Is.EqualTo("Impostor"));
+                Assert.That(VoxelLodPipeline.TryFindManifestForAsset(impostorAssetPath,
+                    out string foundFromImpostor, out _), Is.True);
+                Assert.That(foundFromImpostor, Is.EqualTo(build.ManifestAssetPath));
+
                 string prefabGuid = AssetDatabase.AssetPathToGUID(build.PrefabAssetPath);
                 string separatePrefabFolder = testRoot + "/SeparatePrefabs";
                 VoxelLodPipeline.EnsureAssetFolder(separatePrefabFolder);
@@ -403,6 +553,8 @@ namespace LocalModels.VoxelBridge.Tests
                 Assert.That(reducedMetadata.lodMultiplier, Is.EqualTo(2));
                 Assert.That(reducedMetadata.voxelCount, Is.LessThan(lod0.voxelCount));
                 Assert.That(reduced.PrefabAssetPath, Is.EqualTo(organizedPrefabPath));
+                Assert.That(AssetDatabase.LoadAssetAtPath<GameObject>(organizedPrefabPath)
+                    .GetComponent<LODGroup>().lodCount, Is.EqualTo(3));
             }
             finally
             {

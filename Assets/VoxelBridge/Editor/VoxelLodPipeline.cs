@@ -240,12 +240,14 @@ namespace LocalModels.VoxelBridge
 
             string folder = NormalizeAssetPath(Path.GetDirectoryName(assetPath));
             if (!IsAssetFolder(folder) || !AssetDatabase.IsValidFolder(folder)) return false;
-            foreach (string guid in AssetDatabase.FindAssets("t:TextAsset", new[] { folder }))
+            string parentFolder = NormalizeAssetPath(Path.GetDirectoryName(folder));
+            string[] searchFolders = IsAssetFolder(parentFolder) && AssetDatabase.IsValidFolder(parentFolder)
+                ? new[] { folder, parentFolder }
+                : new[] { folder };
+            foreach (string guid in AssetDatabase.FindAssets("t:TextAsset", searchFolders))
             {
                 string candidate = NormalizeAssetPath(AssetDatabase.GUIDToAssetPath(guid));
                 if (!candidate.EndsWith(".voxset.json", StringComparison.OrdinalIgnoreCase) ||
-                    !NormalizeAssetPath(Path.GetDirectoryName(candidate))
-                        .Equals(folder, StringComparison.Ordinal) ||
                     !TryReadJsonAsset(candidate, out VoxelLodSetManifest candidateManifest))
                     continue;
 
@@ -254,7 +256,9 @@ namespace LocalModels.VoxelBridge
                 bool isLod = (candidateManifest.lods ?? Array.Empty<VoxelLodEntry>())
                     .Any(entry => NormalizeAssetPath(entry.voxAssetPath)
                         .Equals(assetPath, StringComparison.Ordinal));
-                if (!isPrefab && !isLod) continue;
+                bool isImpostor = NormalizeAssetPath(candidateManifest.impostor?.assetPath)
+                    .Equals(assetPath, StringComparison.Ordinal);
+                if (!isPrefab && !isLod && !isImpostor) continue;
                 manifestAssetPath = candidate;
                 manifest = candidateManifest;
                 return true;
@@ -356,6 +360,12 @@ namespace LocalModels.VoxelBridge
                 group.SetLODs(lods);
                 group.RecalculateBounds();
 
+                if (manifest.impostor != null &&
+                    !string.IsNullOrWhiteSpace(manifest.impostor.assetPath) &&
+                    !AmplifyImpostorIntegration.TryAppendExistingImpostor(
+                        root, group, manifest.impostor, out string impostorError))
+                    Debug.LogWarning($"Voxel Bridge omitió el impostor de '{modelName}': {impostorError}");
+
                 string path = ResolvePrefabAssetPath(manifest, familyFolder, modelName);
                 PrefabUtility.SaveAsPrefabAsset(root, path);
                 return path;
@@ -408,6 +418,15 @@ namespace LocalModels.VoxelBridge
             if (!File.Exists(absolute)) return false;
             value = JsonUtility.FromJson<T>(File.ReadAllText(absolute));
             return value != null;
+        }
+
+        internal static bool TryReadManifest(string assetPath, out VoxelLodSetManifest manifest) =>
+            TryReadJsonAsset(assetPath, out manifest);
+
+        internal static void SaveManifest(string assetPath, VoxelLodSetManifest manifest)
+        {
+            WriteJsonAsset(assetPath, manifest);
+            AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceSynchronousImport);
         }
 
         private static void WriteJsonAsset<T>(string assetPath, T value)
