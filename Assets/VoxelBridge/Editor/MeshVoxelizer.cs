@@ -23,6 +23,7 @@ namespace LocalModels.VoxelBridge
         public VoxelGrid Grid;
         public Bounds SourceBounds;
         public int TriangleCount;
+        public int OccupiedVoxelCount;
     }
 
     internal static class MeshVoxelizer
@@ -125,7 +126,8 @@ namespace LocalModels.VoxelBridge
                 }
                 bestDistances = null;
 
-                if (grid.CountOccupied() == 0)
+                int occupiedVoxelCount = grid.CountOccupied();
+                if (occupiedVoxelCount == 0)
                     throw new InvalidOperationException("No se generaron vóxeles. Prueba una resolución mayor o revisa la transparencia del material.");
 
                 if (settings.FillInterior)
@@ -135,10 +137,17 @@ namespace LocalModels.VoxelBridge
                     if (cancelProgress != null && cancelProgress(0.94f, "Rellenando el interior"))
                         throw new OperationCanceledException("Voxelización cancelada.");
                     FillInterior(grid);
+                    occupiedVoxelCount = grid.CountOccupied();
                 }
 
                 cancelProgress?.Invoke(1f, "Voxelización terminada");
-                return new VoxelizationResult { Grid = grid, SourceBounds = bounds, TriangleCount = triangleTotal };
+                return new VoxelizationResult
+                {
+                    Grid = grid,
+                    SourceBounds = bounds,
+                    TriangleCount = triangleTotal,
+                    OccupiedVoxelCount = occupiedVoxelCount
+                };
             }
             finally
             {

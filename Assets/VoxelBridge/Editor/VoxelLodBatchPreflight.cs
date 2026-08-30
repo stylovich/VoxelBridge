@@ -156,7 +156,8 @@ namespace LocalModels.VoxelBridge
             return Hash128.Compute(
                 $"{sources}#{profileValues}#{options}#{batchOptions.MaximumEstimatedMemoryBytes}:" +
                 $"{batchOptions.SkipSourcesOverMemoryBudget}:{batchOptions.AdaptInitialVoxelSize}:" +
-                $"{batchOptions.MaximumInitialLodIndex}:{batchOptions.IgnoreInactiveObjects}")
+                $"{batchOptions.MaximumInitialLodIndex}:{batchOptions.MaximumImportedVoxelCount}:" +
+                $"{batchOptions.IgnoreInactiveObjects}")
                 .ToString();
         }
 

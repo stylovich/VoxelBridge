@@ -1240,6 +1240,90 @@ namespace LocalModels.VoxelBridge.Tests
         }
 
         [Test]
+        public void AutomaticLodPipeline_AdaptsOccupiedVoxelCountBeforeImport()
+        {
+            if (!VoxelImporterIntegration.IsInstalled)
+                Assert.Ignore("Voxel Importer es opcional y no está instalado.");
+
+            const string testRoot = "Assets/VoxelBridgeImporterLimitTestOutput";
+            GameObject root = null;
+            VoxelStyleProfile profile = null;
+            try
+            {
+                root = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                root.name = "ImporterLimitCube";
+                profile = ScriptableObject.CreateInstance<VoxelStyleProfile>();
+                var serializedProfile = new SerializedObject(profile);
+                serializedProfile.FindProperty("baseVoxelSize").floatValue = 0.25f;
+                serializedProfile.FindProperty("chunkCellSize").intValue = 16;
+                serializedProfile.FindProperty("padding").intValue = 1;
+                serializedProfile.FindProperty("fillInterior").boolValue = true;
+                SerializedProperty multipliers = serializedProfile.FindProperty("lodMultipliers");
+                multipliers.arraySize = 3;
+                multipliers.GetArrayElementAtIndex(0).intValue = 1;
+                multipliers.GetArrayElementAtIndex(1).intValue = 2;
+                multipliers.GetArrayElementAtIndex(2).intValue = 4;
+                serializedProfile.ApplyModifiedPropertiesWithoutUndo();
+
+                VoxelizationResult fine = MeshVoxelizer.Voxelize(root, new VoxelizationSettings
+                {
+                    VoxelSize = 0.25f,
+                    ChunkCellSize = 16,
+                    Padding = 1,
+                    FillInterior = true,
+                    ColorMode = VoxelColorMode.SingleColor
+                });
+                VoxelizationResult coarse = MeshVoxelizer.Voxelize(root, new VoxelizationSettings
+                {
+                    VoxelSize = 0.5f,
+                    ChunkCellSize = 16,
+                    Padding = 1,
+                    FillInterior = true,
+                    ColorMode = VoxelColorMode.SingleColor
+                });
+                Assert.That(fine.OccupiedVoxelCount, Is.GreaterThan(coarse.OccupiedVoxelCount));
+                int importerLimit = coarse.OccupiedVoxelCount +
+                                    (fine.OccupiedVoxelCount - coarse.OccupiedVoxelCount) / 2;
+
+                var options = new VoxelLodBuildOptions
+                {
+                    ColorMode = VoxelColorMode.SingleColor,
+                    SingleColor = new Color32(100, 140, 180, 255),
+                    AlphaCutoff = 0.1f,
+                    ExportFolder = testRoot + "/Accepted"
+                };
+                VoxelLodBuildResult build = VoxelLodPipeline.GenerateAutomatic(
+                    root, profile, options, null, 1, importerLimit, 4);
+
+                Assert.That(VoxelImporterIntegration.TryLoadMetadata(build.VoxAssetPaths[0],
+                    out VoxelBridgeMetadata lod0, out string error), Is.True, error);
+                Assert.That(lod0.lodMultiplier, Is.EqualTo(2));
+                Assert.That(lod0.voxelSize, Is.EqualTo(0.5f).Within(1e-6f));
+                Assert.That(lod0.voxelCount, Is.LessThanOrEqualTo(importerLimit));
+                Assert.That(VoxelLodPipeline.TryReadManifest(
+                    build.ManifestAssetPath, out VoxelLodSetManifest manifest), Is.True);
+                Assert.That(manifest.initialVoxelMultiplier, Is.EqualTo(2));
+
+                var rejectedOptions = new VoxelLodBuildOptions
+                {
+                    ColorMode = VoxelColorMode.SingleColor,
+                    ExportFolder = testRoot + "/Rejected"
+                };
+                System.InvalidOperationException exception = Assert.Throws<System.InvalidOperationException>(() =>
+                    VoxelLodPipeline.GenerateAutomatic(
+                        root, profile, rejectedOptions, null, 1, importerLimit, 1));
+                Assert.That(exception.Message, Does.Contain("por encima del límite de importación"));
+                Assert.That(AssetDatabase.IsValidFolder(rejectedOptions.ExportFolder), Is.False);
+            }
+            finally
+            {
+                if (root != null) Object.DestroyImmediate(root);
+                if (profile != null) Object.DestroyImmediate(profile);
+                AssetDatabase.DeleteAsset(testRoot);
+            }
+        }
+
+        [Test]
         public void VoxWriter_WritesExpectedHeaderDimensionsAndVoxelCount()
         {
             var grid = new VoxelGrid(new Vector3Int(2, 3, 4), Vector3.zero, 1f);

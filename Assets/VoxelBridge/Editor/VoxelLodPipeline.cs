@@ -40,6 +40,8 @@ namespace LocalModels.VoxelBridge
 
     internal sealed class VoxelLodBatchOptions
     {
+        public const int DefaultMaximumImportedVoxelCount = 4_000_000;
+
         public bool ReusePrefabSources = true;
         public VoxelPrefabOverrideHandling ModifiedPrefabHandling =
             VoxelPrefabOverrideHandling.UsePrefabSource;
@@ -47,6 +49,7 @@ namespace LocalModels.VoxelBridge
         public bool SkipSourcesOverMemoryBudget = true;
         public bool AdaptInitialVoxelSize = true;
         public int MaximumInitialLodIndex = 2;
+        public int MaximumImportedVoxelCount = DefaultMaximumImportedVoxelCount;
         public bool IgnoreInactiveObjects = true;
         public bool EnableCheckpoint = true;
         public bool ResumeInterruptedBatch = true;
@@ -283,7 +286,12 @@ namespace LocalModels.VoxelBridge
                             cancelProgress != null && cancelProgress(
                                 progressBase + progress / plans.Length,
                                 $"Modelo {sourceIndex + 1} de {plans.Length} · {current.name}: {message}"),
-                        estimate.InitialVoxelMultiplier);
+                        estimate.InitialVoxelMultiplier,
+                        batchOptions.MaximumImportedVoxelCount,
+                        batchOptions.AdaptInitialVoxelSize
+                            ? profile.GetLodMultiplier(Mathf.Clamp(
+                                batchOptions.MaximumInitialLodIndex, 0, profile.LodCount - 1))
+                            : estimate.InitialVoxelMultiplier);
                     var outcome = new VoxelLodBatchConversionOutcome(build, null);
                     outcomes.Add(plan.ReuseKey, outcome);
                     items.Add(new VoxelLodBatchItemResult(plan, build));
@@ -444,13 +452,54 @@ namespace LocalModels.VoxelBridge
 
         public static VoxelLodBuildResult GenerateAutomatic(
             Object source, VoxelStyleProfile profile, VoxelLodBuildOptions options,
-            Func<float, string, bool> cancelProgress = null, int initialVoxelMultiplier = 1)
+            Func<float, string, bool> cancelProgress = null, int initialVoxelMultiplier = 1,
+            int maximumImportedVoxelCount = 0, int maximumInitialVoxelMultiplier = 0)
         {
             ValidateProfileAndOptions(profile, options);
             if (initialVoxelMultiplier < 1 ||
                 (initialVoxelMultiplier & (initialVoxelMultiplier - 1)) != 0)
                 throw new ArgumentOutOfRangeException(nameof(initialVoxelMultiplier),
                     "El multiplicador voxel inicial debe ser una potencia de dos mayor o igual que uno.");
+            if (maximumImportedVoxelCount < 0)
+                throw new ArgumentOutOfRangeException(nameof(maximumImportedVoxelCount),
+                    "El límite de vóxeles importados no puede ser negativo.");
+            if (maximumInitialVoxelMultiplier == 0)
+                maximumInitialVoxelMultiplier = initialVoxelMultiplier;
+            if (!IsPowerOfTwo(maximumInitialVoxelMultiplier) ||
+                maximumInitialVoxelMultiplier < initialVoxelMultiplier)
+                throw new ArgumentOutOfRangeException(nameof(maximumInitialVoxelMultiplier),
+                    "La base voxel máxima debe ser una potencia de dos no menor que la base inicial.");
+
+            VoxelizationResult validatedLod0 = VoxelizeAutomaticLod(
+                source, profile, options, 0, initialVoxelMultiplier, cancelProgress);
+            while (maximumImportedVoxelCount > 0 &&
+                   validatedLod0.OccupiedVoxelCount > maximumImportedVoxelCount)
+            {
+                int rejectedVoxelCount = validatedLod0.OccupiedVoxelCount;
+                if (!TryGetNextInitialVoxelMultiplier(
+                        profile, initialVoxelMultiplier, maximumInitialVoxelMultiplier,
+                        out int nextMultiplier))
+                {
+                    validatedLod0 = null;
+                    CollectRejectedVoxelGrid();
+                    throw new InvalidOperationException(
+                        $"El LOD0 contiene {rejectedVoxelCount:N0} vóxeles, por encima del límite " +
+                        $"de importación de {maximumImportedVoxelCount:N0}. No existe otra base " +
+                        $"permitida después de ×{initialVoxelMultiplier}.");
+                }
+
+                if (cancelProgress != null && cancelProgress(0f,
+                        $"LOD0 contiene {rejectedVoxelCount:N0} vóxeles; " +
+                        $"reintentando con base ×{nextMultiplier}"))
+                    throw new OperationCanceledException("Voxelización cancelada.");
+
+                validatedLod0 = null;
+                CollectRejectedVoxelGrid();
+                initialVoxelMultiplier = nextMultiplier;
+                validatedLod0 = VoxelizeAutomaticLod(
+                    source, profile, options, 0, initialVoxelMultiplier, cancelProgress);
+            }
+
             string familyId = Guid.NewGuid().ToString("N");
             string safeName = MakeSafeFileName(source.name);
             EnsureAssetFolder(options.ExportFolder);
@@ -469,22 +518,18 @@ namespace LocalModels.VoxelBridge
                 {
                     int multiplier = checked(
                         initialVoxelMultiplier * profile.GetLodMultiplier(lodIndex));
-                    float progressBase = (float)lodIndex / profile.LodCount;
-                    var settings = new VoxelizationSettings
+                    VoxelizationResult result;
+                    if (lodIndex == 0)
                     {
-                        VoxelSize = profile.BaseVoxelSize * multiplier,
-                        ChunkCellSize = profile.ChunkCellSize,
-                        Padding = profile.Padding,
-                        FillInterior = profile.FillInterior,
-                        IncludeInactiveObjects = options.IncludeInactiveObjects,
-                        ColorMode = options.ColorMode,
-                        SingleColor = options.SingleColor,
-                        AlphaCutoff = options.AlphaCutoff
-                    };
-                    VoxelizationResult result = MeshVoxelizer.Voxelize(source, settings, (p, message) =>
-                        cancelProgress != null && cancelProgress(
-                            progressBase + p / profile.LodCount,
-                            $"LOD {lodIndex}: {message}"));
+                        result = validatedLod0;
+                        validatedLod0 = null;
+                    }
+                    else
+                    {
+                        result = VoxelizeAutomaticLod(
+                            source, profile, options, lodIndex,
+                            initialVoxelMultiplier, cancelProgress);
+                    }
                     string voxPath = $"{familyFolder}/{safeName}_LOD{lodIndex}.vox";
                     WriteGrid(voxPath, result.Grid, result.SourceBounds, source.name,
                         AssetDatabase.GetAssetPath(source), familyId, manifestAssetPath, lodIndex, multiplier,
@@ -524,6 +569,53 @@ namespace LocalModels.VoxelBridge
                 VoxelLodBatchRecovery.DeleteFamilyIfIncomplete(familyFolder);
                 throw;
             }
+        }
+
+        private static VoxelizationResult VoxelizeAutomaticLod(
+            Object source, VoxelStyleProfile profile, VoxelLodBuildOptions options,
+            int lodIndex, int initialVoxelMultiplier,
+            Func<float, string, bool> cancelProgress)
+        {
+            int multiplier = checked(
+                initialVoxelMultiplier * profile.GetLodMultiplier(lodIndex));
+            float progressBase = (float)lodIndex / profile.LodCount;
+            var settings = new VoxelizationSettings
+            {
+                VoxelSize = profile.BaseVoxelSize * multiplier,
+                ChunkCellSize = profile.ChunkCellSize,
+                Padding = profile.Padding,
+                FillInterior = profile.FillInterior,
+                IncludeInactiveObjects = options.IncludeInactiveObjects,
+                ColorMode = options.ColorMode,
+                SingleColor = options.SingleColor,
+                AlphaCutoff = options.AlphaCutoff
+            };
+            return MeshVoxelizer.Voxelize(source, settings, (progress, message) =>
+                cancelProgress != null && cancelProgress(
+                    progressBase + progress / profile.LodCount,
+                    $"LOD {lodIndex}: {message}"));
+        }
+
+        private static bool TryGetNextInitialVoxelMultiplier(
+            VoxelStyleProfile profile, int currentMultiplier, int maximumMultiplier,
+            out int nextMultiplier)
+        {
+            for (int lodIndex = 0; lodIndex < profile.LodCount; lodIndex++)
+            {
+                int candidate = profile.GetLodMultiplier(lodIndex);
+                if (candidate <= currentMultiplier || candidate > maximumMultiplier) continue;
+                nextMultiplier = candidate;
+                return true;
+            }
+            nextMultiplier = currentMultiplier;
+            return false;
+        }
+
+        private static void CollectRejectedVoxelGrid()
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
         }
 
         public static VoxelLodBuildResult GenerateManual(

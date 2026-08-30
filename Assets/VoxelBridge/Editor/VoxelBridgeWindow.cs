@@ -26,6 +26,8 @@ namespace LocalModels.VoxelBridge
         [SerializeField] private bool batchSkipOverMemoryBudget = true;
         [SerializeField] private bool batchAdaptInitialVoxelSize = true;
         [SerializeField, Range(0, 7)] private int batchMaximumInitialLodIndex = 2;
+        [SerializeField, Min(100_000)] private int batchMaximumImportedVoxelCount =
+            VoxelLodBatchOptions.DefaultMaximumImportedVoxelCount;
         [SerializeField] private bool batchIgnoreInactiveObjects = true;
         [SerializeField] private bool batchResumeInterrupted = true;
         [SerializeField, Range(1, 25)] private int batchCleanupInterval = 1;
@@ -360,6 +362,10 @@ namespace LocalModels.VoxelBridge
                 new GUIContent("Adaptar resolución automáticamente",
                     "Prueba tamaños voxel equivalentes a los LOD del perfil y usa el menor que cumple el límite de rejilla y el presupuesto de memoria."),
                 batchAdaptInitialVoxelSize);
+            batchMaximumImportedVoxelCount = Mathf.Clamp(EditorGUILayout.IntField(
+                new GUIContent("Máximo de vóxeles importados",
+                    "Cantidad máxima de vóxeles ocupados que Voxel Importer puede recibir en el LOD0. La comprobación se realiza antes de escribir o importar archivos."),
+                batchMaximumImportedVoxelCount), 100_000, 50_000_000);
             if (batchAdaptInitialVoxelSize && styleProfile != null && styleProfile.LodCount > 0)
             {
                 batchMaximumInitialLodIndex = Mathf.Clamp(
@@ -374,7 +380,7 @@ namespace LocalModels.VoxelBridge
                         "Último tamaño base que puede seleccionar la adaptación automática."),
                     batchMaximumInitialLodIndex, initialLodLabels);
                 EditorGUILayout.HelpBox(
-                    "Cada fuente usa la base más fina que cumple los límites. Las fuentes que todavía excedan la rejilla o el presupuesto con la base máxima se omiten.",
+                    "Cada fuente usa la base más fina que cumple los límites. Durante la generación, el LOD0 también se compara con el máximo de vóxeles importados y se repite con la siguiente base cuando sea necesario. Las fuentes que todavía excedan algún límite con la base máxima se omiten.",
                     MessageType.None);
             }
             using (new EditorGUI.DisabledScope(batchAdaptInitialVoxelSize))
@@ -801,6 +807,7 @@ namespace LocalModels.VoxelBridge
                                           batchSkipOverMemoryBudget,
             AdaptInitialVoxelSize = batchAdaptInitialVoxelSize,
             MaximumInitialLodIndex = batchMaximumInitialLodIndex,
+            MaximumImportedVoxelCount = batchMaximumImportedVoxelCount,
             IgnoreInactiveObjects = batchIgnoreInactiveObjects,
             EnableCheckpoint = true,
             ResumeInterruptedBatch = batchResumeInterrupted,

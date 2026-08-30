@@ -90,7 +90,7 @@ namespace LocalModels.VoxelBridge
             VoxelLodBatchSourcePlan[] plans, VoxelStyleProfile profile,
             VoxelLodBuildOptions lodOptions, VoxelLodBatchOptions batchOptions)
         {
-            var builder = new StringBuilder("VoxelLodBatch:v2");
+            var builder = new StringBuilder("VoxelLodBatch:v3");
             builder.Append('|').Append(profile != null ? GetStableObjectKey(profile) : "profile:null");
             if (profile != null)
             {
@@ -119,6 +119,7 @@ namespace LocalModels.VoxelBridge
                 builder.Append('|').Append(batchOptions.SkipSourcesOverMemoryBudget);
                 builder.Append('|').Append(batchOptions.AdaptInitialVoxelSize);
                 builder.Append('|').Append(batchOptions.MaximumInitialLodIndex);
+                builder.Append('|').Append(batchOptions.MaximumImportedVoxelCount);
                 builder.Append('|').Append(batchOptions.IgnoreInactiveObjects);
             }
             foreach (VoxelLodBatchSourcePlan plan in plans ?? Array.Empty<VoxelLodBatchSourcePlan>())
