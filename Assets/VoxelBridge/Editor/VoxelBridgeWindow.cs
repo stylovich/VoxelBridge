@@ -16,6 +16,11 @@ namespace LocalModels.VoxelBridge
 
         private Object source;
         private GameObject batchParent;
+        [SerializeField] private bool batchReusePrefabSources = true;
+        [SerializeField] private VoxelPrefabOverrideHandling batchModifiedPrefabHandling =
+            VoxelPrefabOverrideHandling.UsePrefabSource;
+        [SerializeField] private bool batchPlaceInScene;
+        [SerializeField] private bool batchDisableOriginalRoot = true;
         private VoxelStyleProfile styleProfile;
         private VoxelImpostorProfile impostorProfile;
         [SerializeField] private VoxelImpostorQuality impostorQuality = VoxelImpostorQuality.Medium;
@@ -228,17 +233,71 @@ namespace LocalModels.VoxelBridge
             batchParent = (GameObject)EditorGUILayout.ObjectField(
                 new GUIContent("Objeto padre", "Objeto de escena o prefab cuyos hijos directos se procesarán por separado"),
                 batchParent, typeof(GameObject), true);
-            GameObject[] batchSources = VoxelLodPipeline.GetAutomaticBatchSources(batchParent);
+            batchReusePrefabSources = EditorGUILayout.Toggle(
+                new GUIContent("Reutilizar prefab de origen",
+                    "Convierte una sola vez las instancias sin overrides que procedan del mismo prefab y reutiliza esa familia."),
+                batchReusePrefabSources);
+            batchModifiedPrefabHandling = (VoxelPrefabOverrideHandling)EditorGUILayout.Popup(
+                new GUIContent("Instancias modificadas",
+                    "Decide qué hacer cuando una instancia tiene overrides distintos de posición, rotación o escala del root."),
+                (int)batchModifiedPrefabHandling,
+                new[]
+                {
+                    new GUIContent("Usar prefab original", "Descarta los overrides visuales para la conversión y usa la familia del prefab fuente."),
+                    new GUIContent("Convertir como fuente separada", "Voxeliza la jerarquía modificada y crea una familia exclusiva para esta instancia."),
+                    new GUIContent("Ignorar instancia", "No convierte ni coloca esta instancia modificada.")
+                });
+            EditorGUILayout.HelpBox(GetBatchOverrideDescription(batchModifiedPrefabHandling), MessageType.None);
+
+            VoxelLodBatchOptions previewOptions = CreateBatchOptions();
+            VoxelLodBatchSourcePlan[] batchPlans =
+                VoxelLodPipeline.GetAutomaticBatchPlans(batchParent, previewOptions);
             int directChildCount = batchParent != null ? batchParent.transform.childCount : 0;
             if (batchParent != null)
             {
-                int skippedCount = directChildCount - batchSources.Length;
+                int skippedCount = directChildCount - batchPlans.Length;
+                int ignoredCount = batchPlans.Count(plan => plan.Ignored);
+                int conversionCount = batchPlans.Where(plan => !plan.Ignored)
+                    .Select(plan => plan.ReuseKey)
+                    .Distinct()
+                    .Count();
+                int reuseCount = batchPlans.Length - ignoredCount - conversionCount;
+                int modifiedCount = batchPlans.Count(plan => plan.HasPrefabOverrides);
                 EditorGUILayout.HelpBox(
-                    $"{batchSources.Length} familia(s) para generar · {skippedCount} hijo(s) sin mallas se omitirán.",
-                    batchSources.Length > 0 ? MessageType.None : MessageType.Warning);
+                    $"{batchPlans.Length} objeto(s) con malla · {conversionCount} conversión(es) · " +
+                    $"{reuseCount} reutilización(es) · {modifiedCount} instancia(s) modificadas · " +
+                    $"{ignoredCount} ignoradas · {skippedCount} hijo(s) sin malla.",
+                    batchPlans.Any(plan => !plan.Ignored) ? MessageType.None : MessageType.Warning);
             }
 
-            bool canGenerateBatch = batchSources.Length > 0 && styleProfile != null &&
+            bool canPlaceBatch = VoxelLodBatchScenePlacement.CanPlace(batchParent);
+            using (new EditorGUI.DisabledScope(!canPlaceBatch))
+                batchPlaceInScene = EditorGUILayout.Toggle(
+                    new GUIContent("Colocar resultado en escena",
+                        "Crea una raíz voxel paralela e instancia cada prefab convertido con el Transform del hijo original."),
+                    batchPlaceInScene);
+            if (batchParent != null && !canPlaceBatch)
+                EditorGUILayout.HelpBox(
+                    "Para colocar el resultado, asigna un objeto padre perteneciente a una escena cargada; un prefab del Project solo puede convertirse.",
+                    MessageType.None);
+            if (batchPlaceInScene && canPlaceBatch)
+            {
+                EditorGUI.indentLevel++;
+                batchDisableOriginalRoot = EditorGUILayout.Toggle(
+                    new GUIContent("Desactivar raíz original",
+                        "Solo se desactiva cuando todos los hijos directos tienen malla y las conversiones terminan sin fallos, elementos ignorados ni cancelación."),
+                    batchDisableOriginalRoot);
+                EditorGUI.indentLevel--;
+                EditorGUILayout.HelpBox(
+                    "La raíz voxel conserva Transform, layer, estado activo y flags Static, pero no copia scripts, colliders ni otros componentes. Usa el reemplazo automático solo con una raíz visual.",
+                    MessageType.Warning);
+                if (directChildCount > batchPlans.Length)
+                    EditorGUILayout.HelpBox(
+                        "Hay hijos directos sin malla. Se creará la raíz voxel desactivada y no se desactivará la original para evitar perder objetos o componentes no convertidos.",
+                        MessageType.Warning);
+            }
+
+            bool canGenerateBatch = batchPlans.Any(plan => !plan.Ignored) && styleProfile != null &&
                                     styleProfile.TryValidate(out _) &&
                                     VoxelLodPipeline.IsAssetFolder(exportFolder);
             using (new EditorGUI.DisabledScope(!canGenerateBatch))
@@ -545,6 +604,12 @@ namespace LocalModels.VoxelBridge
             ExportFolder = exportFolder
         };
 
+        private VoxelLodBatchOptions CreateBatchOptions() => new()
+        {
+            ReusePrefabSources = batchReusePrefabSources,
+            ModifiedPrefabHandling = batchModifiedPrefabHandling
+        };
+
         private void GenerateAutomaticLods()
         {
             try
@@ -587,24 +652,41 @@ namespace LocalModels.VoxelBridge
                 VoxelLodBatchBuildResult result = VoxelLodPipeline.GenerateAutomaticBatch(
                     batchParent, styleProfile, CreateLodOptions(),
                     (progress, message) => EditorUtility.DisplayCancelableProgressBar(
-                        "Voxel Bridge · Generación por lotes", message, progress));
+                        "Voxel Bridge · Generación por lotes", message, progress),
+                    CreateBatchOptions());
 
-                foreach (VoxelLodBatchItemResult failed in result.Items.Where(item => !item.Succeeded))
+                foreach (VoxelLodBatchItemResult failed in result.Items.Where(item => item.Failed))
                     Debug.LogWarning($"Voxel Bridge omitió '{failed.Source.name}': {failed.Error}", failed.Source);
 
                 VoxelLodBatchItemResult lastSuccess = result.Items.LastOrDefault(item => item.Succeeded);
                 if (lastSuccess != null)
-                {
                     ApplyAutomaticBuildResult(lastSuccess.BuildResult);
-                    SelectAndPing(lastPrefabAsset);
-                }
+
+                VoxelLodBatchPlacementResult? placement = null;
+                if (batchPlaceInScene && VoxelLodBatchScenePlacement.CanPlace(batchParent) &&
+                    result.SucceededCount > 0)
+                    placement = VoxelLodBatchScenePlacement.Place(
+                        batchParent, result, batchDisableOriginalRoot);
+
+                if (placement.HasValue) SelectAndPing(placement.Value.Root);
+                else SelectAndPing(lastPrefabAsset);
 
                 int pendingCount = result.CandidateCount - result.Items.Length;
                 string completion = result.Cancelled
-                    ? $"Lote cancelado; quedan {pendingCount} familia(s) sin procesar."
+                    ? $"Lote cancelado; quedan {pendingCount} objeto(s) sin procesar."
                     : "Lote terminado.";
-                status = $"{completion} {result.SucceededCount} familia(s) creadas y " +
-                         $"{result.FailedCount} con errores.";
+                status = $"{completion} {result.CreatedFamilyCount} familia(s) creadas, " +
+                         $"{result.ReusedCount} instancia(s) reutilizadas, {result.FailedCount} con errores y " +
+                         $"{result.IgnoredCount} ignoradas.";
+                if (placement.HasValue)
+                {
+                    if (placement.Value.OriginalRootDisabled)
+                        status += $" Se colocaron {placement.Value.PlacedCount} objetos y se desactivó la raíz original.";
+                    else if (!batchDisableOriginalRoot)
+                        status += $" Se colocaron {placement.Value.PlacedCount} objetos; la raíz original permanece activa.";
+                    else
+                        status += $" Se creó '{placement.Value.Root.name}' desactivada porque el reemplazo no era completo.";
+                }
                 if (result.SucceededCount == 0 && result.FailedCount > 0)
                     EditorUtility.DisplayDialog("Voxel Bridge · Lote con errores", status +
                         " Revisa la Console para ver el detalle de cada objeto.", "Cerrar");
@@ -636,6 +718,17 @@ namespace LocalModels.VoxelBridge
             lastPrefabAsset = AssetDatabase.LoadMainAssetAtPath(result.PrefabAssetPath);
             lastImpostorAsset = null;
         }
+
+        private static string GetBatchOverrideDescription(VoxelPrefabOverrideHandling handling) =>
+            handling switch
+            {
+                VoxelPrefabOverrideHandling.ConvertInstanceSeparately =>
+                    "Las instancias modificadas conservan sus overrides visuales y generan una familia voxel propia.",
+                VoxelPrefabOverrideHandling.IgnoreInstance =>
+                    "Las instancias modificadas se excluyen del lote; las instancias sin overrides aún pueden reutilizar su prefab fuente.",
+                _ =>
+                    "Las instancias modificadas usan la geometría del prefab original. La instancia de escena no se altera, pero sus overrides visuales no aparecen en el resultado voxel."
+            };
 
         private void GenerateManualLod()
         {

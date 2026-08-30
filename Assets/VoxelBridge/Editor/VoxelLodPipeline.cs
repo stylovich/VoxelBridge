@@ -30,20 +30,64 @@ namespace LocalModels.VoxelBridge
         }
     }
 
+    internal enum VoxelPrefabOverrideHandling
+    {
+        UsePrefabSource,
+        ConvertInstanceSeparately,
+        IgnoreInstance
+    }
+
+    internal sealed class VoxelLodBatchOptions
+    {
+        public bool ReusePrefabSources = true;
+        public VoxelPrefabOverrideHandling ModifiedPrefabHandling =
+            VoxelPrefabOverrideHandling.UsePrefabSource;
+    }
+
+    internal sealed class VoxelLodBatchSourcePlan
+    {
+        public readonly GameObject Source;
+        public readonly Object ConversionSource;
+        public readonly Object ReuseKey;
+        public readonly bool HasPrefabOverrides;
+        public readonly bool Ignored;
+
+        public bool UsesPrefabSource => ConversionSource != null && ConversionSource != Source;
+
+        public VoxelLodBatchSourcePlan(
+            GameObject source, Object conversionSource, Object reuseKey,
+            bool hasPrefabOverrides, bool ignored)
+        {
+            Source = source;
+            ConversionSource = conversionSource;
+            ReuseKey = reuseKey;
+            HasPrefabOverrides = hasPrefabOverrides;
+            Ignored = ignored;
+        }
+    }
+
     internal sealed class VoxelLodBatchItemResult
     {
         public readonly GameObject Source;
+        public readonly Object ConversionSource;
         public readonly VoxelLodBuildResult BuildResult;
         public readonly string Error;
+        public readonly bool Reused;
+        public readonly bool Ignored;
 
-        public bool Succeeded => string.IsNullOrEmpty(Error);
+        public bool Succeeded => !Ignored && string.IsNullOrEmpty(Error);
+        public bool Failed => !Ignored && !string.IsNullOrEmpty(Error);
 
         public VoxelLodBatchItemResult(
-            GameObject source, VoxelLodBuildResult buildResult, string error = null)
+            VoxelLodBatchSourcePlan plan, VoxelLodBuildResult buildResult,
+            bool reused = false, string error = null)
         {
-            Source = source;
+            Source = plan.Source;
+            ConversionSource = plan.ConversionSource;
             BuildResult = buildResult;
             Error = error;
+            Reused = reused;
+            Ignored = plan.Ignored;
         }
     }
 
@@ -54,7 +98,12 @@ namespace LocalModels.VoxelBridge
         public readonly bool Cancelled;
 
         public int SucceededCount => Items.Count(item => item.Succeeded);
-        public int FailedCount => Items.Length - SucceededCount;
+        public int FailedCount => Items.Count(item => item.Failed);
+        public int IgnoredCount => Items.Count(item => item.Ignored);
+        public int ReusedCount => Items.Count(item => item.Succeeded && item.Reused);
+        public int CreatedFamilyCount => Items.Count(item => item.Succeeded && !item.Reused);
+        public bool IsComplete => !Cancelled && Items.Length == CandidateCount &&
+                                  FailedCount == 0 && IgnoredCount == 0;
 
         public VoxelLodBatchBuildResult(
             IEnumerable<VoxelLodBatchItemResult> items, int candidateCount, bool cancelled)
@@ -62,6 +111,18 @@ namespace LocalModels.VoxelBridge
             Items = items.ToArray();
             CandidateCount = candidateCount;
             Cancelled = cancelled;
+        }
+    }
+
+    internal sealed class VoxelLodBatchConversionOutcome
+    {
+        public readonly VoxelLodBuildResult BuildResult;
+        public readonly string Error;
+
+        public VoxelLodBatchConversionOutcome(VoxelLodBuildResult buildResult, string error)
+        {
+            BuildResult = buildResult;
+            Error = error;
         }
     }
 
@@ -84,47 +145,111 @@ namespace LocalModels.VoxelBridge
             return sources.ToArray();
         }
 
+        internal static VoxelLodBatchSourcePlan[] GetAutomaticBatchPlans(
+            GameObject parent, VoxelLodBatchOptions batchOptions = null)
+        {
+            batchOptions ??= new VoxelLodBatchOptions();
+            return GetAutomaticBatchSources(parent)
+                .Select(source => CreateAutomaticBatchPlan(source, batchOptions))
+                .ToArray();
+        }
+
         public static VoxelLodBatchBuildResult GenerateAutomaticBatch(
             GameObject parent, VoxelStyleProfile profile, VoxelLodBuildOptions options,
-            Func<float, string, bool> cancelProgress = null)
+            Func<float, string, bool> cancelProgress = null,
+            VoxelLodBatchOptions batchOptions = null)
         {
             ValidateProfileAndOptions(profile, options);
             if (parent == null) throw new ArgumentNullException(nameof(parent));
 
-            GameObject[] sources = GetAutomaticBatchSources(parent);
-            if (sources.Length == 0)
+            VoxelLodBatchSourcePlan[] plans = GetAutomaticBatchPlans(parent, batchOptions);
+            if (plans.Length == 0)
                 throw new InvalidOperationException(
                     "El objeto padre no contiene hijos directos con mallas para voxelizar.");
 
             var items = new List<VoxelLodBatchItemResult>();
-            for (int sourceIndex = 0; sourceIndex < sources.Length; sourceIndex++)
+            var outcomes = new Dictionary<Object, VoxelLodBatchConversionOutcome>();
+            for (int sourceIndex = 0; sourceIndex < plans.Length; sourceIndex++)
             {
-                GameObject current = sources[sourceIndex];
-                float progressBase = (float)sourceIndex / sources.Length;
+                VoxelLodBatchSourcePlan plan = plans[sourceIndex];
+                GameObject current = plan.Source;
+                float progressBase = (float)sourceIndex / plans.Length;
                 if (cancelProgress != null && cancelProgress(progressBase,
-                        $"Modelo {sourceIndex + 1} de {sources.Length}: preparando {current.name}"))
-                    return new VoxelLodBatchBuildResult(items, sources.Length, true);
+                        $"Modelo {sourceIndex + 1} de {plans.Length}: preparando {current.name}"))
+                    return new VoxelLodBatchBuildResult(items, plans.Length, true);
+
+                if (plan.Ignored)
+                {
+                    items.Add(new VoxelLodBatchItemResult(plan, default));
+                    continue;
+                }
+
+                if (outcomes.TryGetValue(plan.ReuseKey, out VoxelLodBatchConversionOutcome previous))
+                {
+                    items.Add(new VoxelLodBatchItemResult(
+                        plan, previous.BuildResult, true, previous.Error));
+                    continue;
+                }
 
                 try
                 {
                     VoxelLodBuildResult build = GenerateAutomatic(
-                        current, profile, options, (progress, message) =>
+                        plan.ConversionSource, profile, options, (progress, message) =>
                             cancelProgress != null && cancelProgress(
-                                progressBase + progress / sources.Length,
-                                $"Modelo {sourceIndex + 1} de {sources.Length} · {current.name}: {message}"));
-                    items.Add(new VoxelLodBatchItemResult(current, build));
+                                progressBase + progress / plans.Length,
+                                $"Modelo {sourceIndex + 1} de {plans.Length} · {current.name}: {message}"));
+                    var outcome = new VoxelLodBatchConversionOutcome(build, null);
+                    outcomes.Add(plan.ReuseKey, outcome);
+                    items.Add(new VoxelLodBatchItemResult(plan, build));
                 }
                 catch (OperationCanceledException)
                 {
-                    return new VoxelLodBatchBuildResult(items, sources.Length, true);
+                    return new VoxelLodBatchBuildResult(items, plans.Length, true);
                 }
                 catch (Exception exception)
                 {
-                    items.Add(new VoxelLodBatchItemResult(current, default, exception.Message));
+                    var outcome = new VoxelLodBatchConversionOutcome(default, exception.Message);
+                    outcomes.Add(plan.ReuseKey, outcome);
+                    items.Add(new VoxelLodBatchItemResult(plan, default, false, exception.Message));
                 }
             }
 
-            return new VoxelLodBatchBuildResult(items, sources.Length, false);
+            return new VoxelLodBatchBuildResult(items, plans.Length, false);
+        }
+
+        private static VoxelLodBatchSourcePlan CreateAutomaticBatchPlan(
+            GameObject source, VoxelLodBatchOptions batchOptions)
+        {
+            if (!TryGetImmediatePrefabSource(source, out GameObject prefabSource))
+                return new VoxelLodBatchSourcePlan(source, source, source, false, false);
+
+            bool hasOverrides = PrefabUtility.HasPrefabInstanceAnyOverrides(source, false);
+            if (hasOverrides && batchOptions.ModifiedPrefabHandling ==
+                VoxelPrefabOverrideHandling.IgnoreInstance)
+                return new VoxelLodBatchSourcePlan(source, null, source, true, true);
+
+            bool convertSeparately = hasOverrides && batchOptions.ModifiedPrefabHandling ==
+                VoxelPrefabOverrideHandling.ConvertInstanceSeparately;
+            Object conversionSource = convertSeparately ||
+                                      (!batchOptions.ReusePrefabSources && !hasOverrides)
+                ? source
+                : prefabSource;
+            Object reuseKey = batchOptions.ReusePrefabSources && conversionSource == prefabSource
+                ? prefabSource
+                : source;
+            return new VoxelLodBatchSourcePlan(
+                source, conversionSource, reuseKey, hasOverrides, false);
+        }
+
+        private static bool TryGetImmediatePrefabSource(
+            GameObject source, out GameObject prefabSource)
+        {
+            prefabSource = null;
+            if (source == null) return false;
+            GameObject instanceRoot = PrefabUtility.GetNearestPrefabInstanceRoot(source);
+            if (instanceRoot != source) return false;
+            prefabSource = PrefabUtility.GetCorrespondingObjectFromSource(source);
+            return prefabSource != null && AssetDatabase.Contains(prefabSource);
         }
 
         public static VoxelLodBuildResult GenerateAutomatic(

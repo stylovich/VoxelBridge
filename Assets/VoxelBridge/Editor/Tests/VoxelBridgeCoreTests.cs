@@ -399,26 +399,72 @@ namespace LocalModels.VoxelBridge.Tests
         }
 
         [Test]
-        public void AutomaticBatch_ContinuesAfterOneChildFailsAndCreatesOtherFamilies()
+        public void AutomaticBatch_ReusesPrefabSourceContinuesAfterFailureAndPlacesSceneInstances()
         {
             if (!VoxelImporterIntegration.IsInstalled)
                 Assert.Ignore("Voxel Importer es opcional y no está instalado.");
 
             const string testRoot = "Assets/VoxelBridgeBatchTestOutput";
             GameObject parent = null;
+            GameObject sourceObject = null;
+            GameObject placedRoot = null;
             Mesh invalidMesh = null;
             VoxelStyleProfile profile = null;
             try
             {
+                VoxelLodPipeline.EnsureAssetFolder(testRoot);
                 parent = new GameObject("BatchParent");
                 var invalid = new GameObject("InvalidMesh");
                 invalid.transform.SetParent(parent.transform, false);
                 invalidMesh = new Mesh { name = "InvalidMesh" };
                 invalid.AddComponent<MeshFilter>().sharedMesh = invalidMesh;
 
-                GameObject valid = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                valid.name = "ValidCube";
-                valid.transform.SetParent(parent.transform, false);
+                sourceObject = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                sourceObject.name = "ReusableCube";
+                string sourcePrefabPath = testRoot + "/ReusableCube.prefab";
+                GameObject sourcePrefab = PrefabUtility.SaveAsPrefabAsset(
+                    sourceObject, sourcePrefabPath);
+                Object.DestroyImmediate(sourceObject);
+                sourceObject = null;
+                Assert.That(sourcePrefab, Is.Not.Null);
+
+                var firstInstance = PrefabUtility.InstantiatePrefab(
+                    sourcePrefab, parent.transform) as GameObject;
+                var modifiedInstance = PrefabUtility.InstantiatePrefab(
+                    sourcePrefab, parent.transform) as GameObject;
+                Assert.That(firstInstance, Is.Not.Null);
+                Assert.That(modifiedInstance, Is.Not.Null);
+                firstInstance.transform.localPosition = new Vector3(-2f, 0f, 1f);
+                modifiedInstance.transform.localPosition = new Vector3(3f, 0f, -1f);
+                GameObject addedGeometry = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                addedGeometry.name = "AddedOverrideGeometry";
+                addedGeometry.transform.SetParent(modifiedInstance.transform, false);
+                addedGeometry.transform.localPosition = Vector3.right;
+
+                VoxelLodBatchSourcePlan[] originalPlans =
+                    VoxelLodPipeline.GetAutomaticBatchPlans(parent, new VoxelLodBatchOptions());
+                Assert.That(originalPlans, Has.Length.EqualTo(3));
+                Assert.That(originalPlans[1].HasPrefabOverrides, Is.False);
+                Assert.That(originalPlans[2].HasPrefabOverrides, Is.True);
+                Assert.That(originalPlans[1].ConversionSource, Is.EqualTo(sourcePrefab));
+                Assert.That(originalPlans[2].ConversionSource, Is.EqualTo(sourcePrefab));
+                Assert.That(originalPlans[1].ReuseKey, Is.EqualTo(originalPlans[2].ReuseKey));
+
+                VoxelLodBatchSourcePlan[] separatePlans =
+                    VoxelLodPipeline.GetAutomaticBatchPlans(parent, new VoxelLodBatchOptions
+                    {
+                        ModifiedPrefabHandling =
+                            VoxelPrefabOverrideHandling.ConvertInstanceSeparately
+                    });
+                Assert.That(separatePlans[2].ConversionSource, Is.EqualTo(modifiedInstance));
+                Assert.That(separatePlans[1].ReuseKey, Is.Not.EqualTo(separatePlans[2].ReuseKey));
+
+                VoxelLodBatchSourcePlan[] ignoredPlans =
+                    VoxelLodPipeline.GetAutomaticBatchPlans(parent, new VoxelLodBatchOptions
+                    {
+                        ModifiedPrefabHandling = VoxelPrefabOverrideHandling.IgnoreInstance
+                    });
+                Assert.That(ignoredPlans[2].Ignored, Is.True);
 
                 profile = ScriptableObject.CreateInstance<VoxelStyleProfile>();
                 var serializedProfile = new SerializedObject(profile);
@@ -442,22 +488,76 @@ namespace LocalModels.VoxelBridge.Tests
                     VoxelLodPipeline.GenerateAutomaticBatch(parent, profile, options);
 
                 Assert.That(batch.Cancelled, Is.False);
-                Assert.That(batch.CandidateCount, Is.EqualTo(2));
-                Assert.That(batch.Items, Has.Length.EqualTo(2));
-                Assert.That(batch.SucceededCount, Is.EqualTo(1));
+                Assert.That(batch.CandidateCount, Is.EqualTo(3));
+                Assert.That(batch.Items, Has.Length.EqualTo(3));
+                Assert.That(batch.SucceededCount, Is.EqualTo(2));
                 Assert.That(batch.FailedCount, Is.EqualTo(1));
+                Assert.That(batch.CreatedFamilyCount, Is.EqualTo(1));
+                Assert.That(batch.ReusedCount, Is.EqualTo(1));
                 Assert.That(batch.Items[0].Source, Is.EqualTo(invalid));
                 Assert.That(batch.Items[0].Succeeded, Is.False);
                 Assert.That(batch.Items[0].Error, Does.Contain("vértices"));
-                Assert.That(batch.Items[1].Source, Is.EqualTo(valid));
+                Assert.That(batch.Items[1].Source, Is.EqualTo(firstInstance));
                 Assert.That(batch.Items[1].Succeeded, Is.True);
+                Assert.That(batch.Items[1].Reused, Is.False);
                 Assert.That(batch.Items[1].BuildResult.VoxAssetPaths, Has.Length.EqualTo(1));
+                Assert.That(batch.Items[2].Source, Is.EqualTo(modifiedInstance));
+                Assert.That(batch.Items[2].Succeeded, Is.True);
+                Assert.That(batch.Items[2].Reused, Is.True);
+                Assert.That(batch.Items[2].BuildResult.PrefabAssetPath,
+                    Is.EqualTo(batch.Items[1].BuildResult.PrefabAssetPath));
                 Assert.That(AssetDatabase.LoadAssetAtPath<GameObject>(
                     batch.Items[1].BuildResult.PrefabAssetPath), Is.Not.Null);
+
+                VoxelLodBatchPlacementResult incompletePlacement =
+                    VoxelLodBatchScenePlacement.Place(parent, batch, true);
+                placedRoot = incompletePlacement.Root;
+                Assert.That(incompletePlacement.OriginalRootDisabled, Is.False);
+                Assert.That(parent.activeSelf, Is.True);
+                Assert.That(placedRoot.activeSelf, Is.False);
+                Undo.PerformUndo();
+                Assert.That(placedRoot == null, Is.True);
+                placedRoot = null;
+
+                Object.DestroyImmediate(invalid);
+                var completeBatch = new VoxelLodBatchBuildResult(
+                    batch.Items.Skip(1), 2, false);
+                var nonVisualChild = new GameObject("NonVisualChild");
+                nonVisualChild.transform.SetParent(parent.transform, false);
+                VoxelLodBatchPlacementResult skippedChildPlacement =
+                    VoxelLodBatchScenePlacement.Place(parent, completeBatch, true);
+                placedRoot = skippedChildPlacement.Root;
+                Assert.That(skippedChildPlacement.OriginalRootDisabled, Is.False);
+                Assert.That(parent.activeSelf, Is.True);
+                Assert.That(placedRoot.activeSelf, Is.False);
+                Undo.PerformUndo();
+                Assert.That(placedRoot == null, Is.True);
+                placedRoot = null;
+                Object.DestroyImmediate(nonVisualChild);
+
+                VoxelLodBatchPlacementResult placement =
+                    VoxelLodBatchScenePlacement.Place(parent, completeBatch, true);
+                placedRoot = placement.Root;
+                Assert.That(placement.PlacedCount, Is.EqualTo(2));
+                Assert.That(placement.OriginalRootDisabled, Is.True);
+                Assert.That(parent.activeSelf, Is.False);
+                Assert.That(placedRoot.activeSelf, Is.True);
+                Assert.That(placedRoot.transform.childCount, Is.EqualTo(2));
+                Assert.That(placedRoot.transform.GetChild(0).localPosition,
+                    Is.EqualTo(firstInstance.transform.localPosition));
+                Assert.That(placedRoot.transform.GetChild(1).localPosition,
+                    Is.EqualTo(modifiedInstance.transform.localPosition));
+
+                Undo.PerformUndo();
+                Assert.That(parent.activeSelf, Is.True);
+                Assert.That(placedRoot == null, Is.True);
+                placedRoot = null;
             }
             finally
             {
+                if (placedRoot != null) Object.DestroyImmediate(placedRoot);
                 if (parent != null) Object.DestroyImmediate(parent);
+                if (sourceObject != null) Object.DestroyImmediate(sourceObject);
                 if (invalidMesh != null) Object.DestroyImmediate(invalidMesh);
                 if (profile != null) Object.DestroyImmediate(profile);
                 AssetDatabase.DeleteAsset(testRoot);
