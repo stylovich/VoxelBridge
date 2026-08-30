@@ -201,6 +201,80 @@ namespace LocalModels.VoxelBridge.Tests
         }
 
         [Test]
+        public void ImpostorProfile_SelectsAutomaticQualityAtConfiguredBoundaries()
+        {
+            VoxelImpostorProfile profile = ScriptableObject.CreateInstance<VoxelImpostorProfile>();
+            try
+            {
+                Assert.That(profile.TrySelectAutomaticQuality(
+                    0.499f, out VoxelImpostorQuality belowMinimum), Is.False);
+                Assert.That(belowMinimum, Is.EqualTo(VoxelImpostorQuality.Unspecified));
+                Assert.That(profile.TrySelectAutomaticQuality(
+                    0.5f, out VoxelImpostorQuality low), Is.True);
+                Assert.That(low, Is.EqualTo(VoxelImpostorQuality.Low));
+                Assert.That(profile.TrySelectAutomaticQuality(
+                    4f, out VoxelImpostorQuality medium), Is.True);
+                Assert.That(medium, Is.EqualTo(VoxelImpostorQuality.Medium));
+                Assert.That(profile.TrySelectAutomaticQuality(
+                    24f, out VoxelImpostorQuality architecture), Is.True);
+                Assert.That(architecture, Is.EqualTo(VoxelImpostorQuality.Architecture));
+            }
+            finally
+            {
+                Object.DestroyImmediate(profile);
+            }
+        }
+
+        [Test]
+        public void ImpostorBatchPlan_PrioritizesLargeFamiliesAndHonorsAtlasBudget()
+        {
+            const string testRoot = "Assets/VoxelBridgeImpostorPlanTestOutput";
+            VoxelImpostorProfile profile = ScriptableObject.CreateInstance<VoxelImpostorProfile>();
+            try
+            {
+                VoxelLodPipeline.EnsureAssetFolder(testRoot);
+                string tiny = SaveImpostorPlanManifest(testRoot, "Tiny", 0.25f);
+                string prop = SaveImpostorPlanManifest(testRoot, "Prop", 2f);
+                string vehicle = SaveImpostorPlanManifest(testRoot, "Vehicle", 8f);
+                string building = SaveImpostorPlanManifest(testRoot, "Building", 30f);
+                var options = new VoxelImpostorBatchOptions
+                {
+                    SelectQualityBySize = true,
+                    MaximumEstimatedAtlasBytes = 34L * 1024L * 1024L
+                };
+
+                VoxelImpostorBatchPlan plan = AmplifyImpostorIntegration.CreateBatchPlan(
+                    new[] { tiny, prop, vehicle, building, vehicle }, profile, options);
+
+                Assert.That(plan.CandidateCount, Is.EqualTo(4));
+                Assert.That(plan.Entries.Length, Is.EqualTo(2));
+                Assert.That(plan.EstimatedAtlasBytes,
+                    Is.LessThanOrEqualTo(options.MaximumEstimatedAtlasBytes));
+                Assert.That(plan.Entries.Single(entry =>
+                        entry.ManifestAssetPath == building).Quality,
+                    Is.EqualTo(VoxelImpostorQuality.Medium));
+                Assert.That(plan.Entries.Single(entry =>
+                        entry.ManifestAssetPath == vehicle).Quality,
+                    Is.EqualTo(VoxelImpostorQuality.Low));
+                Assert.That(plan.Skips.Single(skip => skip.ManifestAssetPath == tiny).Reason,
+                    Is.EqualTo(VoxelImpostorBatchSkipReason.BelowMinimumSize));
+                Assert.That(plan.Skips.Single(skip => skip.ManifestAssetPath == prop).Reason,
+                    Is.EqualTo(VoxelImpostorBatchSkipReason.AtlasBudget));
+                Assert.That(AmplifyImpostorIntegration.EstimateAtlasBytes(
+                        profile, VoxelImpostorQuality.Low),
+                    Is.EqualTo(6_990_506L));
+                Assert.That(AmplifyImpostorIntegration.EstimateAtlasBytes(
+                        profile, VoxelImpostorQuality.Medium),
+                    Is.EqualTo(27_962_026L));
+            }
+            finally
+            {
+                Object.DestroyImmediate(profile);
+                AssetDatabase.DeleteAsset(testRoot);
+            }
+        }
+
+        [Test]
         public void ImpostorBatch_DeduplicatesFamiliesContinuesAfterFailureAndCanCancel()
         {
             VoxelImpostorProfile profile = ScriptableObject.CreateInstance<VoxelImpostorProfile>();
@@ -299,6 +373,20 @@ namespace LocalModels.VoxelBridge.Tests
                 Assert.That(batch.FailedCount, Is.Zero);
                 Assert.That(AssetDatabase.LoadMainAssetAtPath(
                     batch.Builds[0].ImpostorAssetPath), Is.Not.Null);
+                string impostorFolder = VoxelLodPipeline.NormalizeAssetPath(
+                    Path.GetDirectoryName(batch.Builds[0].ImpostorAssetPath));
+                string[] texturePaths = AssetDatabase.FindAssets(
+                        "t:Texture2D", new[] { impostorFolder })
+                    .Select(AssetDatabase.GUIDToAssetPath)
+                    .ToArray();
+                Assert.That(texturePaths.Length, Is.EqualTo(5));
+                foreach (string texturePath in texturePaths)
+                {
+                    var importer = AssetImporter.GetAtPath(texturePath) as TextureImporter;
+                    Assert.That(importer, Is.Not.Null, texturePath);
+                    Assert.That(importer.mipmapEnabled, Is.True, texturePath);
+                    Assert.That(importer.streamingMipmaps, Is.True, texturePath);
+                }
                 Assert.That(VoxelLodPipeline.TryReadManifest(
                     build.ManifestAssetPath, out VoxelLodSetManifest manifest), Is.True);
                 Assert.That(manifest.impostor, Is.Not.Null);
@@ -1828,6 +1916,18 @@ namespace LocalModels.VoxelBridge.Tests
                 index += value.Length;
             }
             return count;
+        }
+
+        private static string SaveImpostorPlanManifest(
+            string folder, string name, float lodGroupSize)
+        {
+            string path = $"{folder}/{name}.voxset.json";
+            VoxelLodPipeline.SaveManifest(path, new VoxelLodSetManifest
+            {
+                sourceName = name,
+                lodGroupSize = lodGroupSize
+            });
+            return path;
         }
 
         private static void SetWindowField<T>(VoxelBridgeWindow window, string fieldName, T value)

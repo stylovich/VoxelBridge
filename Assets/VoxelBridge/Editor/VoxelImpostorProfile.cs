@@ -184,7 +184,32 @@ namespace LocalModels.VoxelBridge
         menuName = "Voxel Bridge/Configuración de perfiles de impostor")]
     public sealed class VoxelImpostorProfile : ScriptableObject
     {
-        private const int CurrentDataVersion = 3;
+        private const int CurrentDataVersion = 4;
+        private const float DefaultMinimumImpostorSize = 0.5f;
+        private const float DefaultMediumImpostorSize = 4f;
+        private const float DefaultArchitectureImpostorSize = 24f;
+
+        [Header("Selección automática por tamaño")]
+        [Tooltip(
+            "Tamaño máximo del modelo, en metros, por debajo del cual no se genera un impostor. " +
+            "Los objetos pequeños suelen descartarse antes de que un impostor aporte una mejora visible. " +
+            "El valor recomendado para props pequeños es 0,5 m.")]
+        [InspectorName("Tamaño mínimo para impostor (m)")]
+        [SerializeField, Min(0f)] private float minimumImpostorSize =
+            DefaultMinimumImpostorSize;
+        [Tooltip(
+            "A partir de este tamaño se selecciona el perfil Medio. Los modelos entre el tamaño mínimo " +
+            "y este umbral utilizan el perfil Bajo. Un valor de 4 m cubre props grandes y vehículos compactos.")]
+        [InspectorName("Inicio del perfil Medio (m)")]
+        [SerializeField, Min(0.01f)] private float mediumImpostorSize =
+            DefaultMediumImpostorSize;
+        [Tooltip(
+            "A partir de este tamaño se selecciona el perfil Arquitectura. Los modelos entre el umbral " +
+            "Medio y este valor utilizan el perfil Medio. El perfil Alto permanece como selección manual " +
+            "para objetos que pueden observarse desde cualquier dirección.")]
+        [InspectorName("Inicio de Arquitectura (m)")]
+        [SerializeField, Min(0.01f)] private float architectureImpostorSize =
+            DefaultArchitectureImpostorSize;
 
         [SerializeField, HideInInspector] private int dataVersion;
         [Tooltip(
@@ -226,9 +251,79 @@ namespace LocalModels.VoxelBridge
             VoxelImpostorQuality quality, float lastVoxelTransitionHeight, out string error) =>
             GetSettings(quality).TryValidate(lastVoxelTransitionHeight, out error);
 
+        public float MinimumImpostorSize
+        {
+            get
+            {
+                EnsureInitialized();
+                return minimumImpostorSize;
+            }
+        }
+
+        public float MediumImpostorSize
+        {
+            get
+            {
+                EnsureInitialized();
+                return mediumImpostorSize;
+            }
+        }
+
+        public float ArchitectureImpostorSize
+        {
+            get
+            {
+                EnsureInitialized();
+                return architectureImpostorSize;
+            }
+        }
+
+        public bool TrySelectAutomaticQuality(
+            float modelSize, out VoxelImpostorQuality quality)
+        {
+            EnsureInitialized();
+            quality = VoxelImpostorQuality.Unspecified;
+            if (!float.IsFinite(modelSize) || modelSize <= 0f ||
+                !TryValidateAutomaticPolicy(out _))
+                return false;
+            if (modelSize < minimumImpostorSize) return false;
+
+            quality = modelSize >= architectureImpostorSize
+                ? VoxelImpostorQuality.Architecture
+                : modelSize >= mediumImpostorSize
+                    ? VoxelImpostorQuality.Medium
+                    : VoxelImpostorQuality.Low;
+            return true;
+        }
+
+        public bool TryValidateAutomaticPolicy(out string error)
+        {
+            EnsureInitialized();
+            if (!float.IsFinite(minimumImpostorSize) ||
+                !float.IsFinite(mediumImpostorSize) ||
+                !float.IsFinite(architectureImpostorSize) ||
+                minimumImpostorSize < 0f ||
+                mediumImpostorSize <= minimumImpostorSize ||
+                architectureImpostorSize <= mediumImpostorSize)
+            {
+                error = "Los umbrales automáticos deben ser finitos y crecer en el orden mínimo, Medio y Arquitectura.";
+                return false;
+            }
+
+            error = null;
+            return true;
+        }
+
         internal bool EnsureInitialized()
         {
             bool changed = false;
+            if (dataVersion < 4)
+            {
+                minimumImpostorSize = DefaultMinimumImpostorSize;
+                mediumImpostorSize = DefaultMediumImpostorSize;
+                architectureImpostorSize = DefaultArchitectureImpostorSize;
+                changed = true;
+            }
             if (dataVersion != CurrentDataVersion)
             {
                 dataVersion = CurrentDataVersion;
@@ -260,6 +355,9 @@ namespace LocalModels.VoxelBridge
         internal void ResetRecommendedProfiles()
         {
             dataVersion = CurrentDataVersion;
+            minimumImpostorSize = DefaultMinimumImpostorSize;
+            mediumImpostorSize = DefaultMediumImpostorSize;
+            architectureImpostorSize = DefaultArchitectureImpostorSize;
             low = VoxelImpostorSettings.CreateLow();
             medium = VoxelImpostorSettings.CreateMedium();
             high = VoxelImpostorSettings.CreateHigh();

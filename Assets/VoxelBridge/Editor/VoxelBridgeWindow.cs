@@ -35,6 +35,9 @@ namespace LocalModels.VoxelBridge
         [SerializeField] private bool batchResumeInterrupted = true;
         [SerializeField, Range(1, 25)] private int batchCleanupInterval = 1;
         [SerializeField] private bool batchGenerateImpostors = true;
+        [SerializeField] private bool batchSelectImpostorQualityBySize = true;
+        [SerializeField, Min(64)] private int batchImpostorAtlasBudgetMb =
+            VoxelImpostorBatchOptions.DefaultAtlasBudgetMb;
         [SerializeField] private bool batchShowPlanDetails;
         private VoxelLodBatchPreflight batchPreflight;
         private VoxelStyleProfile styleProfile;
@@ -520,11 +523,57 @@ namespace LocalModels.VoxelBridge
 
         private bool DrawBatchImpostorOptions()
         {
-            return DrawAutomaticImpostorOptions(
+            bool ready = DrawAutomaticImpostorOptions(
                 ref batchGenerateImpostors,
                 "Impostores del lote",
                 "Hornea un impostor después de cada familia voxel única y lo añade como último nivel del LODGroup. Las instancias reutilizadas comparten el mismo impostor.",
-                "El horneado se realiza en serie y una sola vez por familia. Un error de Amplify conserva la familia voxel y permite continuar con las restantes.");
+                "El horneado se realiza en serie y una sola vez por familia. Un error de Amplify conserva la familia voxel y permite continuar con las restantes.",
+                false);
+            if (!batchGenerateImpostors || impostorProfile == null) return ready;
+
+            batchSelectImpostorQualityBySize = EditorGUILayout.Toggle(
+                new GUIContent("Seleccionar perfil por tamaño",
+                    "Selecciona Bajo, Medio o Arquitectura a partir del tamaño físico de cada familia. El perfil Alto permanece como selección manual porque el tamaño no permite saber si un objeto puede observarse desde abajo."),
+                batchSelectImpostorQualityBySize);
+
+            bool policyValid = true;
+            if (batchSelectImpostorQualityBySize)
+            {
+                policyValid = impostorProfile.TryValidateAutomaticPolicy(out string policyError);
+                if (!policyValid)
+                    EditorGUILayout.HelpBox(policyError, MessageType.Error);
+                else
+                    EditorGUILayout.HelpBox(
+                        $"Política: menos de {impostorProfile.MinimumImpostorSize:0.##} m sin impostor; " +
+                        $"hasta {impostorProfile.MediumImpostorSize:0.##} m perfil Bajo; " +
+                        $"hasta {impostorProfile.ArchitectureImpostorSize:0.##} m perfil Medio; " +
+                        "a partir de ese tamaño, Arquitectura. El presupuesto conserva primero los objetos mayores y reduce u omite los restantes.",
+                        MessageType.None);
+
+                EditorGUILayout.BeginHorizontal();
+                using (new EditorGUI.DisabledScope(true))
+                    EditorGUILayout.ObjectField("Configuración central", impostorProfile,
+                        typeof(VoxelImpostorProfile), false);
+                if (GUILayout.Button("Editar valores", GUILayout.Width(100)))
+                    SelectAndPing(impostorProfile);
+                EditorGUILayout.EndHorizontal();
+            }
+            else
+            {
+                DrawImpostorQualitySelector();
+                policyValid = ValidateSelectedImpostorQuality();
+            }
+
+            batchImpostorAtlasBudgetMb = Mathf.Max(64, EditorGUILayout.IntField(
+                new GUIContent("Presupuesto total de atlas (MiB)",
+                    "Límite estimado para los cinco mapas y sus mipmaps por cada familia única. En modo automático se reduce la calidad antes de omitir familias. En modo fijo se omiten las que no caben."),
+                batchImpostorAtlasBudgetMb));
+            if (!QualitySettings.streamingMipmapsActive)
+                EditorGUILayout.HelpBox(
+                    "El nivel de calidad activo tiene deshabilitado Mipmap Streaming. Las texturas generadas quedarán preparadas para streaming, pero Unity no limitará su residencia hasta activarlo en Quality Settings.",
+                    MessageType.Warning);
+
+            return ready && policyValid;
         }
 
         private bool DrawIndividualImpostorOptions()
@@ -537,7 +586,8 @@ namespace LocalModels.VoxelBridge
         }
 
         private bool DrawAutomaticImpostorOptions(
-            ref bool generateImpostor, string heading, string toggleTooltip, string footer)
+            ref bool generateImpostor, string heading, string toggleTooltip, string footer,
+            bool drawQualitySelector = true)
         {
             EditorGUILayout.Space(4);
             EditorGUILayout.LabelField(heading, EditorStyles.miniBoldLabel);
@@ -565,18 +615,26 @@ namespace LocalModels.VoxelBridge
                 return false;
             }
 
-            DrawImpostorQualitySelector();
-            if (styleProfile != null && styleProfile.LodCount > 0 &&
-                !impostorProfile.TryValidate(impostorQuality,
-                    styleProfile.GetMinimumLodScreenHeight(styleProfile.LodCount - 1),
-                    out string profileError))
+            if (drawQualitySelector)
             {
-                EditorGUILayout.HelpBox(profileError, MessageType.Error);
-                return false;
+                DrawImpostorQualitySelector();
+                if (!ValidateSelectedImpostorQuality()) return false;
             }
 
             EditorGUILayout.HelpBox(footer, MessageType.None);
             return compatibility.CanBake;
+        }
+
+        private bool ValidateSelectedImpostorQuality()
+        {
+            if (styleProfile == null || styleProfile.LodCount == 0) return true;
+            if (impostorProfile.TryValidate(impostorQuality,
+                    styleProfile.GetMinimumLodScreenHeight(styleProfile.LodCount - 1),
+                    out string profileError))
+                return true;
+
+            EditorGUILayout.HelpBox(profileError, MessageType.Error);
+            return false;
         }
 
         private void DrawColorSettings()
@@ -1061,8 +1119,15 @@ namespace LocalModels.VoxelBridge
                 VoxelImpostorBatchBuildResult impostorResult = null;
                 if (batchGenerateImpostors && !result.Cancelled && result.SucceededCount > 0)
                 {
+                    var impostorOptions = new VoxelImpostorBatchOptions
+                    {
+                        SelectQualityBySize = batchSelectImpostorQualityBySize,
+                        FixedQuality = impostorQuality,
+                        MaximumEstimatedAtlasBytes =
+                            batchImpostorAtlasBudgetMb * 1024L * 1024L
+                    };
                     impostorResult = AmplifyImpostorIntegration.GenerateForBatch(
-                        result, impostorProfile, impostorQuality,
+                        result, impostorProfile, impostorOptions,
                         (progress, message) => EditorUtility.DisplayCancelableProgressBar(
                             "Voxel Bridge · Impostores por lotes", message, progress));
                     LogImpostorFailures(impostorResult);
@@ -1096,6 +1161,11 @@ namespace LocalModels.VoxelBridge
                 {
                     status += $" {impostorResult.GeneratedCount} impostor(es) generados y " +
                               $"{impostorResult.FailedCount} con errores.";
+                    if (impostorResult.SkippedCount > 0)
+                        status += $" {impostorResult.SkippedForSizeCount} omitidos por tamaño y " +
+                                  $"{impostorResult.SkippedForBudgetCount} por presupuesto.";
+                    status += $" Atlas planificados: " +
+                              $"{VoxelLodBatchAnalyzer.FormatBytes(impostorResult.EstimatedAtlasBytes)}.";
                     if (impostorResult.Cancelled)
                         status += $" Horneado cancelado; quedan " +
                                   $"{impostorResult.RemainingCount} familia(s) pendientes.";

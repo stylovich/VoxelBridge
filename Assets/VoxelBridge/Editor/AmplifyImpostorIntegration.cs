@@ -60,24 +60,101 @@ namespace LocalModels.VoxelBridge
         }
     }
 
+    internal enum VoxelImpostorBatchSkipReason
+    {
+        BelowMinimumSize,
+        AtlasBudget
+    }
+
+    internal readonly struct VoxelImpostorBatchSkip
+    {
+        public readonly string ManifestAssetPath;
+        public readonly VoxelImpostorBatchSkipReason Reason;
+
+        public VoxelImpostorBatchSkip(
+            string manifestAssetPath, VoxelImpostorBatchSkipReason reason)
+        {
+            ManifestAssetPath = manifestAssetPath;
+            Reason = reason;
+        }
+    }
+
+    internal sealed class VoxelImpostorBatchOptions
+    {
+        public const int DefaultAtlasBudgetMb = 512;
+
+        public bool SelectQualityBySize = true;
+        public VoxelImpostorQuality FixedQuality = VoxelImpostorQuality.Medium;
+        public long MaximumEstimatedAtlasBytes =
+            DefaultAtlasBudgetMb * 1024L * 1024L;
+    }
+
+    internal readonly struct VoxelImpostorBatchPlanEntry
+    {
+        public readonly string ManifestAssetPath;
+        public readonly VoxelImpostorQuality Quality;
+        public readonly float ModelSize;
+        public readonly long EstimatedAtlasBytes;
+
+        public VoxelImpostorBatchPlanEntry(
+            string manifestAssetPath, VoxelImpostorQuality quality,
+            float modelSize, long estimatedAtlasBytes)
+        {
+            ManifestAssetPath = manifestAssetPath;
+            Quality = quality;
+            ModelSize = modelSize;
+            EstimatedAtlasBytes = estimatedAtlasBytes;
+        }
+    }
+
+    internal sealed class VoxelImpostorBatchPlan
+    {
+        public readonly int CandidateCount;
+        public readonly VoxelImpostorBatchPlanEntry[] Entries;
+        public readonly VoxelImpostorBatchSkip[] Skips;
+        public readonly long EstimatedAtlasBytes;
+
+        public VoxelImpostorBatchPlan(
+            int candidateCount, IEnumerable<VoxelImpostorBatchPlanEntry> entries,
+            IEnumerable<VoxelImpostorBatchSkip> skips, long estimatedAtlasBytes)
+        {
+            CandidateCount = candidateCount;
+            Entries = entries.ToArray();
+            Skips = skips.ToArray();
+            EstimatedAtlasBytes = estimatedAtlasBytes;
+        }
+    }
+
     internal sealed class VoxelImpostorBatchBuildResult
     {
         public readonly int CandidateCount;
         public readonly VoxelImpostorBuildResult[] Builds;
         public readonly VoxelImpostorBatchFailure[] Failures;
+        public readonly VoxelImpostorBatchSkip[] Skips;
+        public readonly long EstimatedAtlasBytes;
         public readonly bool Cancelled;
 
         public int GeneratedCount => Builds.Length;
         public int FailedCount => Failures.Length;
-        public int RemainingCount => Mathf.Max(0, CandidateCount - GeneratedCount - FailedCount);
+        public int SkippedCount => Skips.Length;
+        public int SkippedForSizeCount => Skips.Count(skip =>
+            skip.Reason == VoxelImpostorBatchSkipReason.BelowMinimumSize);
+        public int SkippedForBudgetCount => Skips.Count(skip =>
+            skip.Reason == VoxelImpostorBatchSkipReason.AtlasBudget);
+        public int RemainingCount => Mathf.Max(
+            0, CandidateCount - GeneratedCount - FailedCount - SkippedCount);
 
         public VoxelImpostorBatchBuildResult(
             int candidateCount, IEnumerable<VoxelImpostorBuildResult> builds,
-            IEnumerable<VoxelImpostorBatchFailure> failures, bool cancelled)
+            IEnumerable<VoxelImpostorBatchFailure> failures, bool cancelled,
+            IEnumerable<VoxelImpostorBatchSkip> skips = null,
+            long estimatedAtlasBytes = 0)
         {
             CandidateCount = candidateCount;
             Builds = builds.ToArray();
             Failures = failures.ToArray();
+            Skips = skips?.ToArray() ?? Array.Empty<VoxelImpostorBatchSkip>();
+            EstimatedAtlasBytes = Math.Max(0, estimatedAtlasBytes);
             Cancelled = cancelled;
         }
     }
@@ -99,6 +176,13 @@ namespace LocalModels.VoxelBridge
         private static bool cachedCanBake;
         private static Api cachedApi;
         private static AmplifyImpostorCompatibility cachedCompatibility;
+
+        private sealed class BatchCandidate
+        {
+            public string ManifestAssetPath;
+            public VoxelImpostorQuality DesiredQuality;
+            public float ModelSize;
+        }
 
         private sealed class Api
         {
@@ -227,9 +311,11 @@ namespace LocalModels.VoxelBridge
                 }
 
                 if (!(api.MeshField.GetValue(data) is Mesh) ||
-                    !(api.MaterialField.GetValue(data) is Material))
+                    !(api.MaterialField.GetValue(data) is Material generatedMaterial))
                     throw new InvalidOperationException(
                         "Amplify terminó sin producir el mesh o el material del impostor.");
+
+                ConfigureGeneratedTextureStreaming(generatedMaterial, outputFolder);
             }
             finally
             {
@@ -252,6 +338,39 @@ namespace LocalModels.VoxelBridge
             return new VoxelImpostorBuildResult(impostorAssetPath, prefabPath);
         }
 
+        internal static int ConfigureGeneratedTextureStreaming(
+            Material material, string outputFolder)
+        {
+            if (material == null) throw new ArgumentNullException(nameof(material));
+            outputFolder = VoxelLodPipeline.NormalizeAssetPath(outputFolder).TrimEnd('/');
+            string folderPrefix = outputFolder + "/";
+            int changedCount = 0;
+
+            foreach (string propertyName in material.GetTexturePropertyNames())
+            {
+                Texture texture = material.GetTexture(propertyName);
+                string path = texture == null
+                    ? null
+                    : VoxelLodPipeline.NormalizeAssetPath(AssetDatabase.GetAssetPath(texture));
+                if (string.IsNullOrEmpty(path) ||
+                    !path.StartsWith(folderPrefix, StringComparison.OrdinalIgnoreCase) ||
+                    !(AssetImporter.GetAtPath(path) is TextureImporter importer))
+                    continue;
+
+                bool changed = !importer.mipmapEnabled || !importer.streamingMipmaps ||
+                               importer.streamingMipmapsPriority != 0;
+                if (!changed) continue;
+
+                importer.mipmapEnabled = true;
+                importer.streamingMipmaps = true;
+                importer.streamingMipmapsPriority = 0;
+                importer.SaveAndReimport();
+                changedCount++;
+            }
+
+            return changedCount;
+        }
+
         internal static VoxelImpostorBatchBuildResult GenerateForBatch(
             VoxelLodBatchBuildResult batch, VoxelImpostorProfile profile,
             VoxelImpostorQuality quality, Func<float, string, bool> cancelProgress = null,
@@ -263,6 +382,185 @@ namespace LocalModels.VoxelBridge
                 batch.Items.Where(item => item.Succeeded)
                     .Select(item => item.BuildResult.ManifestAssetPath),
                 profile, quality, cancelProgress, generate);
+        }
+
+        internal static VoxelImpostorBatchBuildResult GenerateForBatch(
+            VoxelLodBatchBuildResult batch, VoxelImpostorProfile profile,
+            VoxelImpostorBatchOptions options,
+            Func<float, string, bool> cancelProgress = null,
+            Func<string, VoxelImpostorProfile, VoxelImpostorQuality,
+                VoxelImpostorBuildResult> generate = null)
+        {
+            if (batch == null) throw new ArgumentNullException(nameof(batch));
+            VoxelImpostorBatchPlan plan = CreateBatchPlan(
+                batch.Items.Where(item => item.Succeeded)
+                    .Select(item => item.BuildResult.ManifestAssetPath),
+                profile, options);
+            return GeneratePlannedBatch(plan, profile, cancelProgress, generate);
+        }
+
+        internal static VoxelImpostorBatchPlan CreateBatchPlan(
+            IEnumerable<string> manifestAssetPaths, VoxelImpostorProfile profile,
+            VoxelImpostorBatchOptions options)
+        {
+            if (manifestAssetPaths == null)
+                throw new ArgumentNullException(nameof(manifestAssetPaths));
+            if (profile == null) throw new ArgumentNullException(nameof(profile));
+            options ??= new VoxelImpostorBatchOptions();
+            if (options.SelectQualityBySize &&
+                !profile.TryValidateAutomaticPolicy(out string policyError))
+                throw new InvalidOperationException(policyError);
+
+            string[] paths = manifestAssetPaths
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Select(VoxelLodPipeline.NormalizeAssetPath)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            var candidates = new List<BatchCandidate>(paths.Length);
+            var skips = new List<VoxelImpostorBatchSkip>();
+
+            foreach (string path in paths)
+            {
+                float modelSize = 0f;
+                if (VoxelLodPipeline.TryReadManifest(path, out VoxelLodSetManifest manifest))
+                    modelSize = manifest.lodGroupSize;
+                bool validSize = !float.IsNaN(modelSize) && !float.IsInfinity(modelSize) &&
+                                 modelSize > 0f;
+                if (options.SelectQualityBySize && validSize &&
+                    modelSize < profile.MinimumImpostorSize)
+                {
+                    skips.Add(new VoxelImpostorBatchSkip(
+                        path, VoxelImpostorBatchSkipReason.BelowMinimumSize));
+                    continue;
+                }
+
+                VoxelImpostorQuality quality = VoxelImpostorProfile.NormalizeQuality(
+                    options.FixedQuality);
+                if (options.SelectQualityBySize && validSize)
+                    profile.TrySelectAutomaticQuality(modelSize, out quality);
+                candidates.Add(new BatchCandidate
+                {
+                    ManifestAssetPath = path,
+                    DesiredQuality = VoxelImpostorProfile.NormalizeQuality(quality),
+                    ModelSize = modelSize
+                });
+            }
+
+            candidates.Sort((left, right) =>
+            {
+                int bySize = right.ModelSize.CompareTo(left.ModelSize);
+                return bySize != 0
+                    ? bySize
+                    : StringComparer.OrdinalIgnoreCase.Compare(
+                        left.ManifestAssetPath, right.ManifestAssetPath);
+            });
+
+            long budget = options.MaximumEstimatedAtlasBytes <= 0
+                ? long.MaxValue
+                : options.MaximumEstimatedAtlasBytes;
+            long estimatedBytes = 0;
+            var entries = new List<VoxelImpostorBatchPlanEntry>(candidates.Count);
+            foreach (BatchCandidate candidate in candidates)
+            {
+                bool selected = false;
+                foreach (VoxelImpostorQuality quality in EnumerateQualityFallbacks(
+                             candidate.DesiredQuality, options.SelectQualityBySize))
+                {
+                    long bytes = EstimateAtlasBytes(profile, quality);
+                    if (bytes > budget - estimatedBytes) continue;
+
+                    entries.Add(new VoxelImpostorBatchPlanEntry(
+                        candidate.ManifestAssetPath, quality,
+                        candidate.ModelSize, bytes));
+                    estimatedBytes += bytes;
+                    selected = true;
+                    break;
+                }
+
+                if (!selected)
+                    skips.Add(new VoxelImpostorBatchSkip(
+                        candidate.ManifestAssetPath,
+                        VoxelImpostorBatchSkipReason.AtlasBudget));
+            }
+
+            return new VoxelImpostorBatchPlan(
+                paths.Length, entries, skips, estimatedBytes);
+        }
+
+        internal static long EstimateAtlasBytes(
+            VoxelImpostorProfile profile, VoxelImpostorQuality quality)
+        {
+            if (profile == null) throw new ArgumentNullException(nameof(profile));
+            int resolution = profile.GetSettings(quality).TextureResolution;
+            const int mapCount = 5;
+            const int bytesPerPixel = 4;
+            const int mipNumerator = 4;
+            const int mipDenominator = 3;
+            return checked((long)resolution * resolution * mapCount * bytesPerPixel *
+                           mipNumerator / mipDenominator);
+        }
+
+        private static IEnumerable<VoxelImpostorQuality> EnumerateQualityFallbacks(
+            VoxelImpostorQuality desired, bool allowFallback)
+        {
+            desired = VoxelImpostorProfile.NormalizeQuality(desired);
+            yield return desired;
+            if (!allowFallback) yield break;
+            if (desired is VoxelImpostorQuality.High or VoxelImpostorQuality.Architecture)
+                yield return VoxelImpostorQuality.Medium;
+            if (desired != VoxelImpostorQuality.Low)
+                yield return VoxelImpostorQuality.Low;
+        }
+
+        private static VoxelImpostorBatchBuildResult GeneratePlannedBatch(
+            VoxelImpostorBatchPlan plan, VoxelImpostorProfile profile,
+            Func<float, string, bool> cancelProgress,
+            Func<string, VoxelImpostorProfile, VoxelImpostorQuality,
+                VoxelImpostorBuildResult> generate)
+        {
+            if (plan == null) throw new ArgumentNullException(nameof(plan));
+            if (profile == null) throw new ArgumentNullException(nameof(profile));
+            var builds = new List<VoxelImpostorBuildResult>();
+            var failures = new List<VoxelImpostorBatchFailure>();
+            generate ??= GenerateOrUpdate;
+
+            for (int index = 0; index < plan.Entries.Length; index++)
+            {
+                VoxelImpostorBatchPlanEntry entry = plan.Entries[index];
+                if (cancelProgress != null && cancelProgress(
+                        (float)index / plan.Entries.Length,
+                        $"Impostor {index + 1} de {plan.Entries.Length} · " +
+                        Path.GetFileName(entry.ManifestAssetPath)))
+                    return new VoxelImpostorBatchBuildResult(
+                        plan.CandidateCount, builds, failures, true,
+                        plan.Skips, plan.EstimatedAtlasBytes);
+
+                try
+                {
+                    builds.Add(generate(entry.ManifestAssetPath, profile, entry.Quality));
+                }
+                catch (OperationCanceledException)
+                {
+                    return new VoxelImpostorBatchBuildResult(
+                        plan.CandidateCount, builds, failures, true,
+                        plan.Skips, plan.EstimatedAtlasBytes);
+                }
+                catch (Exception exception)
+                {
+                    failures.Add(new VoxelImpostorBatchFailure(
+                        entry.ManifestAssetPath, exception.Message));
+                }
+                finally
+                {
+                    VoxelLodBatchMemoryCleaner.ReleaseUnusedMemory(profile);
+                }
+            }
+
+            cancelProgress?.Invoke(
+                1f, $"Impostores terminados: {builds.Count} de {plan.Entries.Length}");
+            return new VoxelImpostorBatchBuildResult(
+                plan.CandidateCount, builds, failures, false,
+                plan.Skips, plan.EstimatedAtlasBytes);
         }
 
         internal static VoxelImpostorBatchBuildResult GenerateForManifests(
