@@ -335,9 +335,11 @@ namespace LocalModels.VoxelBridge
             instanceRoot = PrefabUtility.GetNearestPrefabInstanceRoot(source);
             if (instanceRoot == null) return false;
 
-            prefabSource = PrefabUtility.GetCorrespondingObjectFromOriginalSource(source);
-            if (prefabSource == null)
-                prefabSource = PrefabUtility.GetCorrespondingObjectFromSource(source);
+            string nearestAssetPath = PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(source);
+            if (!string.IsNullOrEmpty(nearestAssetPath))
+                prefabSource = PrefabUtility.GetCorrespondingObjectFromSourceAtPath(
+                    source, nearestAssetPath);
+            if (prefabSource == null) prefabSource = PrefabUtility.GetCorrespondingObjectFromSource(source);
             return prefabSource != null && AssetDatabase.Contains(prefabSource);
         }
 
@@ -382,9 +384,13 @@ namespace LocalModels.VoxelBridge
             if (candidate is Component component) candidateObject = component.gameObject;
             if (candidateObject == null) return false;
 
-            GameObject original = PrefabUtility.GetCorrespondingObjectFromOriginalSource(
-                candidateObject);
-            if (original != null) candidateObject = original;
+            string scopeAssetPath = AssetDatabase.GetAssetPath(prefabSource);
+            if (!string.IsNullOrEmpty(scopeAssetPath))
+            {
+                GameObject scoped = PrefabUtility.GetCorrespondingObjectFromSourceAtPath(
+                    candidateObject, scopeAssetPath);
+                if (scoped != null) candidateObject = scoped;
+            }
             return candidateObject == prefabSource ||
                    candidateObject.transform.IsChildOf(prefabSource.transform);
         }

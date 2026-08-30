@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -25,6 +26,7 @@ namespace LocalModels.VoxelBridge
         [SerializeField] private bool batchSkipOverMemoryBudget = true;
         [SerializeField] private bool batchResumeInterrupted = true;
         [SerializeField, Range(1, 25)] private int batchCleanupInterval = 1;
+        [SerializeField] private bool batchShowPlanDetails;
         private VoxelLodBatchPreflight batchPreflight;
         private VoxelStyleProfile styleProfile;
         private VoxelImpostorProfile impostorProfile;
@@ -277,6 +279,56 @@ namespace LocalModels.VoxelBridge
                     $"{reuseCount} reutilización(es) · {modifiedCount} instancia(s) modificadas · " +
                     $"{ignoredCount} ignoradas · {skippedCount} hijo(s) sin malla.",
                     batchPlans.Any(plan => !plan.Ignored) ? MessageType.None : MessageType.Warning);
+
+                batchShowPlanDetails = EditorGUILayout.Foldout(
+                    batchShowPlanDetails, "Ver plan convertir / reutilizar / ignorar", true);
+                if (batchShowPlanDetails)
+                {
+                    var seen = new HashSet<Object>();
+                    int visibleCount = Mathf.Min(100, batchPlans.Length);
+                    EditorGUI.indentLevel++;
+                    for (int index = 0; index < visibleCount; index++)
+                    {
+                        VoxelLodBatchSourcePlan plan = batchPlans[index];
+                        string action;
+                        if (plan.Ignored)
+                        {
+                            action = "IGNORAR · instancia con overrides";
+                        }
+                        else if (!seen.Add(plan.ReuseKey))
+                        {
+                            action = $"REUTILIZAR · {plan.ConversionSource.name}";
+                        }
+                        else if (plan.UsesPrefabSource && plan.HasPrefabOverrides)
+                        {
+                            action = $"CONVERTIR PREFAB · {plan.ConversionSource.name} · ignorar overrides";
+                        }
+                        else if (plan.UsesPrefabSource)
+                        {
+                            string sourcePath = AssetDatabase.GetAssetPath(plan.ConversionSource);
+                            action = $"CONVERTIR PREFAB · {plan.ConversionSource.name}" +
+                                     (string.IsNullOrEmpty(sourcePath) ? string.Empty : $" · {sourcePath}");
+                        }
+                        else if (plan.HasPrefabOverrides)
+                        {
+                            action = "CONVERTIR SEPARADO · instancia editada";
+                        }
+                        else
+                        {
+                            action = "CONVERTIR · objeto sin fuente prefab reutilizable";
+                        }
+
+                        EditorGUILayout.LabelField(
+                            $"{index + 1}. {plan.Source.name}  →  {action}",
+                            EditorStyles.wordWrappedMiniLabel);
+                    }
+                    if (batchPlans.Length > visibleCount)
+                        EditorGUILayout.LabelField(
+                            $"… y {batchPlans.Length - visibleCount} elemento(s) más. " +
+                            "El resumen superior cuenta el lote completo.",
+                            EditorStyles.wordWrappedMiniLabel);
+                    EditorGUI.indentLevel--;
+                }
             }
 
             EditorGUILayout.Space(4);

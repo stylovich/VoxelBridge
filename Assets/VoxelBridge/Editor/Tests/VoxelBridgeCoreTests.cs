@@ -666,6 +666,53 @@ namespace LocalModels.VoxelBridge.Tests
         }
 
         [Test]
+        public void AutomaticBatch_PreservesPrefabVariantAsReusableSource()
+        {
+            const string testRoot = "Assets/VoxelBridgeVariantBatchTestOutput";
+            GameObject baseSource = null;
+            GameObject variantSource = null;
+            GameObject parent = null;
+            try
+            {
+                VoxelLodPipeline.EnsureAssetFolder(testRoot);
+                baseSource = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                baseSource.name = "VariantBase";
+                GameObject basePrefab = PrefabUtility.SaveAsPrefabAsset(
+                    baseSource, testRoot + "/VariantBase.prefab");
+                Object.DestroyImmediate(baseSource);
+                baseSource = null;
+
+                variantSource = PrefabUtility.InstantiatePrefab(basePrefab) as GameObject;
+                Assert.That(variantSource, Is.Not.Null);
+                variantSource.transform.localScale = new Vector3(1f, 2f, 1f);
+                GameObject variantPrefab = PrefabUtility.SaveAsPrefabAsset(
+                    variantSource, testRoot + "/TallVariant.prefab");
+                Object.DestroyImmediate(variantSource);
+                variantSource = null;
+                Assert.That(PrefabUtility.GetPrefabAssetType(variantPrefab),
+                    Is.EqualTo(PrefabAssetType.Variant));
+
+                parent = new GameObject("VariantParent");
+                PrefabUtility.InstantiatePrefab(variantPrefab, parent.transform);
+                PrefabUtility.InstantiatePrefab(variantPrefab, parent.transform);
+                VoxelLodBatchSourcePlan[] plans = VoxelLodPipeline.GetAutomaticBatchPlans(
+                    parent, new VoxelLodBatchOptions());
+
+                Assert.That(plans, Has.Length.EqualTo(2));
+                Assert.That(plans[0].ConversionSource, Is.EqualTo(variantPrefab));
+                Assert.That(plans[1].ConversionSource, Is.EqualTo(variantPrefab));
+                Assert.That(plans[0].ReuseKey, Is.EqualTo(plans[1].ReuseKey));
+            }
+            finally
+            {
+                if (parent != null) Object.DestroyImmediate(parent);
+                if (variantSource != null) Object.DestroyImmediate(variantSource);
+                if (baseSource != null) Object.DestroyImmediate(baseSource);
+                AssetDatabase.DeleteAsset(testRoot);
+            }
+        }
+
+        [Test]
         public void BatchPreflight_EstimatesEachReusableSourceOnceAndAppliesBudget()
         {
             const string testRoot = "Assets/VoxelBridgePreflightTestOutput";
