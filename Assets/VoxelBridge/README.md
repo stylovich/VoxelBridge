@@ -8,9 +8,11 @@ Herramienta de Editor para convertir mallas de Unity a `.vox`, mantener una esca
 2. Crea un `VoxelStyleProfile` desde la ventana o mediante `Create > Voxel Bridge > Perfil de estilo voxel`.
 3. Define `Base Voxel Size` en unidades de Unity. Para vóxeles de 10 cm usa `0.1`.
 4. Define multiplicadores LOD estrictamente crecientes y en potencias de dos, por ejemplo `1, 2, 4, 8`.
-5. Selecciona un FBX, OBJ, prefab u objeto de escena y pulsa `Generar familia .vox + prefab LOD`.
+5. Selecciona un FBX, OBJ, prefab u objeto de escena, configura el impostor final y pulsa el botón de generación.
 
-Para una fuente perteneciente a una escena cargada, `Colocar resultado en escena` instancia el prefab voxel como hermano del GameObject original y conserva su transform, layer, tag y flags Static. `Desactivar objeto original` realiza el reemplazo visual después de completar correctamente la conversión y admite Undo. Las fuentes seleccionadas desde Project solo generan assets y no modifican la escena.
+En la generación individual, `Generar impostor final` hornea el perfil seleccionado después de crear la familia voxel y añade el resultado como último nivel del `LODGroup`. Cuando también se utiliza `Colocar resultado en escena`, el horneado termina antes de instanciar el prefab.
+
+Para una fuente perteneciente a una escena cargada, `Colocar resultado en escena` instancia el prefab voxel como hermano del GameObject original y conserva su transform, layer, tag y flags Static. `Desactivar objeto original` realiza el reemplazo visual después de completar correctamente la conversión y admite Undo. Si la conversión o el horneado del impostor falla, el objeto original permanece activo. Las fuentes seleccionadas desde Project solo generan assets y no modifican la escena.
 
 La sección `Generación por lotes` procesa los hijos directos de un objeto padre. Cada hijo que contenga una malla —en sí mismo o en cualquiera de sus descendientes— utiliza el mismo perfil voxel, color y carpeta de salida. `Ignorar objetos desactivados` está activo de forma predeterminada: omite los hijos directos desactivados y excluye la geometría desactivada dentro de cada fuente. Al desactivarlo se incluye toda la jerarquía, independientemente de su estado. Los hijos directos sin mallas se omiten. Si un modelo falla, el lote informa el error en la Console y continúa con los demás. La misma operación está disponible en `GameObject > Voxel Bridge > Generar hijos como familias voxel y LOD`.
 

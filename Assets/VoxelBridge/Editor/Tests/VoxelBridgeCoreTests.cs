@@ -1,5 +1,6 @@
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
@@ -253,6 +254,82 @@ namespace LocalModels.VoxelBridge.Tests
                 if (voxelProfile != null) Object.DestroyImmediate(voxelProfile);
                 if (impostorProfile != null) Object.DestroyImmediate(impostorProfile);
                 AssetDatabase.DeleteAsset(testRoot);
+            }
+        }
+
+        [Test]
+        public void IndividualGeneration_BakesImpostorAndUpdatesPrefab()
+        {
+            if (!VoxelImporterIntegration.IsInstalled)
+                Assert.Ignore("Voxel Importer es opcional y no está instalado.");
+            AmplifyImpostorCompatibility compatibility =
+                AmplifyImpostorIntegration.GetCompatibility();
+            if (!compatibility.CanBake)
+                Assert.Ignore(compatibility.Message);
+
+            const string testRoot = "Assets/VoxelBridgeIndividualImpostorTestOutput";
+            GameObject source = null;
+            VoxelStyleProfile voxelProfile = null;
+            VoxelImpostorProfile impostorProfile = null;
+            VoxelBridgeWindow window = null;
+            Object previousSelection = Selection.activeObject;
+            UnityEngine.SceneManagement.Scene testScene = default;
+            try
+            {
+                testScene = UnityEditor.SceneManagement.EditorSceneManager.NewPreviewScene();
+                source = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                source.name = "IndividualImpostorCube";
+                UnityEngine.SceneManagement.SceneManager.MoveGameObjectToScene(source, testScene);
+
+                voxelProfile = ScriptableObject.CreateInstance<VoxelStyleProfile>();
+                var serializedProfile = new SerializedObject(voxelProfile);
+                serializedProfile.FindProperty("baseVoxelSize").floatValue = 0.5f;
+                serializedProfile.FindProperty("chunkCellSize").intValue = 16;
+                SerializedProperty multipliers =
+                    serializedProfile.FindProperty("lodMultipliers");
+                multipliers.arraySize = 1;
+                multipliers.GetArrayElementAtIndex(0).intValue = 1;
+                SerializedProperty transitions =
+                    serializedProfile.FindProperty("lodScreenHeights");
+                transitions.arraySize = 1;
+                transitions.GetArrayElementAtIndex(0).floatValue = 0.05f;
+                serializedProfile.ApplyModifiedPropertiesWithoutUndo();
+                impostorProfile = ScriptableObject.CreateInstance<VoxelImpostorProfile>();
+
+                window = ScriptableObject.CreateInstance<VoxelBridgeWindow>();
+                SetWindowField(window, "source", source);
+                SetWindowField(window, "styleProfile", voxelProfile);
+                SetWindowField(window, "impostorProfile", impostorProfile);
+                SetWindowField(window, "impostorQuality", VoxelImpostorQuality.Low);
+                SetWindowField(window, "colorMode", VoxelColorMode.SingleColor);
+                SetWindowField(window, "exportFolder", testRoot);
+                SetWindowField(window, "individualGenerateImpostor", true);
+                SetWindowField(window, "individualPlaceInScene", false);
+
+                MethodInfo generate = typeof(VoxelBridgeWindow).GetMethod(
+                    "GenerateAutomaticLods", BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.That(generate, Is.Not.Null);
+                generate.Invoke(window, null);
+
+                Assert.That(GetWindowField<Object>(window, "lastImpostorAsset"), Is.Not.Null,
+                    GetWindowField<string>(window, "status"));
+                GameObject generatedPrefab =
+                    GetWindowField<Object>(window, "lastPrefabAsset") as GameObject;
+                Assert.That(generatedPrefab, Is.Not.Null);
+                LODGroup lodGroup = generatedPrefab.GetComponent<LODGroup>();
+                Assert.That(lodGroup, Is.Not.Null);
+                Assert.That(lodGroup.lodCount, Is.EqualTo(2));
+            }
+            finally
+            {
+                Selection.activeObject = previousSelection;
+                if (source != null) Object.DestroyImmediate(source);
+                if (window != null) Object.DestroyImmediate(window);
+                if (voxelProfile != null) Object.DestroyImmediate(voxelProfile);
+                if (impostorProfile != null) Object.DestroyImmediate(impostorProfile);
+                AssetDatabase.DeleteAsset(testRoot);
+                if (testScene.IsValid() && testScene.isLoaded)
+                    UnityEditor.SceneManagement.EditorSceneManager.ClosePreviewScene(testScene);
             }
         }
 
@@ -1653,6 +1730,22 @@ namespace LocalModels.VoxelBridge.Tests
                 index += value.Length;
             }
             return count;
+        }
+
+        private static void SetWindowField<T>(VoxelBridgeWindow window, string fieldName, T value)
+        {
+            FieldInfo field = typeof(VoxelBridgeWindow).GetField(
+                fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(field, Is.Not.Null, $"No se encontró el campo '{fieldName}'.");
+            field.SetValue(window, value);
+        }
+
+        private static T GetWindowField<T>(VoxelBridgeWindow window, string fieldName)
+        {
+            FieldInfo field = typeof(VoxelBridgeWindow).GetField(
+                fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(field, Is.Not.Null, $"No se encontró el campo '{fieldName}'.");
+            return (T)field.GetValue(window);
         }
 
         private static Bounds CalculateBounds(Renderer[] renderers)

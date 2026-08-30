@@ -16,6 +16,7 @@ namespace LocalModels.VoxelBridge
             "Assets/VoxelBridgeSettings/VoxelImpostorProfile.asset";
 
         private Object source;
+        [SerializeField] private bool individualGenerateImpostor = true;
         [SerializeField] private bool individualPlaceInScene;
         [SerializeField] private bool individualDisableOriginalObject = true;
         private GameObject batchParent;
@@ -235,6 +236,7 @@ namespace LocalModels.VoxelBridge
 
             DrawColorSettings();
             VoxelBridgeFolderPicker.Draw("Carpeta de familias", ref exportFolder);
+            bool individualImpostorReady = DrawIndividualImpostorOptions();
             GameObject individualSceneSource = source as GameObject;
             bool canPlaceIndividual = VoxelLodBatchScenePlacement.CanPlace(individualSceneSource);
             using (new EditorGUI.DisabledScope(!canPlaceIndividual))
@@ -259,10 +261,14 @@ namespace LocalModels.VoxelBridge
             }
             bool canGenerate = source != null && VoxelBridgeSourceSelection.IsSupported(source) &&
                                styleProfile != null && styleProfile.TryValidate(out _) &&
-                               VoxelLodPipeline.IsAssetFolder(exportFolder);
+                               VoxelLodPipeline.IsAssetFolder(exportFolder) &&
+                               individualImpostorReady;
             using (new EditorGUI.DisabledScope(!canGenerate))
             {
-                if (GUILayout.Button("Generar familia .vox + prefab LOD", GUILayout.Height(38)))
+                string label = individualGenerateImpostor
+                    ? "Generar familia .vox + prefab LOD + impostor"
+                    : "Generar familia .vox + prefab LOD";
+                if (GUILayout.Button(label, GUILayout.Height(38)))
                     GenerateAutomaticLods();
             }
             if (source != null && !VoxelBridgeSourceSelection.IsSupported(source))
@@ -514,13 +520,30 @@ namespace LocalModels.VoxelBridge
 
         private bool DrawBatchImpostorOptions()
         {
+            return DrawAutomaticImpostorOptions(
+                ref batchGenerateImpostors,
+                "Impostores del lote",
+                "Hornea un impostor después de cada familia voxel única y lo añade como último nivel del LODGroup. Las instancias reutilizadas comparten el mismo impostor.",
+                "El horneado se realiza en serie y una sola vez por familia. Un error de Amplify conserva la familia voxel y permite continuar con las restantes.");
+        }
+
+        private bool DrawIndividualImpostorOptions()
+        {
+            return DrawAutomaticImpostorOptions(
+                ref individualGenerateImpostor,
+                "Impostor final",
+                "Hornea un impostor con Amplify después de generar la familia voxel y lo añade como último nivel del LODGroup.",
+                "El impostor se hornea antes de colocar el prefab en la escena. Si el horneado falla, el objeto original permanece activo.");
+        }
+
+        private bool DrawAutomaticImpostorOptions(
+            ref bool generateImpostor, string heading, string toggleTooltip, string footer)
+        {
             EditorGUILayout.Space(4);
-            EditorGUILayout.LabelField("Impostores del lote", EditorStyles.miniBoldLabel);
-            batchGenerateImpostors = EditorGUILayout.Toggle(
-                new GUIContent("Generar impostor final",
-                    "Hornea un impostor después de cada familia voxel única y lo añade como último nivel del LODGroup. Las instancias reutilizadas comparten el mismo impostor."),
-                batchGenerateImpostors);
-            if (!batchGenerateImpostors) return true;
+            EditorGUILayout.LabelField(heading, EditorStyles.miniBoldLabel);
+            generateImpostor = EditorGUILayout.Toggle(
+                new GUIContent("Generar impostor final", toggleTooltip), generateImpostor);
+            if (!generateImpostor) return true;
 
             AmplifyImpostorCompatibility compatibility =
                 AmplifyImpostorIntegration.GetCompatibility();
@@ -552,9 +575,7 @@ namespace LocalModels.VoxelBridge
                 return false;
             }
 
-            EditorGUILayout.HelpBox(
-                "El horneado se realiza en serie y una sola vez por familia. Un error de Amplify conserva la familia voxel y permite continuar con las restantes.",
-                MessageType.None);
+            EditorGUILayout.HelpBox(footer, MessageType.None);
             return compatibility.CanBake;
         }
 
@@ -952,14 +973,31 @@ namespace LocalModels.VoxelBridge
                 }
                 lastPrefabAsset = AssetDatabase.LoadMainAssetAtPath(result.PrefabAssetPath);
                 lastImpostorAsset = null;
+                VoxelLodBuildResult placementBuild = result;
+                if (individualGenerateImpostor)
+                {
+                    VoxelImpostorBuildResult impostorResult =
+                        AmplifyImpostorIntegration.GenerateOrUpdate(
+                            result.ManifestAssetPath, impostorProfile, impostorQuality);
+                    lastImpostorAsset = AssetDatabase.LoadMainAssetAtPath(
+                        impostorResult.ImpostorAssetPath);
+                    lastPrefabAsset = AssetDatabase.LoadMainAssetAtPath(
+                        impostorResult.PrefabAssetPath);
+                    placementBuild = new VoxelLodBuildResult(
+                        result.ManifestAssetPath, impostorResult.PrefabAssetPath,
+                        result.VoxAssetPaths);
+                }
+
                 VoxelLodSinglePlacementResult? placement = null;
                 if (individualPlaceInScene &&
                     VoxelLodBatchScenePlacement.CanPlace(source as GameObject))
                     placement = VoxelLodBatchScenePlacement.PlaceSingle(
-                        (GameObject)source, result, individualDisableOriginalObject);
+                        (GameObject)source, placementBuild, individualDisableOriginalObject);
 
                 SelectAndPing(placement.HasValue ? placement.Value.Instance : lastVoxAsset);
-                status = $"Familia creada: {result.VoxAssetPaths.Length} archivo(s) .vox. Prefab: {result.PrefabAssetPath}";
+                status = $"Familia creada: {result.VoxAssetPaths.Length} archivo(s) .vox. Prefab: {placementBuild.PrefabAssetPath}";
+                if (individualGenerateImpostor)
+                    status += $" Impostor {VoxelImpostorProfile.GetQualityName(impostorQuality)} generado.";
                 if (placement.HasValue)
                     status += placement.Value.OriginalObjectDisabled
                         ? " Instancia colocada y objeto original desactivado."
