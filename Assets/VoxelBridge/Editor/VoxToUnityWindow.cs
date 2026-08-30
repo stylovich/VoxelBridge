@@ -125,7 +125,7 @@ namespace LocalModels.VoxelBridge
         {
             EditorGUILayout.LabelField("2. OBJ exportado por MagicaVoxel (alternativa)", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox(
-                "Solo hace falta si no quieres conservar el .vox directo. Exporta OBJ desde MagicaVoxel y usa el sidecar original para recuperar escala y pivote.",
+                "Flujo alternativo para importar un OBJ exportado desde MagicaVoxel. El sidecar original recupera la escala y el pivote.",
                 MessageType.None);
             returnedObj = (GameObject)EditorGUILayout.ObjectField("OBJ exportado", returnedObj,
                 typeof(GameObject), false);

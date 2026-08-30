@@ -10,7 +10,7 @@ Herramienta de Editor para convertir mallas de Unity a `.vox`, mantener una esca
 4. Define multiplicadores LOD estrictamente crecientes y en potencias de dos, por ejemplo `1, 2, 4, 8`.
 5. Selecciona un FBX, OBJ, prefab u objeto de escena y pulsa `Generar familia .vox + prefab LOD`.
 
-Para convertir varios modelos de una vez, usa `Generación por lotes` en la misma sección y asigna un objeto padre. Cada hijo directo que contenga una malla —en sí mismo o en cualquiera de sus descendientes— se procesa con el mismo perfil voxel, color y carpeta de salida. Los descendientes inactivos también forman parte de la geometría; los hijos directos sin mallas se omiten. Si un modelo falla, el lote informa el error en la Console y continúa con los demás. También puedes seleccionar el padre en la jerarquía y usar `GameObject > Voxel Bridge > Generar hijos como familias voxel y LOD`.
+La sección `Generación por lotes` procesa los hijos directos de un objeto padre. Cada hijo que contenga una malla —en sí mismo o en cualquiera de sus descendientes— utiliza el mismo perfil voxel, color y carpeta de salida. Los descendientes inactivos también forman parte de la geometría; los hijos directos sin mallas se omiten. Si un modelo falla, el lote informa el error en la Console y continúa con los demás. La misma operación está disponible en `GameObject > Voxel Bridge > Generar hijos como familias voxel y LOD`.
 
 `Reutilizar prefab de origen` evita voxelizar varias veces instancias equivalentes: las instancias sin overrides del mismo prefab comparten una sola familia `.vox` y el mismo prefab convertido. Esto también funciona cuando las instancias están anidadas dentro de otro prefab; la herramienta resuelve el prefab reutilizable más cercano y conserva las variantes como fuentes distintas de su prefab base. Los cambios normales de posición, rotación y escala del root no cuentan como edición y se recuperan al colocar el resultado.
 
@@ -18,9 +18,9 @@ Para una instancia de prefab con overrides no predeterminados se puede elegir en
 
 El desplegable `Ver plan convertir / reutilizar / ignorar` muestra la decisión tomada para cada hijo antes de iniciar. Una fila `REUTILIZAR` no genera otra familia: al colocar el lote crea otra instancia del mismo prefab voxel con el Transform del objeto original. Una fila `CONVERTIR` sí genera una carpeta independiente.
 
-Antes de voxelizar, `Analizar memoria del lote` calcula las rejillas de todas las fuentes únicas y estima su pico de memoria. El presupuesto predeterminado de 1024 MiB por modelo es conservador para un equipo de 32 GB; si `Omitir modelos sobre presupuesto` está activo, esas fuentes se registran como error y el resto continúa. Para edificios grandes conviene además usar una unidad base de 5–10 cm o dividir la fuente, porque un lote pequeño no evita que un único modelo excesivo agote la memoria.
+Antes de voxelizar, `Analizar memoria del lote` calcula las rejillas de todas las fuentes únicas y estima su pico de memoria. El presupuesto predeterminado es 1024 MiB por modelo y debe ajustarse según la memoria disponible y la carga del Editor. Si `Omitir modelos sobre presupuesto` está activo, esas fuentes se registran como error y el resto continúa. Para modelos grandes conviene además aumentar la unidad base o dividir la fuente, porque reducir el tamaño del lote no disminuye el consumo de una conversión individual.
 
-Durante el proceso, cada familia terminada se registra en `Library/VoxelBridge/BatchCheckpoints`. Si Unity se cierra o el usuario cancela, `Reanudar lote interrumpido` recupera esas familias cuando la fuente, el perfil y las opciones coinciden, y continúa únicamente con las pendientes. El checkpoint se elimina al completar el lote. `Limpiar cada N familias` descarga assets sin uso y fuerza la recolección de memoria; usa `1` para máxima seguridad y `2–4` si prefieres algo más de velocidad en lotes moderados.
+Durante el proceso, cada familia terminada se registra en `Library/VoxelBridge/BatchCheckpoints`. Si Unity se cierra o el usuario cancela, `Reanudar lote interrumpido` recupera esas familias cuando la fuente, el perfil y las opciones coinciden, y continúa únicamente con las pendientes. El checkpoint se elimina al completar el lote. `Limpiar cada N familias` descarga assets sin uso y fuerza la recolección de memoria. El valor `1` prioriza la estabilidad; los valores `2–4` reducen la frecuencia de limpieza en lotes moderados.
 
 Una familia en construcción contiene una marca privada de Voxel Bridge. Ante una excepción controlada se elimina en el momento; tras un cierre fatal, la siguiente ejecución o el botón `Buscar y limpiar salidas incompletas` elimina solamente carpetas que contengan esa marca. Las familias completas y las carpetas creadas manualmente no se tocan.
 
@@ -37,11 +37,11 @@ La familia generada contiene:
 
 Regenerar o sustituir un LOD actualiza el mismo prefab indicado por el manifiesto; no crea copias sucesivas del prefab.
 
-Cada modelo queda completamente agrupado en `Assets/VoxelBridgeExports/Nombre_VoxelLOD/`: los `.vox`, sidecars, manifiesto y prefab viven juntos. Si una familia anterior tiene el prefab en `VoxelBridgeImports`, asigna su `.voxset.json` en `LOD manual` y pulsa `Reconstruir prefab desde manifiesto`; Voxel Bridge lo mueve junto a sus `.vox` conservando el GUID y las referencias existentes.
+Cada modelo queda completamente agrupado en `Assets/VoxelBridgeExports/Nombre_VoxelLOD/`: los `.vox`, sidecars, manifiesto y prefab viven juntos. `Reconstruir prefab desde manifiesto` reubica junto a los `.vox` cualquier prefab indicado por el manifiesto que esté fuera de la carpeta de la familia, conservando su GUID y sus referencias.
 
 `Reconstruir prefab desde manifiesto` también resincroniza la escala, el pivote y la transformación de importación de todos los `.vox` de la familia. Úsalo para aplicar correcciones de compatibilidad a familias ya generadas sin volver a voxelizar el modelo fuente.
 
-También puedes hacer clic derecho sobre el prefab, cualquiera de sus `.vox` o el manifiesto y elegir `Voxel Bridge > Editar LODs de la familia`. La ventana muestra cada nivel con accesos para seleccionarlo, abrirlo directamente en MagicaVoxel o usarlo como padre del siguiente LOD manual.
+El menú contextual del prefab, de sus `.vox` y del manifiesto incluye `Voxel Bridge > Editar LODs de la familia`. La ventana muestra cada nivel con accesos para seleccionarlo, abrirlo directamente en MagicaVoxel o usarlo como padre del siguiente LOD manual.
 
 El GameObject raíz y su archivo prefab usan solamente el nombre del modelo original; la carpeta conserva el sufijo `_VoxelLOD` para identificar la familia. En la jerarquía, haz clic derecho sobre un hijo de cualquier nivel y elige `Voxel Bridge > Editar este LOD en MagicaVoxel` para abrir exactamente su `.vox`. La opción `Editar LODs de la familia` abre la lista completa desde cualquier objeto perteneciente al `LODGroup`.
 
@@ -56,7 +56,7 @@ Con Amplify Impostors 1.0.4 instalado, la sección `Impostor final` hornea todos
 - `Alto · Gran distancia`: Octahedron, atlas 2048, 16×16 vistas, padding 48, 12 vértices, descarte 0.0015 y Cross Fade 0.25. Está pensado para vehículos voladores, objetos móviles importantes y modelos que pueden verse desde cualquier dirección.
 - `Arquitectura · Fondo`: HemiOctahedron, atlas 2048, 16×16 vistas, padding 48, 10 vértices, descarte 0.0005 y Cross Fade 0.30. Concentra las capturas en el hemisferio superior para edificios, estructuras y siluetas del skyline que no se observan desde abajo.
 
-El manifiesto de cada familia guarda el perfil seleccionado y la ventana lo recupera al abrir nuevamente su prefab, `.vox` o `.voxset.json`. `Editar valores` abre la configuración central para ajustar los cuatro perfiles del proyecto; su Inspector también permite restaurar todos los valores recomendados con Undo.
+El manifiesto de cada familia guarda el perfil seleccionado y la ventana lo recupera al abrir nuevamente su prefab, `.vox` o `.voxset.json`. `Editar valores` abre la configuración central para ajustar los cuatro perfiles compartidos; su Inspector también permite restaurar todos los valores recomendados con Undo.
 
 Para vehículos terrestres usa `Medio` en tráfico o elementos secundarios y `Alto` cuando su silueta sea importante o la cámara tenga libertad vertical. Los vehículos voladores deben usar `Alto`, porque necesitan capturas de todo el objeto y pueden verse desde abajo. El movimiento no requiere otro tipo de asset, pero hace más visible el cambio angular: valida el Cross Fade con la velocidad máxima de cámara y vehículo.
 
@@ -77,9 +77,9 @@ Ambas rutas reemplazan la entrada del nivel elegido en el manifiesto y reconstru
 
 Cuando una rejilla supera `Chunk Cell Size`, Voxel Bridge escribe un único `.vox` VOX 200 con varios modelos y scene graph. Cada modelo ocupa como máximo 256 celdas por eje, conserva su posición global y se puede editar en MagicaVoxel como parte del mismo archivo.
 
-Con Voxel Importer, un `.vox` con varios chunks se importa en modo `Individual`: el prefab conserva un renderer por chunk. Esto permite culling granular y encaja con el baking de subescenas/DOTS; el `LODGroup` referencia todos los renderers del nivel. No se combinan todos los chunks en una sola malla, porque hacerlo haría que un fragmento visible mantuviera renderizado el edificio completo.
+Con Voxel Importer, un `.vox` con varios chunks se importa en modo `Individual`: el prefab conserva un renderer por chunk y el `LODGroup` referencia todos los renderers del nivel. Esta estructura permite culling granular. Los chunks no se combinan en una sola malla.
 
-Actualmente la salida está dividida en chunks, pero la fase de voxelización mantiene una rejilla densa global para que el relleno interior y las fronteras entre chunks sean correctos. Existe un límite de seguridad de 80 millones de celdas. Si se supera, aumenta `Base Voxel Size` o divide el asset fuente. Una futura voxelización por bloques podría retirar este límite sin cambiar el formato generado.
+La fase de voxelización utiliza una rejilla densa global para mantener correctos el relleno interior y las fronteras entre chunks. El límite de seguridad es de 80 millones de celdas. Si se supera, se debe aumentar `Base Voxel Size` o dividir el asset fuente.
 
 ## Conversión puntual por resolución
 
@@ -106,13 +106,13 @@ Si `Assets/VoxelImporter` está instalado, conserva el `.vox` como asset de Unit
 - `Combine Voxel Faces` y `Share Same Face`;
 - `Ignore Cavity` cuando `Ocultar cavidades cerradas` está activo.
 
-La interfaz de retorno está separada en `Tools > Voxel Bridge > VOX a Unity`. Allí puedes asignar un `.vox`, comprobar su ruta física, aplicar escala y pivote desde el sidecar, seleccionar el modelo importado o abrirlo en MagicaVoxel. También puedes resincronizar todos los generados con `Tools > Voxel Bridge > Sincronizar todos los .vox`.
+La interfaz de retorno está separada en `Tools > Voxel Bridge > VOX a Unity`. Permite asignar un `.vox`, comprobar su ruta física, aplicar escala y pivote desde el sidecar, seleccionar el modelo importado o abrirlo en MagicaVoxel. `Tools > Voxel Bridge > Sincronizar todos los .vox` resincroniza todos los archivos generados.
 
 Voxel Bridge necesita corregir las normales que Voxel Importer genera cuando `Import Scale` contiene ejes negativos. Después de instalar o actualizar Voxel Importer usa `Tools > Voxel Bridge > Compatibilidad > Aplicar parche de normales de Voxel Importer`. La acción es idempotente y reimporta automáticamente los `.vox` generados. Si una versión nueva cambia el código esperado, Voxel Bridge no modifica el asset y muestra un warning para que el conflicto se revise manualmente.
 
 Para editar cualquier `.vox`, selecciónalo en Project y usa `Assets > Voxel Bridge > Abrir en MagicaVoxel`. La primera vez se solicitará la ubicación de `MagicaVoxel.exe`; Voxel Bridge recordará esa ruta para las siguientes aperturas. El mismo botón está disponible en las tres interfaces cuando existe una salida `.vox` válida.
 
-Voxel Importer genera mallas normales durante la importación. El juego usa esas mallas; no dibuja millones de cubos ni mantiene vóxeles editables en runtime. Por ello, conservar los `.vox` directamente es el flujo más corto y mantiene la actualización automática al guardar desde MagicaVoxel. Para producción se usa el prefab generado, cuyos renderers provienen de esos `.vox`.
+Voxel Importer genera mallas normales durante la importación; no dibuja cubos individuales ni mantiene vóxeles editables en runtime. Conservar los `.vox` mantiene la actualización automática al guardar desde MagicaVoxel. El prefab generado referencia los renderers importados desde esos archivos.
 
 ## MagicaVoxel OBJ a Unity (alternativa)
 
@@ -131,5 +131,5 @@ El prefab conserva el pivote local y escala cada unidad del OBJ al tamaño del v
 - El relleno depende de que la superficie sea razonablemente cerrada. Agujeros en la malla pueden dejar el interior vacío.
 - `Rellenar interior` desactivado crea una carcasa de un vóxel de grosor. Sus caras internas son reales. `Ignore Cavity` oculta solo cavidades cerradas; una ventana, puerta o grieta conecta la cavidad con el exterior. Para eliminar siempre las caras internas, usa relleno sólido.
 - El muestreo de texturas se limita internamente a 512 px por material para evitar picos innecesarios de memoria.
-- La paleta se cuantiza actualmente por cada LOD. La consolidación de materiales/paletas compartidas entre familias queda separada de este flujo de geometría.
+- Cada LOD se cuantiza de forma independiente. La herramienta no genera una paleta compartida entre LODs o familias.
 - `Assets/VoxelImporter` es una dependencia opcional del Asset Store y no forma parte del módulo portátil. Instálala por separado antes de aplicar su parche de compatibilidad.

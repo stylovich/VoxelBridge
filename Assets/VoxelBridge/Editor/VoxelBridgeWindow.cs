@@ -335,7 +335,7 @@ namespace LocalModels.VoxelBridge
             EditorGUILayout.LabelField("Seguridad de memoria", EditorStyles.miniBoldLabel);
             batchMemoryBudgetMb = Mathf.Clamp(EditorGUILayout.IntField(
                 new GUIContent("Presupuesto por modelo (MiB)",
-                    "Pico estimado permitido para una conversión única. 1024 MiB es un límite conservador para este equipo de 32 GB."),
+                    "Límite estimado de memoria temporal para una fuente. El valor debe ajustarse según la memoria disponible y la carga del Editor."),
                 batchMemoryBudgetMb), 256, 8192);
             batchSkipOverMemoryBudget = EditorGUILayout.Toggle(
                 new GUIContent("Omitir modelos sobre presupuesto",
@@ -589,8 +589,8 @@ namespace LocalModels.VoxelBridge
             if (impostorProfile == null)
             {
                 EditorGUILayout.HelpBox(
-                    "Crea la configuración central una sola vez. Después elegirás el perfil de uso " +
-                    "directamente para cada familia.", MessageType.Warning);
+                    "La configuración central contiene los perfiles de uso compartidos por todas las familias.",
+                    MessageType.Warning);
                 if (GUILayout.Button("Crear configuración de perfiles de impostor"))
                     CreateDefaultImpostorProfile();
             }
