@@ -42,7 +42,8 @@ namespace LocalModels.VoxelBridge
             PrefabStageUtility.GetPrefabStage(sourceParent) == null;
 
         public static VoxelLodSinglePlacementResult PlaceSingle(
-            GameObject sourceObject, VoxelLodBuildResult build, bool disableOriginalObject)
+            GameObject sourceObject, VoxelLodBuildResult build, VoxelStyleProfile profile,
+            bool disableOriginalObject)
         {
             if (!CanPlace(sourceObject))
                 throw new InvalidOperationException(
@@ -65,6 +66,7 @@ namespace LocalModels.VoxelBridge
                 instanceTransform.SetParent(sourceTransform.parent, false);
                 instanceTransform.SetSiblingIndex(sourceTransform.GetSiblingIndex() + 1);
                 CopyLocalTransform(sourceTransform, instanceTransform);
+                SnapWorldPosition(instanceTransform, sourceTransform.position, profile);
                 instance.name = GameObjectUtility.GetUniqueNameForSibling(
                     sourceTransform.parent, sourceObject.name + "_Voxel");
                 instance.tag = sourceObject.tag;
@@ -95,7 +97,7 @@ namespace LocalModels.VoxelBridge
 
         public static VoxelLodBatchPlacementResult Place(
             GameObject sourceParent, VoxelLodBatchBuildResult batch,
-            bool disableOriginalRoot)
+            VoxelStyleProfile profile, bool disableOriginalRoot)
         {
             if (!CanPlace(sourceParent))
                 throw new InvalidOperationException(
@@ -120,6 +122,7 @@ namespace LocalModels.VoxelBridge
             voxelRoot.transform.SetParent(sourceParent.transform.parent, false);
             voxelRoot.transform.SetSiblingIndex(sourceParent.transform.GetSiblingIndex() + 1);
             CopyLocalTransform(sourceParent.transform, voxelRoot.transform);
+            SnapWorldPosition(voxelRoot.transform, sourceParent.transform.position, profile);
             voxelRoot.layer = sourceParent.layer;
             voxelRoot.tag = sourceParent.tag;
             GameObjectUtility.SetStaticEditorFlags(
@@ -141,6 +144,7 @@ namespace LocalModels.VoxelBridge
                 Undo.RegisterCreatedObjectUndo(instance, "Colocar modelo voxel");
                 instance.name = item.Source.name;
                 CopyLocalTransform(item.Source.transform, instance.transform);
+                SnapWorldPosition(instance.transform, item.Source.transform.position, profile);
                 SetLayerAndStaticFlagsRecursively(
                     instance, item.Source.layer,
                     GameObjectUtility.GetStaticEditorFlags(item.Source));
@@ -175,6 +179,13 @@ namespace LocalModels.VoxelBridge
             destination.localPosition = source.localPosition;
             destination.localRotation = source.localRotation;
             destination.localScale = source.localScale;
+        }
+
+        private static void SnapWorldPosition(
+            Transform destination, Vector3 sourceWorldPosition, VoxelStyleProfile profile)
+        {
+            if (profile != null)
+                destination.position = profile.GetSnappedWorldPosition(sourceWorldPosition);
         }
 
         private static void SetLayerAndStaticFlagsRecursively(

@@ -34,6 +34,32 @@ namespace LocalModels.VoxelBridge.Tests
         }
 
         [Test]
+        public void StyleProfile_SnapsWorldPositionToBaseVoxelGrid()
+        {
+            VoxelStyleProfile profile = ScriptableObject.CreateInstance<VoxelStyleProfile>();
+            try
+            {
+                var serializedProfile = new SerializedObject(profile);
+                serializedProfile.FindProperty("baseVoxelSize").floatValue = 0.024f;
+                serializedProfile.ApplyModifiedPropertiesWithoutUndo();
+
+                Vector3 source = new(1.001f, 0.013f, -0.013f);
+                Vector3 snapped = profile.GetSnappedWorldPosition(source);
+                Assert.That(snapped.x, Is.EqualTo(1.008f).Within(1e-6f));
+                Assert.That(snapped.y, Is.EqualTo(0.024f).Within(1e-6f));
+                Assert.That(snapped.z, Is.EqualTo(-0.024f).Within(1e-6f));
+
+                serializedProfile.FindProperty("snapPlacedPivotsToVoxelGrid").boolValue = false;
+                serializedProfile.ApplyModifiedPropertiesWithoutUndo();
+                Assert.That(profile.GetSnappedWorldPosition(source), Is.EqualTo(source));
+            }
+            finally
+            {
+                Object.DestroyImmediate(profile);
+            }
+        }
+
+        [Test]
         public void StyleProfile_AdaptsLodTransitionsAroundReferenceSize()
         {
             VoxelStyleProfile profile = ScriptableObject.CreateInstance<VoxelStyleProfile>();
@@ -731,14 +757,20 @@ namespace LocalModels.VoxelBridge.Tests
             GameObject sourceObject = null;
             GameObject prefabSource = null;
             GameObject placedInstance = null;
+            VoxelStyleProfile profile = null;
             UnityEngine.SceneManagement.Scene originalScene =
                 UnityEngine.SceneManagement.SceneManager.GetActiveScene();
             UnityEngine.SceneManagement.Scene testScene = default;
             try
             {
+                UnityEditor.SceneManagement.NewSceneMode sceneMode =
+                    originalScene.IsValid() && originalScene.isLoaded &&
+                    !string.IsNullOrEmpty(originalScene.path)
+                        ? UnityEditor.SceneManagement.NewSceneMode.Additive
+                        : UnityEditor.SceneManagement.NewSceneMode.Single;
                 testScene = UnityEditor.SceneManagement.EditorSceneManager.NewScene(
                     UnityEditor.SceneManagement.NewSceneSetup.EmptyScene,
-                    UnityEditor.SceneManagement.NewSceneMode.Additive);
+                    sceneMode);
                 VoxelLodPipeline.EnsureAssetFolder(testRoot);
                 prefabSource = GameObject.CreatePrimitive(PrimitiveType.Cube);
                 prefabSource.name = "ConvertedSingle";
@@ -751,7 +783,7 @@ namespace LocalModels.VoxelBridge.Tests
                 parent = new GameObject("SinglePlacementParent");
                 sourceObject = new GameObject("SingleSource");
                 sourceObject.transform.SetParent(parent.transform, false);
-                sourceObject.transform.localPosition = new Vector3(2f, 3f, -4f);
+                sourceObject.transform.localPosition = new Vector3(2.24f, 3.24f, -4.24f);
                 sourceObject.transform.localRotation = Quaternion.Euler(10f, 20f, 30f);
                 sourceObject.transform.localScale = new Vector3(1.5f, 0.75f, 2f);
                 sourceObject.layer = 6;
@@ -760,11 +792,15 @@ namespace LocalModels.VoxelBridge.Tests
 
                 var build = new VoxelLodBuildResult(
                     null, prefabPath, System.Array.Empty<string>());
+                profile = ScriptableObject.CreateInstance<VoxelStyleProfile>();
+                var serializedProfile = new SerializedObject(profile);
+                serializedProfile.FindProperty("baseVoxelSize").floatValue = 0.5f;
+                serializedProfile.ApplyModifiedPropertiesWithoutUndo();
                 Assert.That(VoxelLodBatchScenePlacement.CanPlace(sourceObject), Is.True);
                 Assert.That(VoxelLodBatchScenePlacement.CanPlace(prefab), Is.False);
 
                 VoxelLodSinglePlacementResult placement =
-                    VoxelLodBatchScenePlacement.PlaceSingle(sourceObject, build, false);
+                    VoxelLodBatchScenePlacement.PlaceSingle(sourceObject, build, profile, false);
                 placedInstance = placement.Instance;
                 Assert.That(placement.OriginalObjectDisabled, Is.False);
                 Assert.That(sourceObject.activeSelf, Is.True);
@@ -773,8 +809,8 @@ namespace LocalModels.VoxelBridge.Tests
                 Assert.That(placedInstance.transform.parent, Is.EqualTo(parent.transform));
                 Assert.That(placedInstance.transform.GetSiblingIndex(),
                     Is.EqualTo(sourceObject.transform.GetSiblingIndex() + 1));
-                Assert.That(placedInstance.transform.localPosition,
-                    Is.EqualTo(sourceObject.transform.localPosition));
+                Assert.That(placedInstance.transform.position,
+                    Is.EqualTo(new Vector3(2f, 3f, -4f)));
                 Assert.That(Quaternion.Angle(placedInstance.transform.localRotation,
                     sourceObject.transform.localRotation), Is.LessThan(1e-4f));
                 Assert.That(placedInstance.transform.localScale,
@@ -788,7 +824,8 @@ namespace LocalModels.VoxelBridge.Tests
                 Assert.That(sourceObject.activeSelf, Is.True);
                 placedInstance = null;
 
-                placement = VoxelLodBatchScenePlacement.PlaceSingle(sourceObject, build, true);
+                placement = VoxelLodBatchScenePlacement.PlaceSingle(
+                    sourceObject, build, profile, true);
                 placedInstance = placement.Instance;
                 Assert.That(placement.OriginalObjectDisabled, Is.True);
                 Assert.That(sourceObject.activeSelf, Is.False);
@@ -805,10 +842,12 @@ namespace LocalModels.VoxelBridge.Tests
                 if (sourceObject != null) Object.DestroyImmediate(sourceObject);
                 if (parent != null) Object.DestroyImmediate(parent);
                 if (prefabSource != null) Object.DestroyImmediate(prefabSource);
+                if (profile != null) Object.DestroyImmediate(profile);
                 AssetDatabase.DeleteAsset(testRoot);
                 if (originalScene.IsValid() && originalScene.isLoaded)
                     UnityEngine.SceneManagement.SceneManager.SetActiveScene(originalScene);
-                if (testScene.IsValid() && testScene.isLoaded)
+                if (testScene.IsValid() && testScene.isLoaded &&
+                    UnityEngine.SceneManagement.SceneManager.sceneCount > 1)
                     UnityEditor.SceneManagement.EditorSceneManager.CloseScene(testScene, true);
             }
         }
@@ -931,7 +970,7 @@ namespace LocalModels.VoxelBridge.Tests
                     "La fuente inválida no debe dejar una carpeta de familia vacía.");
 
                 VoxelLodBatchPlacementResult incompletePlacement =
-                    VoxelLodBatchScenePlacement.Place(parent, batch, true);
+                    VoxelLodBatchScenePlacement.Place(parent, batch, profile, true);
                 placedRoot = incompletePlacement.Root;
                 Assert.That(incompletePlacement.OriginalRootDisabled, Is.False);
                 Assert.That(parent.activeSelf, Is.True);
@@ -946,7 +985,7 @@ namespace LocalModels.VoxelBridge.Tests
                 var nonVisualChild = new GameObject("NonVisualChild");
                 nonVisualChild.transform.SetParent(parent.transform, false);
                 VoxelLodBatchPlacementResult skippedChildPlacement =
-                    VoxelLodBatchScenePlacement.Place(parent, completeBatch, true);
+                    VoxelLodBatchScenePlacement.Place(parent, completeBatch, profile, true);
                 placedRoot = skippedChildPlacement.Root;
                 Assert.That(skippedChildPlacement.OriginalRootDisabled, Is.False);
                 Assert.That(parent.activeSelf, Is.True);
@@ -957,7 +996,7 @@ namespace LocalModels.VoxelBridge.Tests
                 Object.DestroyImmediate(nonVisualChild);
 
                 VoxelLodBatchPlacementResult placement =
-                    VoxelLodBatchScenePlacement.Place(parent, completeBatch, true);
+                    VoxelLodBatchScenePlacement.Place(parent, completeBatch, profile, true);
                 placedRoot = placement.Root;
                 Assert.That(placement.PlacedCount, Is.EqualTo(2));
                 Assert.That(placement.OriginalRootDisabled, Is.True);

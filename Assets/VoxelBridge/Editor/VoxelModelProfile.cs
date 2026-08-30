@@ -56,6 +56,11 @@ namespace LocalModels.VoxelBridge
         [InspectorName("Umbral para penúltimo LOD")]
         [SerializeField, Min(0.01f)] private float penultimateLodShadowSizeThreshold = 0.5f;
 
+        [Header("Alineación al grid")]
+        [Tooltip("Al colocar automáticamente el resultado en una escena, ajusta la posición mundial de su pivote al múltiplo más cercano de la unidad voxel base. El desplazamiento máximo es media celda por eje y la geometría conserva su alineación local.")]
+        [InspectorName("Alinear pivotes al colocar")]
+        [SerializeField] private bool snapPlacedPivotsToVoxelGrid = true;
+
         public float BaseVoxelSize => Mathf.Max(0.001f, baseVoxelSize);
         public int ChunkCellSize => Mathf.Clamp(chunkCellSize, 16, 256);
         public int Padding => Mathf.Clamp(padding, 0, 8);
@@ -72,6 +77,16 @@ namespace LocalModels.VoxelBridge
             if (modelSize < penultimateLodShadowSizeThreshold)
                 return Mathf.Max(0, voxelLodCount - 2);
             return modelSize < lastLodShadowSizeThreshold ? voxelLodCount - 1 : -1;
+        }
+
+        public Vector3 GetSnappedWorldPosition(Vector3 worldPosition)
+        {
+            if (!snapPlacedPivotsToVoxelGrid) return worldPosition;
+            float gridSize = BaseVoxelSize;
+            return new Vector3(
+                Mathf.Round(worldPosition.x / gridSize) * gridSize,
+                Mathf.Round(worldPosition.y / gridSize) * gridSize,
+                Mathf.Round(worldPosition.z / gridSize) * gridSize);
         }
 
         public int GetLodMultiplier(int index)

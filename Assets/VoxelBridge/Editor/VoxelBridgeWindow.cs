@@ -997,7 +997,8 @@ namespace LocalModels.VoxelBridge
                 if (individualPlaceInScene &&
                     VoxelLodBatchScenePlacement.CanPlace(source as GameObject))
                     placement = VoxelLodBatchScenePlacement.PlaceSingle(
-                        (GameObject)source, placementBuild, individualDisableOriginalObject);
+                        (GameObject)source, placementBuild, styleProfile,
+                        individualDisableOriginalObject);
 
                 SelectAndPing(placement.HasValue ? placement.Value.Instance : lastVoxAsset);
                 status = $"Familia creada: {result.VoxAssetPaths.Length} archivo(s) .vox. Prefab: {placementBuild.PrefabAssetPath}";
@@ -1078,7 +1079,7 @@ namespace LocalModels.VoxelBridge
                 if (batchPlaceInScene && VoxelLodBatchScenePlacement.CanPlace(batchParent) &&
                     result.SucceededCount > 0)
                     placement = VoxelLodBatchScenePlacement.Place(
-                        batchParent, result, batchDisableOriginalRoot);
+                        batchParent, result, styleProfile, batchDisableOriginalRoot);
 
                 if (placement.HasValue) SelectAndPing(placement.Value.Root);
                 else SelectAndPing(lastPrefabAsset);
