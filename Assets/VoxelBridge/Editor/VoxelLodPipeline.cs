@@ -44,6 +44,9 @@ namespace LocalModels.VoxelBridge
             VoxelPrefabOverrideHandling.UsePrefabSource;
         public long MaximumEstimatedMemoryBytes = 1024L * 1024L * 1024L;
         public bool SkipSourcesOverMemoryBudget = true;
+        public bool EnableCheckpoint = true;
+        public bool ResumeInterruptedBatch = true;
+        public int CleanupInterval = 1;
         public VoxelLodBatchPreflight Preflight;
     }
 
@@ -76,6 +79,7 @@ namespace LocalModels.VoxelBridge
         public readonly VoxelLodBuildResult BuildResult;
         public readonly string Error;
         public readonly bool Reused;
+        public readonly bool Resumed;
         public readonly bool Ignored;
 
         public bool Succeeded => !Ignored && string.IsNullOrEmpty(Error);
@@ -83,13 +87,14 @@ namespace LocalModels.VoxelBridge
 
         public VoxelLodBatchItemResult(
             VoxelLodBatchSourcePlan plan, VoxelLodBuildResult buildResult,
-            bool reused = false, string error = null)
+            bool reused = false, string error = null, bool resumed = false)
         {
             Source = plan.Source;
             ConversionSource = plan.ConversionSource;
             BuildResult = buildResult;
             Error = error;
             Reused = reused;
+            Resumed = resumed;
             Ignored = plan.Ignored;
         }
     }
@@ -105,7 +110,9 @@ namespace LocalModels.VoxelBridge
         public int FailedCount => Items.Count(item => item.Failed);
         public int IgnoredCount => Items.Count(item => item.Ignored);
         public int ReusedCount => Items.Count(item => item.Succeeded && item.Reused);
-        public int CreatedFamilyCount => Items.Count(item => item.Succeeded && !item.Reused);
+        public int ResumedCount => Items.Count(item => item.Succeeded && item.Resumed);
+        public int CreatedFamilyCount => Items.Count(item =>
+            item.Succeeded && !item.Reused && !item.Resumed);
         public bool IsComplete => !Cancelled && Items.Length == CandidateCount &&
                                   FailedCount == 0 && IgnoredCount == 0;
 
@@ -124,11 +131,15 @@ namespace LocalModels.VoxelBridge
     {
         public readonly VoxelLodBuildResult BuildResult;
         public readonly string Error;
+        public readonly bool FromCheckpoint;
+        public bool CheckpointClaimed;
 
-        public VoxelLodBatchConversionOutcome(VoxelLodBuildResult buildResult, string error)
+        public VoxelLodBatchConversionOutcome(
+            VoxelLodBuildResult buildResult, string error, bool fromCheckpoint = false)
         {
             BuildResult = buildResult;
             Error = error;
+            FromCheckpoint = fromCheckpoint;
         }
     }
 
@@ -181,8 +192,23 @@ namespace LocalModels.VoxelBridge
                 preflight = VoxelLodBatchAnalyzer.Analyze(
                     plans, profile, options, batchOptions, cancelProgress);
 
+            int cleanedFamilies = VoxelLodBatchRecovery.CleanupIncompleteFamilies(
+                options.ExportFolder);
+            if (cleanedFamilies > 0)
+                Debug.LogWarning(
+                    $"Voxel Bridge eliminó {cleanedFamilies} familia(s) incompletas marcadas " +
+                    "por una ejecución interrumpida.");
+
             var items = new List<VoxelLodBatchItemResult>();
-            var outcomes = new Dictionary<Object, VoxelLodBatchConversionOutcome>();
+            string checkpointSignature = VoxelLodBatchIdentity.CreateBatchSignature(
+                plans, profile, options, batchOptions);
+            if (batchOptions.EnableCheckpoint && !batchOptions.ResumeInterruptedBatch)
+                VoxelLodBatchCheckpointStore.Reset(checkpointSignature);
+            Dictionary<Object, VoxelLodBatchConversionOutcome> outcomes =
+                batchOptions.EnableCheckpoint && batchOptions.ResumeInterruptedBatch
+                    ? VoxelLodBatchCheckpointStore.LoadOutcomes(checkpointSignature, plans)
+                    : new Dictionary<Object, VoxelLodBatchConversionOutcome>();
+            int processedUniqueSources = 0;
             for (int sourceIndex = 0; sourceIndex < plans.Length; sourceIndex++)
             {
                 VoxelLodBatchSourcePlan plan = plans[sourceIndex];
@@ -190,7 +216,10 @@ namespace LocalModels.VoxelBridge
                 float progressBase = (float)sourceIndex / plans.Length;
                 if (cancelProgress != null && cancelProgress(progressBase,
                         $"Modelo {sourceIndex + 1} de {plans.Length}: preparando {current.name}"))
+                {
+                    VoxelLodBatchMemoryCleaner.ReleaseUnusedMemory(parent, profile);
                     return new VoxelLodBatchBuildResult(items, plans.Length, true, preflight);
+                }
 
                 if (plan.Ignored)
                 {
@@ -200,8 +229,10 @@ namespace LocalModels.VoxelBridge
 
                 if (outcomes.TryGetValue(plan.ReuseKey, out VoxelLodBatchConversionOutcome previous))
                 {
+                    bool resumed = previous.FromCheckpoint && !previous.CheckpointClaimed;
+                    if (resumed) previous.CheckpointClaimed = true;
                     items.Add(new VoxelLodBatchItemResult(
-                        plan, previous.BuildResult, true, previous.Error));
+                        plan, previous.BuildResult, !resumed, previous.Error, resumed));
                     continue;
                 }
 
@@ -219,6 +250,8 @@ namespace LocalModels.VoxelBridge
                     var rejected = new VoxelLodBatchConversionOutcome(default, preflightError);
                     outcomes.Add(plan.ReuseKey, rejected);
                     items.Add(new VoxelLodBatchItemResult(plan, default, false, preflightError));
+                    CleanupBatchMemoryIfNeeded(
+                        ++processedUniqueSources, batchOptions.CleanupInterval, parent, profile);
                     continue;
                 }
 
@@ -232,9 +265,15 @@ namespace LocalModels.VoxelBridge
                     var outcome = new VoxelLodBatchConversionOutcome(build, null);
                     outcomes.Add(plan.ReuseKey, outcome);
                     items.Add(new VoxelLodBatchItemResult(plan, build));
+                    if (batchOptions.EnableCheckpoint)
+                        VoxelLodBatchCheckpointStore.Record(
+                            checkpointSignature, plan, build);
+                    CleanupBatchMemoryIfNeeded(
+                        ++processedUniqueSources, batchOptions.CleanupInterval, parent, profile);
                 }
                 catch (OperationCanceledException)
                 {
+                    VoxelLodBatchMemoryCleaner.ReleaseUnusedMemory(parent, profile);
                     return new VoxelLodBatchBuildResult(items, plans.Length, true, preflight);
                 }
                 catch (Exception exception)
@@ -242,10 +281,23 @@ namespace LocalModels.VoxelBridge
                     var outcome = new VoxelLodBatchConversionOutcome(default, exception.Message);
                     outcomes.Add(plan.ReuseKey, outcome);
                     items.Add(new VoxelLodBatchItemResult(plan, default, false, exception.Message));
+                    CleanupBatchMemoryIfNeeded(
+                        ++processedUniqueSources, batchOptions.CleanupInterval, parent, profile);
                 }
             }
 
+            if (batchOptions.EnableCheckpoint)
+                VoxelLodBatchCheckpointStore.Reset(checkpointSignature);
+            VoxelLodBatchMemoryCleaner.ReleaseUnusedMemory(parent, profile);
             return new VoxelLodBatchBuildResult(items, plans.Length, false, preflight);
+        }
+
+        private static void CleanupBatchMemoryIfNeeded(
+            int processedCount, int interval, params Object[] keepAlive)
+        {
+            interval = Mathf.Clamp(interval, 1, 50);
+            if (processedCount % interval == 0)
+                VoxelLodBatchMemoryCleaner.ReleaseUnusedMemory(keepAlive);
         }
 
         private static VoxelLodBatchSourcePlan CreateAutomaticBatchPlan(
@@ -348,60 +400,70 @@ namespace LocalModels.VoxelBridge
             string familyFolder = AssetDatabase.GenerateUniqueAssetPath(
                 $"{NormalizeAssetPath(options.ExportFolder)}/{safeName}_VoxelLOD");
             EnsureAssetFolder(familyFolder);
-            string manifestAssetPath = $"{familyFolder}/{safeName}.voxset.json";
-            string profilePath = AssetDatabase.GetAssetPath(profile);
-            var entries = new List<VoxelLodEntry>();
-            var voxPaths = new List<string>();
-
-            for (int lodIndex = 0; lodIndex < profile.LodCount; lodIndex++)
+            VoxelLodBatchRecovery.MarkFamilyIncomplete(familyFolder, source.name);
+            try
             {
-                int multiplier = profile.GetLodMultiplier(lodIndex);
-                float progressBase = (float)lodIndex / profile.LodCount;
-                var settings = new VoxelizationSettings
+                string manifestAssetPath = $"{familyFolder}/{safeName}.voxset.json";
+                string profilePath = AssetDatabase.GetAssetPath(profile);
+                var entries = new List<VoxelLodEntry>();
+                var voxPaths = new List<string>();
+
+                for (int lodIndex = 0; lodIndex < profile.LodCount; lodIndex++)
                 {
-                    VoxelSize = profile.BaseVoxelSize * multiplier,
-                    ChunkCellSize = profile.ChunkCellSize,
-                    Padding = profile.Padding,
-                    FillInterior = profile.FillInterior,
-                    ColorMode = options.ColorMode,
-                    SingleColor = options.SingleColor,
-                    AlphaCutoff = options.AlphaCutoff
+                    int multiplier = profile.GetLodMultiplier(lodIndex);
+                    float progressBase = (float)lodIndex / profile.LodCount;
+                    var settings = new VoxelizationSettings
+                    {
+                        VoxelSize = profile.BaseVoxelSize * multiplier,
+                        ChunkCellSize = profile.ChunkCellSize,
+                        Padding = profile.Padding,
+                        FillInterior = profile.FillInterior,
+                        ColorMode = options.ColorMode,
+                        SingleColor = options.SingleColor,
+                        AlphaCutoff = options.AlphaCutoff
+                    };
+                    VoxelizationResult result = MeshVoxelizer.Voxelize(source, settings, (p, message) =>
+                        cancelProgress != null && cancelProgress(
+                            progressBase + p / profile.LodCount,
+                            $"LOD {lodIndex}: {message}"));
+                    string voxPath = $"{familyFolder}/{safeName}_LOD{lodIndex}.vox";
+                    WriteGrid(voxPath, result.Grid, result.SourceBounds, source.name,
+                        AssetDatabase.GetAssetPath(source), familyId, manifestAssetPath, lodIndex, multiplier,
+                        VoxelLodGenerationMode.SourceMesh, null, profile);
+                    entries.Add(new VoxelLodEntry
+                    {
+                        lodIndex = lodIndex,
+                        multiplier = multiplier,
+                        generationMode = VoxelLodGenerationMode.SourceMesh,
+                        voxAssetPath = voxPath
+                    });
+                    voxPaths.Add(voxPath);
+                }
+
+                var manifest = new VoxelLodSetManifest
+                {
+                    familyId = familyId,
+                    sourceName = source.name,
+                    sourceAssetPath = AssetDatabase.GetAssetPath(source),
+                    baseVoxelSize = profile.BaseVoxelSize,
+                    chunkCellSize = profile.ChunkCellSize,
+                    profileAssetPath = profilePath,
+                    lods = entries.ToArray()
                 };
-                VoxelizationResult result = MeshVoxelizer.Voxelize(source, settings, (p, message) =>
-                    cancelProgress != null && cancelProgress(
-                        progressBase + p / profile.LodCount,
-                        $"LOD {lodIndex}: {message}"));
-                string voxPath = $"{familyFolder}/{safeName}_LOD{lodIndex}.vox";
-                WriteGrid(voxPath, result.Grid, result.SourceBounds, source.name,
-                    AssetDatabase.GetAssetPath(source), familyId, manifestAssetPath, lodIndex, multiplier,
-                    VoxelLodGenerationMode.SourceMesh, null, profile);
-                entries.Add(new VoxelLodEntry
-                {
-                    lodIndex = lodIndex,
-                    multiplier = multiplier,
-                    generationMode = VoxelLodGenerationMode.SourceMesh,
-                    voxAssetPath = voxPath
-                });
-                voxPaths.Add(voxPath);
+                WriteJsonAsset(manifestAssetPath, manifest);
+                ImportGeneratedVox(voxPaths);
+                string prefabPath = BuildPrefab(manifest, familyFolder);
+                manifest.prefabAssetPath = prefabPath;
+                WriteJsonAsset(manifestAssetPath, manifest);
+                AssetDatabase.ImportAsset(manifestAssetPath, ImportAssetOptions.ForceSynchronousImport);
+                VoxelLodBatchRecovery.CompleteFamily(familyFolder);
+                return new VoxelLodBuildResult(manifestAssetPath, prefabPath, voxPaths.ToArray());
             }
-
-            var manifest = new VoxelLodSetManifest
+            catch
             {
-                familyId = familyId,
-                sourceName = source.name,
-                sourceAssetPath = AssetDatabase.GetAssetPath(source),
-                baseVoxelSize = profile.BaseVoxelSize,
-                chunkCellSize = profile.ChunkCellSize,
-                profileAssetPath = profilePath,
-                lods = entries.ToArray()
-            };
-            WriteJsonAsset(manifestAssetPath, manifest);
-            ImportGeneratedVox(voxPaths);
-            string prefabPath = BuildPrefab(manifest, familyFolder);
-            manifest.prefabAssetPath = prefabPath;
-            WriteJsonAsset(manifestAssetPath, manifest);
-            AssetDatabase.ImportAsset(manifestAssetPath, ImportAssetOptions.ForceSynchronousImport);
-            return new VoxelLodBuildResult(manifestAssetPath, prefabPath, voxPaths.ToArray());
+                VoxelLodBatchRecovery.DeleteFamilyIfIncomplete(familyFolder);
+                throw;
+            }
         }
 
         public static VoxelLodBuildResult GenerateManual(

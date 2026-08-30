@@ -508,6 +508,12 @@ namespace LocalModels.VoxelBridge.Tests
                     Is.EqualTo(batch.Items[1].BuildResult.PrefabAssetPath));
                 Assert.That(AssetDatabase.LoadAssetAtPath<GameObject>(
                     batch.Items[1].BuildResult.PrefabAssetPath), Is.Not.Null);
+                Assert.That(VoxelLodBatchRecovery.FindIncompleteFamilies(options.ExportFolder),
+                    Is.Empty);
+                Assert.That(Directory.GetDirectories(
+                    VoxelLodPipeline.AssetPathToAbsolute(options.ExportFolder)),
+                    Has.Length.EqualTo(1),
+                    "La fuente inválida no debe dejar una carpeta de familia vacía.");
 
                 VoxelLodBatchPlacementResult incompletePlacement =
                     VoxelLodBatchScenePlacement.Place(parent, batch, true);
@@ -673,6 +679,121 @@ namespace LocalModels.VoxelBridge.Tests
             {
                 if (parent != null) Object.DestroyImmediate(parent);
                 if (sourceObject != null) Object.DestroyImmediate(sourceObject);
+                if (profile != null) Object.DestroyImmediate(profile);
+                AssetDatabase.DeleteAsset(testRoot);
+            }
+        }
+
+        [Test]
+        public void BatchRecovery_DeletesOnlyFamiliesMarkedAsIncomplete()
+        {
+            const string testRoot = "Assets/VoxelBridgeRecoveryTestOutput";
+            const string markedFamily = testRoot + "/MarkedFamily";
+            const string completeFamily = testRoot + "/CompleteFamily";
+            try
+            {
+                VoxelLodPipeline.EnsureAssetFolder(markedFamily);
+                VoxelLodPipeline.EnsureAssetFolder(completeFamily);
+                VoxelLodBatchRecovery.MarkFamilyIncomplete(markedFamily, "InterruptedSource");
+
+                string[] incomplete = VoxelLodBatchRecovery.FindIncompleteFamilies(testRoot);
+                Assert.That(incomplete, Is.EqualTo(new[] { markedFamily }));
+
+                int cleaned = VoxelLodBatchRecovery.CleanupIncompleteFamilies(testRoot);
+                Assert.That(cleaned, Is.EqualTo(1));
+                Assert.That(AssetDatabase.IsValidFolder(markedFamily), Is.False);
+                Assert.That(AssetDatabase.IsValidFolder(completeFamily), Is.True);
+            }
+            finally
+            {
+                AssetDatabase.DeleteAsset(testRoot);
+            }
+        }
+
+        [Test]
+        public void AutomaticBatch_ResumesCompletedFamiliesFromCheckpoint()
+        {
+            if (!VoxelImporterIntegration.IsInstalled)
+                Assert.Ignore("Voxel Importer es opcional y no está instalado.");
+
+            const string testRoot = "Assets/VoxelBridgeCheckpointTestOutput";
+            GameObject firstSource = null;
+            GameObject secondSource = null;
+            GameObject parent = null;
+            VoxelStyleProfile profile = null;
+            string checkpointSignature = null;
+            try
+            {
+                VoxelLodPipeline.EnsureAssetFolder(testRoot);
+                firstSource = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                firstSource.name = "CheckpointCube";
+                GameObject firstPrefab = PrefabUtility.SaveAsPrefabAsset(
+                    firstSource, testRoot + "/CheckpointCube.prefab");
+                Object.DestroyImmediate(firstSource);
+                firstSource = null;
+
+                secondSource = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                secondSource.name = "CheckpointSphere";
+                GameObject secondPrefab = PrefabUtility.SaveAsPrefabAsset(
+                    secondSource, testRoot + "/CheckpointSphere.prefab");
+                Object.DestroyImmediate(secondSource);
+                secondSource = null;
+
+                parent = new GameObject("CheckpointParent");
+                PrefabUtility.InstantiatePrefab(firstPrefab, parent.transform);
+                PrefabUtility.InstantiatePrefab(secondPrefab, parent.transform);
+                profile = ScriptableObject.CreateInstance<VoxelStyleProfile>();
+                var serializedProfile = new SerializedObject(profile);
+                serializedProfile.FindProperty("baseVoxelSize").floatValue = 0.5f;
+                serializedProfile.FindProperty("fillInterior").boolValue = false;
+                serializedProfile.FindProperty("chunkCellSize").intValue = 16;
+                SerializedProperty multipliers = serializedProfile.FindProperty("lodMultipliers");
+                multipliers.arraySize = 1;
+                multipliers.GetArrayElementAtIndex(0).intValue = 1;
+                serializedProfile.ApplyModifiedPropertiesWithoutUndo();
+
+                var lodOptions = new VoxelLodBuildOptions
+                {
+                    ColorMode = VoxelColorMode.SingleColor,
+                    SingleColor = new Color32(80, 160, 220, 255),
+                    ExportFolder = testRoot + "/Exports"
+                };
+                var batchOptions = new VoxelLodBatchOptions
+                {
+                    EnableCheckpoint = true,
+                    ResumeInterruptedBatch = true,
+                    CleanupInterval = 1
+                };
+                VoxelLodBatchSourcePlan[] plans =
+                    VoxelLodPipeline.GetAutomaticBatchPlans(parent, batchOptions);
+                checkpointSignature = VoxelLodBatchIdentity.CreateBatchSignature(
+                    plans, profile, lodOptions, batchOptions);
+
+                VoxelLodBatchBuildResult interrupted =
+                    VoxelLodPipeline.GenerateAutomaticBatch(
+                        parent, profile, lodOptions,
+                        (_, message) => message.StartsWith("Modelo 2 de 2: preparando"),
+                        batchOptions);
+                Assert.That(interrupted.Cancelled, Is.True);
+                Assert.That(interrupted.CreatedFamilyCount, Is.EqualTo(1));
+                Assert.That(VoxelLodBatchCheckpointStore.Exists(checkpointSignature), Is.True);
+
+                batchOptions.Preflight = interrupted.Preflight;
+                VoxelLodBatchBuildResult resumed = VoxelLodPipeline.GenerateAutomaticBatch(
+                    parent, profile, lodOptions, null, batchOptions);
+                Assert.That(resumed.Cancelled, Is.False);
+                Assert.That(resumed.SucceededCount, Is.EqualTo(2));
+                Assert.That(resumed.ResumedCount, Is.EqualTo(1));
+                Assert.That(resumed.CreatedFamilyCount, Is.EqualTo(1));
+                Assert.That(VoxelLodBatchCheckpointStore.Exists(checkpointSignature), Is.False);
+            }
+            finally
+            {
+                if (!string.IsNullOrEmpty(checkpointSignature))
+                    VoxelLodBatchCheckpointStore.Reset(checkpointSignature);
+                if (parent != null) Object.DestroyImmediate(parent);
+                if (firstSource != null) Object.DestroyImmediate(firstSource);
+                if (secondSource != null) Object.DestroyImmediate(secondSource);
                 if (profile != null) Object.DestroyImmediate(profile);
                 AssetDatabase.DeleteAsset(testRoot);
             }

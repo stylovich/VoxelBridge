@@ -23,6 +23,8 @@ namespace LocalModels.VoxelBridge
         [SerializeField] private bool batchDisableOriginalRoot = true;
         [SerializeField, Min(256)] private int batchMemoryBudgetMb = 1024;
         [SerializeField] private bool batchSkipOverMemoryBudget = true;
+        [SerializeField] private bool batchResumeInterrupted = true;
+        [SerializeField, Range(1, 25)] private int batchCleanupInterval = 1;
         private VoxelLodBatchPreflight batchPreflight;
         private VoxelStyleProfile styleProfile;
         private VoxelImpostorProfile impostorProfile;
@@ -287,6 +289,24 @@ namespace LocalModels.VoxelBridge
                 new GUIContent("Omitir modelos sobre presupuesto",
                     "Evita iniciar fuentes cuyo pico estimado supera el límite. Se registran como error y el resto del lote continúa."),
                 batchSkipOverMemoryBudget);
+            batchResumeInterrupted = EditorGUILayout.Toggle(
+                new GUIContent("Reanudar lote interrumpido",
+                    "Recupera familias completas registradas en Library y continúa con las fuentes pendientes. El checkpoint se descarta al terminar el lote."),
+                batchResumeInterrupted);
+            batchCleanupInterval = EditorGUILayout.IntSlider(
+                new GUIContent("Limpiar cada N familias",
+                    "Libera assets, texturas temporales y memoria administrada después de este número de fuentes únicas. 1 es el valor más seguro; 2–4 puede ser algo más rápido."),
+                batchCleanupInterval, 1, 25);
+            EditorGUILayout.HelpBox(
+                "Cada familia terminada se registra fuera de Assets. Si Unity se cierra, la siguiente ejecución con la misma fuente y configuración reutiliza esas familias. Las carpetas parciales marcadas por la herramienta se eliminan antes de continuar.",
+                MessageType.None);
+            if (GUILayout.Button("Buscar y limpiar salidas incompletas"))
+            {
+                int cleaned = VoxelLodBatchRecovery.CleanupIncompleteFamilies(exportFolder);
+                status = cleaned > 0
+                    ? $"Se eliminaron {cleaned} familia(s) incompletas marcadas por Voxel Bridge."
+                    : "No se encontraron familias incompletas marcadas por Voxel Bridge.";
+            }
             using (new EditorGUI.DisabledScope(batchPlans.All(plan => plan.Ignored) ||
                                                styleProfile == null ||
                                                !styleProfile.TryValidate(out _)))
@@ -656,6 +676,9 @@ namespace LocalModels.VoxelBridge
             MaximumEstimatedMemoryBytes = Mathf.Max(256, batchMemoryBudgetMb) *
                                           VoxelLodBatchAnalyzer.Mebibyte,
             SkipSourcesOverMemoryBudget = batchSkipOverMemoryBudget,
+            EnableCheckpoint = true,
+            ResumeInterruptedBatch = batchResumeInterrupted,
+            CleanupInterval = batchCleanupInterval,
             Preflight = batchPreflight
         };
 
@@ -777,6 +800,7 @@ namespace LocalModels.VoxelBridge
                     ? $"Lote cancelado; quedan {pendingCount} objeto(s) sin procesar."
                     : "Lote terminado.";
                 status = $"{completion} {result.CreatedFamilyCount} familia(s) creadas, " +
+                         $"{result.ResumedCount} recuperadas desde checkpoint, " +
                          $"{result.ReusedCount} instancia(s) reutilizadas, {result.FailedCount} con errores y " +
                          $"{result.IgnoredCount} ignoradas.";
                 if (placement.HasValue)
