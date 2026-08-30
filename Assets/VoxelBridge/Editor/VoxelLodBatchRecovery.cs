@@ -70,6 +70,7 @@ namespace LocalModels.VoxelBridge
             foreach (Transform transform in root.GetComponentsInChildren<Transform>(true))
             {
                 builder.Append('|').Append(GetHierarchyPath(root.transform, transform));
+                builder.Append(':').Append(transform.gameObject.activeSelf);
                 AppendVector(builder, transform.localPosition);
                 AppendVector(builder, transform.localEulerAngles);
                 AppendVector(builder, transform.localScale);
@@ -89,7 +90,7 @@ namespace LocalModels.VoxelBridge
             VoxelLodBatchSourcePlan[] plans, VoxelStyleProfile profile,
             VoxelLodBuildOptions lodOptions, VoxelLodBatchOptions batchOptions)
         {
-            var builder = new StringBuilder("VoxelLodBatch:v1");
+            var builder = new StringBuilder("VoxelLodBatch:v2");
             builder.Append('|').Append(profile != null ? GetStableObjectKey(profile) : "profile:null");
             if (profile != null)
             {
@@ -106,11 +107,19 @@ namespace LocalModels.VoxelBridge
                     .Append(lodOptions.SingleColor.g).Append(',').Append(lodOptions.SingleColor.b)
                     .Append(',').Append(lodOptions.SingleColor.a);
                 builder.Append('|').Append(lodOptions.AlphaCutoff.ToString("R"));
+                builder.Append('|').Append(batchOptions == null
+                    ? lodOptions.IncludeInactiveObjects
+                    : !batchOptions.IgnoreInactiveObjects);
             }
             if (batchOptions != null)
             {
                 builder.Append('|').Append(batchOptions.ReusePrefabSources);
                 builder.Append('|').Append(batchOptions.ModifiedPrefabHandling);
+                builder.Append('|').Append(batchOptions.MaximumEstimatedMemoryBytes);
+                builder.Append('|').Append(batchOptions.SkipSourcesOverMemoryBudget);
+                builder.Append('|').Append(batchOptions.AdaptInitialVoxelSize);
+                builder.Append('|').Append(batchOptions.MaximumInitialLodIndex);
+                builder.Append('|').Append(batchOptions.IgnoreInactiveObjects);
             }
             foreach (VoxelLodBatchSourcePlan plan in plans ?? Array.Empty<VoxelLodBatchSourcePlan>())
             {

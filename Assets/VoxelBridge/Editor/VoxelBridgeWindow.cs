@@ -24,6 +24,9 @@ namespace LocalModels.VoxelBridge
         [SerializeField] private bool batchDisableOriginalRoot = true;
         [SerializeField, Min(256)] private int batchMemoryBudgetMb = 1024;
         [SerializeField] private bool batchSkipOverMemoryBudget = true;
+        [SerializeField] private bool batchAdaptInitialVoxelSize = true;
+        [SerializeField, Range(0, 7)] private int batchMaximumInitialLodIndex = 2;
+        [SerializeField] private bool batchIgnoreInactiveObjects = true;
         [SerializeField] private bool batchResumeInterrupted = true;
         [SerializeField, Range(1, 25)] private int batchCleanupInterval = 1;
         [SerializeField] private bool batchShowPlanDetails;
@@ -171,6 +174,12 @@ namespace LocalModels.VoxelBridge
             }
         }
 
+        private void OnHierarchyChange()
+        {
+            batchPreflight = null;
+            Repaint();
+        }
+
         private void OnGUI()
         {
             scroll = EditorGUILayout.BeginScrollView(scroll);
@@ -235,11 +244,15 @@ namespace LocalModels.VoxelBridge
             EditorGUILayout.Space(12);
             EditorGUILayout.LabelField("Generación por lotes", EditorStyles.miniBoldLabel);
             EditorGUILayout.HelpBox(
-                "Convierte cada hijo directo del padre en una familia independiente. Cada familia incluye las mallas de todos los descendientes de ese hijo, incluso si están inactivos. Los hijos vacíos se omiten.",
+                "Convierte cada hijo directo del padre en una familia independiente. Cada familia incluye las mallas de sus descendientes según la opción de objetos desactivados. Los hijos sin mallas utilizables se omiten.",
                 MessageType.Info);
             batchParent = (GameObject)EditorGUILayout.ObjectField(
                 new GUIContent("Objeto padre", "Objeto de escena o prefab cuyos hijos directos se procesarán por separado"),
                 batchParent, typeof(GameObject), true);
+            batchIgnoreInactiveObjects = EditorGUILayout.Toggle(
+                new GUIContent("Ignorar objetos desactivados",
+                    "Omite hijos directos desactivados y mallas situadas bajo descendientes desactivados. El estado del padre del lote no afecta esta evaluación."),
+                batchIgnoreInactiveObjects);
             batchReusePrefabSources = EditorGUILayout.Toggle(
                 new GUIContent("Reutilizar prefab de origen",
                     "Convierte una sola vez las instancias sin overrides que procedan del mismo prefab y reutiliza esa familia."),
@@ -260,13 +273,18 @@ namespace LocalModels.VoxelBridge
             VoxelLodBatchSourcePlan[] batchPlans =
                 VoxelLodPipeline.GetAutomaticBatchPlans(batchParent, previewOptions);
             string preflightSignature = VoxelLodBatchAnalyzer.CreateSignature(
-                batchPlans, styleProfile, CreateLodOptions(), previewOptions);
+                batchPlans, styleProfile, CreateBatchLodOptions(), previewOptions);
             if (batchPreflight != null && batchPreflight.Signature != preflightSignature)
                 batchPreflight = null;
             int directChildCount = batchParent != null ? batchParent.transform.childCount : 0;
             if (batchParent != null)
             {
-                int skippedCount = directChildCount - batchPlans.Length;
+                int inactiveDirectChildCount = batchIgnoreInactiveObjects
+                    ? Enumerable.Range(0, directChildCount).Count(index =>
+                        !batchParent.transform.GetChild(index).gameObject.activeSelf)
+                    : 0;
+                int skippedCount = Mathf.Max(
+                    0, directChildCount - batchPlans.Length - inactiveDirectChildCount);
                 int ignoredCount = batchPlans.Count(plan => plan.Ignored);
                 int conversionCount = batchPlans.Where(plan => !plan.Ignored)
                     .Select(plan => plan.ReuseKey)
@@ -277,7 +295,8 @@ namespace LocalModels.VoxelBridge
                 EditorGUILayout.HelpBox(
                     $"{batchPlans.Length} objeto(s) con malla · {conversionCount} conversión(es) · " +
                     $"{reuseCount} reutilización(es) · {modifiedCount} instancia(s) modificadas · " +
-                    $"{ignoredCount} ignoradas · {skippedCount} hijo(s) sin malla.",
+                    $"{ignoredCount} ignoradas · {inactiveDirectChildCount} desactivadas omitidas · " +
+                    $"{skippedCount} sin malla activa.",
                     batchPlans.Any(plan => !plan.Ignored) ? MessageType.None : MessageType.Warning);
 
                 batchShowPlanDetails = EditorGUILayout.Foldout(
@@ -337,10 +356,37 @@ namespace LocalModels.VoxelBridge
                 new GUIContent("Presupuesto por modelo (MiB)",
                     "Límite estimado de memoria temporal para una fuente. El valor debe ajustarse según la memoria disponible y la carga del Editor."),
                 batchMemoryBudgetMb), 256, 8192);
-            batchSkipOverMemoryBudget = EditorGUILayout.Toggle(
-                new GUIContent("Omitir modelos sobre presupuesto",
-                    "Evita iniciar fuentes cuyo pico estimado supera el límite. Se registran como error y el resto del lote continúa."),
-                batchSkipOverMemoryBudget);
+            batchAdaptInitialVoxelSize = EditorGUILayout.Toggle(
+                new GUIContent("Adaptar resolución automáticamente",
+                    "Prueba tamaños voxel equivalentes a los LOD del perfil y usa el menor que cumple el límite de rejilla y el presupuesto de memoria."),
+                batchAdaptInitialVoxelSize);
+            if (batchAdaptInitialVoxelSize && styleProfile != null && styleProfile.LodCount > 0)
+            {
+                batchMaximumInitialLodIndex = Mathf.Clamp(
+                    batchMaximumInitialLodIndex, 0, styleProfile.LodCount - 1);
+                string[] initialLodLabels = Enumerable.Range(0, styleProfile.LodCount)
+                    .Select(index =>
+                        $"LOD{index} · ×{styleProfile.GetLodMultiplier(index)} · " +
+                        $"{styleProfile.BaseVoxelSize * styleProfile.GetLodMultiplier(index):0.###} m")
+                    .ToArray();
+                batchMaximumInitialLodIndex = EditorGUILayout.Popup(
+                    new GUIContent("Base máxima permitida",
+                        "Último tamaño base que puede seleccionar la adaptación automática."),
+                    batchMaximumInitialLodIndex, initialLodLabels);
+                EditorGUILayout.HelpBox(
+                    "Cada fuente usa la base más fina que cumple los límites. Las fuentes que todavía excedan la rejilla o el presupuesto con la base máxima se omiten.",
+                    MessageType.None);
+            }
+            using (new EditorGUI.DisabledScope(batchAdaptInitialVoxelSize))
+            {
+                bool skipOverBudget = EditorGUILayout.Toggle(
+                    new GUIContent("Omitir modelos sobre presupuesto",
+                        batchAdaptInitialVoxelSize
+                            ? "La adaptación automática siempre omite las fuentes que no caben con la base máxima."
+                            : "Evita iniciar fuentes cuyo pico estimado supera el límite. Se registran como error y el resto del lote continúa."),
+                    batchAdaptInitialVoxelSize || batchSkipOverMemoryBudget);
+                if (!batchAdaptInitialVoxelSize) batchSkipOverMemoryBudget = skipOverBudget;
+            }
             batchResumeInterrupted = EditorGUILayout.Toggle(
                 new GUIContent("Reanudar lote interrumpido",
                     "Recupera familias completas registradas en Library y continúa con las fuentes pendientes. El checkpoint se descarta al terminar el lote."),
@@ -375,16 +421,17 @@ namespace LocalModels.VoxelBridge
                     $"{batchPreflight.UniqueConversionCount} fuente(s) única(s) · " +
                     $"pico estimado {VoxelLodBatchAnalyzer.FormatBytes(batchPreflight.EstimatedPeakBytes)} · " +
                     $"{batchPreflight.TotalDenseCells:N0} celdas entre todos los LODs · " +
+                    $"{batchPreflight.AdaptedCount} con base adaptada · " +
                     $"{batchPreflight.OverBudgetCount} sobre presupuesto · " +
                     $"{batchPreflight.InvalidCount} inválidas.", analysisType);
                 foreach (VoxelLodBatchSourceEstimate estimate in batchPreflight.Sources
-                             .Where(item => item.Risk is VoxelLodBatchMemoryRisk.OverBudget or
-                                 VoxelLodBatchMemoryRisk.Invalid)
-                             .Take(6))
+                             .Where(item => item.WasAdapted ||
+                                            item.Risk is VoxelLodBatchMemoryRisk.OverBudget or
+                                                VoxelLodBatchMemoryRisk.Invalid)
+                             .Take(8))
                     EditorGUILayout.LabelField(
-                        $"• {estimate.SourceName}: " + (estimate.IsValid
-                            ? VoxelLodBatchAnalyzer.FormatBytes(estimate.EstimatedPeakBytes)
-                            : estimate.Error), EditorStyles.wordWrappedMiniLabel);
+                        $"• {estimate.SourceName}: {FormatBatchEstimate(estimate)}",
+                        EditorStyles.wordWrappedMiniLabel);
             }
 
             bool canPlaceBatch = VoxelLodBatchScenePlacement.CanPlace(batchParent);
@@ -408,7 +455,11 @@ namespace LocalModels.VoxelBridge
                 EditorGUILayout.HelpBox(
                     "La raíz voxel conserva Transform, layer, estado activo y flags Static, pero no copia scripts, colliders ni otros componentes. Usa el reemplazo automático solo con una raíz visual.",
                     MessageType.Warning);
-                if (directChildCount > batchPlans.Length)
+                int inactiveDirectChildren = batchIgnoreInactiveObjects && batchParent != null
+                    ? Enumerable.Range(0, directChildCount).Count(index =>
+                        !batchParent.transform.GetChild(index).gameObject.activeSelf)
+                    : 0;
+                if (directChildCount > batchPlans.Length + inactiveDirectChildren)
                     EditorGUILayout.HelpBox(
                         "Hay hijos directos sin malla. Se creará la raíz voxel desactivada y no se desactivará la original para evitar perder objetos o componentes no convertidos.",
                         MessageType.Warning);
@@ -721,13 +772,36 @@ namespace LocalModels.VoxelBridge
             ExportFolder = exportFolder
         };
 
+        private VoxelLodBuildOptions CreateBatchLodOptions()
+        {
+            VoxelLodBuildOptions options = CreateLodOptions();
+            options.IncludeInactiveObjects = !batchIgnoreInactiveObjects;
+            return options;
+        }
+
+        private static string FormatBatchEstimate(VoxelLodBatchSourceEstimate estimate)
+        {
+            if (!estimate.IsValid) return estimate.Error;
+            string voxelSize = estimate.LodPlans.Length > 0
+                ? $" · {estimate.LodPlans[0].VoxelSize:0.###} m"
+                : string.Empty;
+            string budget = estimate.IsOverBudget ? " · sobre presupuesto" : string.Empty;
+            return $"base LOD{estimate.InitialLodIndex} · ×{estimate.InitialVoxelMultiplier}" +
+                   $"{voxelSize} · {VoxelLodBatchAnalyzer.FormatBytes(estimate.EstimatedPeakBytes)}" +
+                   budget;
+        }
+
         private VoxelLodBatchOptions CreateBatchOptions() => new()
         {
             ReusePrefabSources = batchReusePrefabSources,
             ModifiedPrefabHandling = batchModifiedPrefabHandling,
             MaximumEstimatedMemoryBytes = Mathf.Max(256, batchMemoryBudgetMb) *
                                           VoxelLodBatchAnalyzer.Mebibyte,
-            SkipSourcesOverMemoryBudget = batchSkipOverMemoryBudget,
+            SkipSourcesOverMemoryBudget = batchAdaptInitialVoxelSize ||
+                                          batchSkipOverMemoryBudget,
+            AdaptInitialVoxelSize = batchAdaptInitialVoxelSize,
+            MaximumInitialLodIndex = batchMaximumInitialLodIndex,
+            IgnoreInactiveObjects = batchIgnoreInactiveObjects,
             EnableCheckpoint = true,
             ResumeInterruptedBatch = batchResumeInterrupted,
             CleanupInterval = batchCleanupInterval,
@@ -743,7 +817,7 @@ namespace LocalModels.VoxelBridge
                 VoxelLodBatchSourcePlan[] plans =
                     VoxelLodPipeline.GetAutomaticBatchPlans(batchParent, batchOptions);
                 batchPreflight = VoxelLodBatchAnalyzer.Analyze(
-                    plans, styleProfile, CreateLodOptions(), batchOptions,
+                    plans, styleProfile, CreateBatchLodOptions(), batchOptions,
                     (progress, message) => EditorUtility.DisplayCancelableProgressBar(
                         "Voxel Bridge · Análisis de memoria", message, progress));
                 status = $"Análisis terminado: {batchPreflight.UniqueConversionCount} fuente(s) únicas, " +
@@ -805,18 +879,20 @@ namespace LocalModels.VoxelBridge
                 VoxelLodBatchOptions batchOptions = CreateBatchOptions();
                 VoxelLodBatchSourcePlan[] plans =
                     VoxelLodPipeline.GetAutomaticBatchPlans(batchParent, batchOptions);
+                VoxelLodBuildOptions lodOptions = CreateBatchLodOptions();
                 string signature = VoxelLodBatchAnalyzer.CreateSignature(
-                    plans, styleProfile, CreateLodOptions(), batchOptions);
+                    plans, styleProfile, lodOptions, batchOptions);
                 if (batchPreflight == null || batchPreflight.Signature != signature)
                 {
                     batchOptions.Preflight = null;
                     batchPreflight = VoxelLodBatchAnalyzer.Analyze(
-                        plans, styleProfile, CreateLodOptions(), batchOptions,
+                        plans, styleProfile, lodOptions, batchOptions,
                         (progress, message) => EditorUtility.DisplayCancelableProgressBar(
                             "Voxel Bridge · Análisis previo", message, progress));
                 }
                 batchOptions.Preflight = batchPreflight;
-                if (!batchSkipOverMemoryBudget && batchPreflight.OverBudgetCount > 0 &&
+                if (!batchOptions.SkipSourcesOverMemoryBudget &&
+                    batchPreflight.OverBudgetCount > 0 &&
                     !EditorUtility.DisplayDialog("Voxel Bridge · Riesgo de memoria",
                         $"{batchPreflight.OverBudgetCount} fuente(s) superan el presupuesto de " +
                         $"{batchMemoryBudgetMb} MiB. Continuar puede cerrar Unity por falta de memoria.",
@@ -826,7 +902,7 @@ namespace LocalModels.VoxelBridge
                     return;
                 }
                 VoxelLodBatchBuildResult result = VoxelLodPipeline.GenerateAutomaticBatch(
-                    batchParent, styleProfile, CreateLodOptions(),
+                    batchParent, styleProfile, lodOptions,
                     (progress, message) => EditorUtility.DisplayCancelableProgressBar(
                         "Voxel Bridge · Generación por lotes", message, progress),
                     batchOptions);

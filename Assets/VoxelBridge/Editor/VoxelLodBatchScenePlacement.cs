@@ -84,7 +84,8 @@ namespace LocalModels.VoxelBridge
             }
 
             bool coversEveryDirectChild =
-                sourceParent.transform.childCount == batch.CandidateCount;
+                sourceParent.transform.childCount == batch.CandidateCount +
+                batch.ExcludedInactiveDirectChildCount;
             bool originalRootDisabled = disableOriginalRoot && batch.IsComplete &&
                                         coversEveryDirectChild;
             if (originalRootDisabled)

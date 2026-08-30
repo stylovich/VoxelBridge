@@ -12,6 +12,7 @@ namespace LocalModels.VoxelBridge
         public int ChunkCellSize = 256;
         public int Padding = 1;
         public bool FillInterior = true;
+        public bool IncludeInactiveObjects = true;
         public VoxelColorMode ColorMode = VoxelColorMode.MaterialAndTexture;
         public Color32 SingleColor = new Color32(180, 180, 180, 255);
         public float AlphaCutoff = 0.1f;
@@ -48,7 +49,7 @@ namespace LocalModels.VoxelBridge
             if (!physicalSizeMode && settings.Resolution <= settings.Padding * 2)
                 throw new ArgumentException("La resolución debe ser mayor que el padding de ambos lados.");
 
-            List<MeshSource> sources = ExtractMeshes(source);
+            List<MeshSource> sources = ExtractMeshes(source, settings.IncludeInactiveObjects);
             if (sources.Count == 0)
                 throw new InvalidOperationException("El objeto seleccionado no contiene MeshFilter ni SkinnedMeshRenderer.");
 
@@ -147,10 +148,11 @@ namespace LocalModels.VoxelBridge
             }
         }
 
-        internal static Bounds GetSourceBounds(UnityEngine.Object source)
+        internal static Bounds GetSourceBounds(
+            UnityEngine.Object source, bool includeInactiveObjects = true)
         {
             if (source == null) throw new ArgumentNullException(nameof(source));
-            List<MeshSource> sources = ExtractMeshes(source);
+            List<MeshSource> sources = ExtractMeshes(source, includeInactiveObjects);
             try
             {
                 if (sources.Count == 0)
@@ -165,7 +167,8 @@ namespace LocalModels.VoxelBridge
             }
         }
 
-        private static List<MeshSource> ExtractMeshes(UnityEngine.Object source)
+        private static List<MeshSource> ExtractMeshes(
+            UnityEngine.Object source, bool includeInactiveObjects)
         {
             var result = new List<MeshSource>();
             if (source is Mesh mesh)
@@ -190,7 +193,10 @@ namespace LocalModels.VoxelBridge
                 Matrix4x4 toRoot = workingRoot.transform.worldToLocalMatrix;
                 foreach (MeshFilter filter in workingRoot.GetComponentsInChildren<MeshFilter>(true))
                 {
-                    if (filter.sharedMesh == null) continue;
+                    if (filter.sharedMesh == null ||
+                        (!includeInactiveObjects &&
+                         !IsActiveWithinRoot(workingRoot.transform, filter.transform)))
+                        continue;
                     var renderer = filter.GetComponent<MeshRenderer>();
                     result.Add(CreateMeshSource(filter.sharedMesh, toRoot * filter.transform.localToWorldMatrix,
                         renderer != null ? renderer.sharedMaterials : null, false));
@@ -198,7 +204,10 @@ namespace LocalModels.VoxelBridge
 
                 foreach (SkinnedMeshRenderer renderer in workingRoot.GetComponentsInChildren<SkinnedMeshRenderer>(true))
                 {
-                    if (renderer.sharedMesh == null) continue;
+                    if (renderer.sharedMesh == null ||
+                        (!includeInactiveObjects &&
+                         !IsActiveWithinRoot(workingRoot.transform, renderer.transform)))
+                        continue;
                     var baked = new Mesh { name = renderer.sharedMesh.name + "_VoxelBake" };
                     renderer.BakeMesh(baked);
                     result.Add(CreateMeshSource(baked, toRoot * renderer.transform.localToWorldMatrix,
@@ -210,6 +219,18 @@ namespace LocalModels.VoxelBridge
                 if (isAsset) UnityEngine.Object.DestroyImmediate(workingRoot);
             }
             return result;
+        }
+
+        internal static bool IsActiveWithinRoot(Transform root, Transform current)
+        {
+            if (root == null || current == null) return false;
+            while (current != null)
+            {
+                if (!current.gameObject.activeSelf) return false;
+                if (current == root) return true;
+                current = current.parent;
+            }
+            return false;
         }
 
         private static MeshSource CreateMeshSource(Mesh mesh, Matrix4x4 transform, Material[] materials, bool ownsMesh)

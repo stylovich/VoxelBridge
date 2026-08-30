@@ -86,11 +86,12 @@ namespace LocalModels.VoxelBridge
     [Serializable]
     internal sealed class VoxelLodSetManifest
     {
-        public int formatVersion = 1;
+        public int formatVersion = 2;
         public string familyId;
         public string sourceName;
         public string sourceAssetPath;
         public float baseVoxelSize;
+        public int initialVoxelMultiplier = 1;
         public int chunkCellSize;
         public string profileAssetPath;
         public string prefabAssetPath;

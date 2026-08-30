@@ -406,7 +406,7 @@ namespace LocalModels.VoxelBridge.Tests
         }
 
         [Test]
-        public void AutomaticBatchSources_UsesDirectChildrenAsFamiliesAndIncludesNestedMeshes()
+        public void AutomaticBatchSources_IgnoresInactiveObjectsByDefaultAndCanIncludeThem()
         {
             var parent = new GameObject("BatchParent");
             try
@@ -423,14 +423,30 @@ namespace LocalModels.VoxelBridge.Tests
                 inactiveCube.transform.SetParent(inactiveFamily.transform, false);
                 inactiveFamily.SetActive(false);
 
+                GameObject inactiveNestedCube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                inactiveNestedCube.name = "InactiveNestedGeometry";
+                inactiveNestedCube.transform.SetParent(nestedFamily.transform, false);
+                inactiveNestedCube.transform.localPosition = Vector3.right * 100f;
+                inactiveNestedCube.SetActive(false);
+
                 var emptyFamily = new GameObject("EmptyFamily");
                 emptyFamily.transform.SetParent(parent.transform, false);
 
                 GameObject[] sources = VoxelLodPipeline.GetAutomaticBatchSources(parent);
+                GameObject[] sourcesIncludingInactive = VoxelLodPipeline.GetAutomaticBatchSources(
+                    parent, new VoxelLodBatchOptions { IgnoreInactiveObjects = false });
+                Bounds activeBounds = MeshVoxelizer.GetSourceBounds(
+                    nestedFamily, includeInactiveObjects: false);
+                Bounds allBounds = MeshVoxelizer.GetSourceBounds(
+                    nestedFamily, includeInactiveObjects: true);
 
-                Assert.That(sources, Is.EqualTo(new[] { nestedFamily, inactiveFamily }));
+                Assert.That(sources, Is.EqualTo(new[] { nestedFamily }));
+                Assert.That(sourcesIncludingInactive,
+                    Is.EqualTo(new[] { nestedFamily, inactiveFamily }));
                 Assert.That(sources.Contains(nestedCube), Is.False);
                 Assert.That(sources.Contains(emptyFamily), Is.False);
+                Assert.That(activeBounds.size.x, Is.LessThan(2f));
+                Assert.That(allBounds.size.x, Is.GreaterThan(50f));
             }
             finally
             {
@@ -759,6 +775,9 @@ namespace LocalModels.VoxelBridge.Tests
                 Assert.That(preflight.ReusedCount, Is.EqualTo(1));
                 Assert.That(preflight.Sources[0].LodPlans, Has.Length.EqualTo(2));
                 Assert.That(preflight.Sources[0].EstimatedPeakBytes, Is.GreaterThan(0));
+                Assert.That(preflight.Sources[0].InitialLodIndex, Is.EqualTo(1));
+                Assert.That(preflight.Sources[0].InitialVoxelMultiplier, Is.EqualTo(2));
+                Assert.That(preflight.AdaptedCount, Is.EqualTo(1));
                 Assert.That(preflight.Sources[0].Risk,
                     Is.EqualTo(VoxelLodBatchMemoryRisk.OverBudget));
             }
@@ -768,6 +787,71 @@ namespace LocalModels.VoxelBridge.Tests
                 if (sourceObject != null) Object.DestroyImmediate(sourceObject);
                 if (profile != null) Object.DestroyImmediate(profile);
                 AssetDatabase.DeleteAsset(testRoot);
+            }
+        }
+
+        [Test]
+        public void BatchPreflight_UsesSmallestAllowedLodBaseThatFitsBudget()
+        {
+            GameObject parent = null;
+            VoxelStyleProfile profile = null;
+            try
+            {
+                parent = new GameObject("AdaptivePreflightParent");
+                GameObject cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                cube.transform.SetParent(parent.transform, false);
+                profile = ScriptableObject.CreateInstance<VoxelStyleProfile>();
+                var serializedProfile = new SerializedObject(profile);
+                serializedProfile.FindProperty("baseVoxelSize").floatValue = 0.05f;
+                SerializedProperty multipliers = serializedProfile.FindProperty("lodMultipliers");
+                multipliers.arraySize = 3;
+                multipliers.GetArrayElementAtIndex(0).intValue = 1;
+                multipliers.GetArrayElementAtIndex(1).intValue = 2;
+                multipliers.GetArrayElementAtIndex(2).intValue = 4;
+                serializedProfile.ApplyModifiedPropertiesWithoutUndo();
+
+                var lodOptions = new VoxelLodBuildOptions
+                {
+                    ColorMode = VoxelColorMode.SingleColor,
+                    ExportFolder = "Assets"
+                };
+                VoxelLodBatchSourcePlan[] plans = VoxelLodPipeline.GetAutomaticBatchPlans(
+                    parent, new VoxelLodBatchOptions());
+                var baselineOptions = new VoxelLodBatchOptions
+                {
+                    AdaptInitialVoxelSize = false,
+                    MaximumEstimatedMemoryBytes = long.MaxValue
+                };
+                long finePeak = VoxelLodBatchAnalyzer.Analyze(
+                    plans, profile, lodOptions, baselineOptions).Sources[0].EstimatedPeakBytes;
+
+                serializedProfile.FindProperty("baseVoxelSize").floatValue = 0.1f;
+                serializedProfile.ApplyModifiedPropertiesWithoutUndo();
+                long coarsePeak = VoxelLodBatchAnalyzer.Analyze(
+                    plans, profile, lodOptions, baselineOptions).Sources[0].EstimatedPeakBytes;
+                serializedProfile.FindProperty("baseVoxelSize").floatValue = 0.05f;
+                serializedProfile.ApplyModifiedPropertiesWithoutUndo();
+                Assert.That(finePeak, Is.GreaterThan(coarsePeak));
+
+                var adaptiveOptions = new VoxelLodBatchOptions
+                {
+                    AdaptInitialVoxelSize = true,
+                    MaximumInitialLodIndex = 2,
+                    MaximumEstimatedMemoryBytes = coarsePeak + (finePeak - coarsePeak) / 2
+                };
+                VoxelLodBatchPreflight adaptive = VoxelLodBatchAnalyzer.Analyze(
+                    plans, profile, lodOptions, adaptiveOptions);
+
+                Assert.That(adaptive.Sources[0].IsOverBudget, Is.False);
+                Assert.That(adaptive.Sources[0].InitialLodIndex, Is.EqualTo(1));
+                Assert.That(adaptive.Sources[0].InitialVoxelMultiplier, Is.EqualTo(2));
+                Assert.That(adaptive.Sources[0].LodPlans[0].VoxelSize,
+                    Is.EqualTo(0.1f).Within(1e-6f));
+            }
+            finally
+            {
+                if (parent != null) Object.DestroyImmediate(parent);
+                if (profile != null) Object.DestroyImmediate(profile);
             }
         }
 
@@ -1080,6 +1164,75 @@ namespace LocalModels.VoxelBridge.Tests
             finally
             {
                 if (prefabInstance != null) Object.DestroyImmediate(prefabInstance);
+                if (root != null) Object.DestroyImmediate(root);
+                if (profile != null) Object.DestroyImmediate(profile);
+                AssetDatabase.DeleteAsset(testRoot);
+            }
+        }
+
+        [Test]
+        public void AutomaticLodPipeline_PersistsAdaptiveBaseForManualReduction()
+        {
+            if (!VoxelImporterIntegration.IsInstalled)
+                Assert.Ignore("Voxel Importer es opcional y no está instalado.");
+
+            const string testRoot = "Assets/VoxelBridgeAdaptiveLodTestOutput";
+            GameObject root = null;
+            VoxelStyleProfile profile = null;
+            try
+            {
+                root = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                root.name = "AdaptiveCube";
+                profile = ScriptableObject.CreateInstance<VoxelStyleProfile>();
+                var serializedProfile = new SerializedObject(profile);
+                serializedProfile.FindProperty("baseVoxelSize").floatValue = 0.25f;
+                serializedProfile.FindProperty("chunkCellSize").intValue = 16;
+                serializedProfile.FindProperty("padding").intValue = 1;
+                serializedProfile.FindProperty("fillInterior").boolValue = true;
+                SerializedProperty multipliers = serializedProfile.FindProperty("lodMultipliers");
+                multipliers.arraySize = 2;
+                multipliers.GetArrayElementAtIndex(0).intValue = 1;
+                multipliers.GetArrayElementAtIndex(1).intValue = 2;
+                serializedProfile.ApplyModifiedPropertiesWithoutUndo();
+
+                var options = new VoxelLodBuildOptions
+                {
+                    ColorMode = VoxelColorMode.SingleColor,
+                    SingleColor = new Color32(120, 160, 200, 255),
+                    AlphaCutoff = 0.1f,
+                    ExportFolder = testRoot + "/Exports"
+                };
+
+                VoxelLodBuildResult build = VoxelLodPipeline.GenerateAutomatic(
+                    root, profile, options, null, 2);
+
+                Assert.That(VoxelImporterIntegration.TryLoadMetadata(build.VoxAssetPaths[0],
+                    out VoxelBridgeMetadata lod0, out string error), Is.True, error);
+                Assert.That(VoxelImporterIntegration.TryLoadMetadata(build.VoxAssetPaths[1],
+                    out VoxelBridgeMetadata lod1, out error), Is.True, error);
+                Assert.That(lod0.voxelSize, Is.EqualTo(0.5f).Within(1e-6f));
+                Assert.That(lod0.lodMultiplier, Is.EqualTo(2));
+                Assert.That(lod1.voxelSize, Is.EqualTo(1f).Within(1e-6f));
+                Assert.That(lod1.lodMultiplier, Is.EqualTo(4));
+
+                Assert.That(VoxelLodPipeline.TryReadManifest(
+                    build.ManifestAssetPath, out VoxelLodSetManifest manifest), Is.True);
+                Assert.That(manifest.formatVersion, Is.EqualTo(2));
+                Assert.That(manifest.baseVoxelSize, Is.EqualTo(0.25f).Within(1e-6f));
+                Assert.That(manifest.initialVoxelMultiplier, Is.EqualTo(2));
+                Assert.That(manifest.lods.Select(entry => entry.multiplier),
+                    Is.EqualTo(new[] { 2, 4 }));
+
+                VoxelLodBuildResult reduced = VoxelLodPipeline.GenerateManual(
+                    build.VoxAssetPaths[0], profile, 1,
+                    VoxelLodGenerationMode.ReduceParent, options);
+                Assert.That(VoxelImporterIntegration.TryLoadMetadata(reduced.VoxAssetPaths[0],
+                    out VoxelBridgeMetadata reducedMetadata, out error), Is.True, error);
+                Assert.That(reducedMetadata.voxelSize, Is.EqualTo(1f).Within(1e-6f));
+                Assert.That(reducedMetadata.lodMultiplier, Is.EqualTo(4));
+            }
+            finally
+            {
                 if (root != null) Object.DestroyImmediate(root);
                 if (profile != null) Object.DestroyImmediate(profile);
                 AssetDatabase.DeleteAsset(testRoot);

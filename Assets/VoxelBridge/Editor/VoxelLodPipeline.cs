@@ -14,6 +14,7 @@ namespace LocalModels.VoxelBridge
         public Color32 SingleColor;
         public float AlphaCutoff;
         public string ExportFolder;
+        public bool IncludeInactiveObjects = true;
     }
 
     internal readonly struct VoxelLodBuildResult
@@ -44,6 +45,9 @@ namespace LocalModels.VoxelBridge
             VoxelPrefabOverrideHandling.UsePrefabSource;
         public long MaximumEstimatedMemoryBytes = 1024L * 1024L * 1024L;
         public bool SkipSourcesOverMemoryBudget = true;
+        public bool AdaptInitialVoxelSize = true;
+        public int MaximumInitialLodIndex = 2;
+        public bool IgnoreInactiveObjects = true;
         public bool EnableCheckpoint = true;
         public bool ResumeInterruptedBatch = true;
         public int CleanupInterval = 1;
@@ -103,6 +107,7 @@ namespace LocalModels.VoxelBridge
     {
         public readonly VoxelLodBatchItemResult[] Items;
         public readonly int CandidateCount;
+        public readonly int ExcludedInactiveDirectChildCount;
         public readonly bool Cancelled;
         public readonly VoxelLodBatchPreflight Preflight;
 
@@ -118,10 +123,11 @@ namespace LocalModels.VoxelBridge
 
         public VoxelLodBatchBuildResult(
             IEnumerable<VoxelLodBatchItemResult> items, int candidateCount, bool cancelled,
-            VoxelLodBatchPreflight preflight = null)
+            VoxelLodBatchPreflight preflight = null, int excludedInactiveDirectChildCount = 0)
         {
             Items = items.ToArray();
             CandidateCount = candidateCount;
+            ExcludedInactiveDirectChildCount = Mathf.Max(0, excludedInactiveDirectChildCount);
             Cancelled = cancelled;
             Preflight = preflight;
         }
@@ -145,18 +151,27 @@ namespace LocalModels.VoxelBridge
 
     internal static class VoxelLodPipeline
     {
-        internal static GameObject[] GetAutomaticBatchSources(GameObject parent)
+        internal static GameObject[] GetAutomaticBatchSources(
+            GameObject parent, VoxelLodBatchOptions batchOptions = null)
         {
             if (parent == null) return Array.Empty<GameObject>();
+            batchOptions ??= new VoxelLodBatchOptions();
 
             var sources = new List<GameObject>();
             for (int childIndex = 0; childIndex < parent.transform.childCount; childIndex++)
             {
                 GameObject child = parent.transform.GetChild(childIndex).gameObject;
+                if (batchOptions.IgnoreInactiveObjects && !child.activeSelf) continue;
                 bool hasMesh = child.GetComponentsInChildren<MeshFilter>(true)
-                    .Any(filter => filter.sharedMesh != null);
+                    .Any(filter => filter.sharedMesh != null &&
+                                   (!batchOptions.IgnoreInactiveObjects ||
+                                    MeshVoxelizer.IsActiveWithinRoot(
+                                        child.transform, filter.transform)));
                 bool hasSkinnedMesh = child.GetComponentsInChildren<SkinnedMeshRenderer>(true)
-                    .Any(renderer => renderer.sharedMesh != null);
+                    .Any(renderer => renderer.sharedMesh != null &&
+                                     (!batchOptions.IgnoreInactiveObjects ||
+                                      MeshVoxelizer.IsActiveWithinRoot(
+                                          child.transform, renderer.transform)));
                 if (hasMesh || hasSkinnedMesh) sources.Add(child);
             }
             return sources.ToArray();
@@ -166,7 +181,7 @@ namespace LocalModels.VoxelBridge
             GameObject parent, VoxelLodBatchOptions batchOptions = null)
         {
             batchOptions ??= new VoxelLodBatchOptions();
-            return GetAutomaticBatchSources(parent)
+            return GetAutomaticBatchSources(parent, batchOptions)
                 .Select(source => CreateAutomaticBatchPlan(source, batchOptions))
                 .ToArray();
         }
@@ -179,21 +194,25 @@ namespace LocalModels.VoxelBridge
             ValidateProfileAndOptions(profile, options);
             if (parent == null) throw new ArgumentNullException(nameof(parent));
 
+            batchOptions ??= new VoxelLodBatchOptions();
+            VoxelLodBuildOptions effectiveOptions = CreateBatchBuildOptions(options, batchOptions);
             VoxelLodBatchSourcePlan[] plans = GetAutomaticBatchPlans(parent, batchOptions);
             if (plans.Length == 0)
                 throw new InvalidOperationException(
                     "El objeto padre no contiene hijos directos con mallas para voxelizar.");
 
-            batchOptions ??= new VoxelLodBatchOptions();
+            int excludedInactiveDirectChildren = batchOptions.IgnoreInactiveObjects
+                ? CountInactiveDirectChildren(parent)
+                : 0;
             VoxelLodBatchPreflight preflight = batchOptions.Preflight;
             string expectedSignature = VoxelLodBatchAnalyzer.CreateSignature(
-                plans, profile, options, batchOptions);
+                plans, profile, effectiveOptions, batchOptions);
             if (preflight == null || preflight.Signature != expectedSignature)
                 preflight = VoxelLodBatchAnalyzer.Analyze(
-                    plans, profile, options, batchOptions, cancelProgress);
+                    plans, profile, effectiveOptions, batchOptions, cancelProgress);
 
             int cleanedFamilies = VoxelLodBatchRecovery.CleanupIncompleteFamilies(
-                options.ExportFolder);
+                effectiveOptions.ExportFolder);
             if (cleanedFamilies > 0)
                 Debug.LogWarning(
                     $"Voxel Bridge eliminó {cleanedFamilies} familia(s) incompletas marcadas " +
@@ -201,7 +220,7 @@ namespace LocalModels.VoxelBridge
 
             var items = new List<VoxelLodBatchItemResult>();
             string checkpointSignature = VoxelLodBatchIdentity.CreateBatchSignature(
-                plans, profile, options, batchOptions);
+                plans, profile, effectiveOptions, batchOptions);
             if (batchOptions.EnableCheckpoint && !batchOptions.ResumeInterruptedBatch)
                 VoxelLodBatchCheckpointStore.Reset(checkpointSignature);
             Dictionary<Object, VoxelLodBatchConversionOutcome> outcomes =
@@ -218,7 +237,8 @@ namespace LocalModels.VoxelBridge
                         $"Modelo {sourceIndex + 1} de {plans.Length}: preparando {current.name}"))
                 {
                     VoxelLodBatchMemoryCleaner.ReleaseUnusedMemory(parent, profile);
-                    return new VoxelLodBatchBuildResult(items, plans.Length, true, preflight);
+                    return new VoxelLodBatchBuildResult(
+                        items, plans.Length, true, preflight, excludedInactiveDirectChildren);
                 }
 
                 if (plan.Ignored)
@@ -241,7 +261,8 @@ namespace LocalModels.VoxelBridge
                     ? "No se encontró el análisis previo de esta fuente."
                     : estimate.Error;
                 if (string.IsNullOrEmpty(preflightError) &&
-                    batchOptions.SkipSourcesOverMemoryBudget && estimate.IsOverBudget)
+                    (batchOptions.AdaptInitialVoxelSize ||
+                     batchOptions.SkipSourcesOverMemoryBudget) && estimate.IsOverBudget)
                     preflightError =
                         $"Memoria estimada {VoxelLodBatchAnalyzer.FormatBytes(estimate.EstimatedPeakBytes)}, " +
                         $"por encima del presupuesto de {VoxelLodBatchAnalyzer.FormatBytes(estimate.MemoryBudgetBytes)}.";
@@ -258,10 +279,11 @@ namespace LocalModels.VoxelBridge
                 try
                 {
                     VoxelLodBuildResult build = GenerateAutomatic(
-                        plan.ConversionSource, profile, options, (progress, message) =>
+                        plan.ConversionSource, profile, effectiveOptions, (progress, message) =>
                             cancelProgress != null && cancelProgress(
                                 progressBase + progress / plans.Length,
-                                $"Modelo {sourceIndex + 1} de {plans.Length} · {current.name}: {message}"));
+                                $"Modelo {sourceIndex + 1} de {plans.Length} · {current.name}: {message}"),
+                        estimate.InitialVoxelMultiplier);
                     var outcome = new VoxelLodBatchConversionOutcome(build, null);
                     outcomes.Add(plan.ReuseKey, outcome);
                     items.Add(new VoxelLodBatchItemResult(plan, build));
@@ -274,7 +296,8 @@ namespace LocalModels.VoxelBridge
                 catch (OperationCanceledException)
                 {
                     VoxelLodBatchMemoryCleaner.ReleaseUnusedMemory(parent, profile);
-                    return new VoxelLodBatchBuildResult(items, plans.Length, true, preflight);
+                    return new VoxelLodBatchBuildResult(
+                        items, plans.Length, true, preflight, excludedInactiveDirectChildren);
                 }
                 catch (Exception exception)
                 {
@@ -289,7 +312,31 @@ namespace LocalModels.VoxelBridge
             if (batchOptions.EnableCheckpoint)
                 VoxelLodBatchCheckpointStore.Reset(checkpointSignature);
             VoxelLodBatchMemoryCleaner.ReleaseUnusedMemory(parent, profile);
-            return new VoxelLodBatchBuildResult(items, plans.Length, false, preflight);
+            return new VoxelLodBatchBuildResult(
+                items, plans.Length, false, preflight, excludedInactiveDirectChildren);
+        }
+
+        private static int CountInactiveDirectChildren(GameObject parent)
+        {
+            if (parent == null) return 0;
+            int count = 0;
+            for (int index = 0; index < parent.transform.childCount; index++)
+                if (!parent.transform.GetChild(index).gameObject.activeSelf)
+                    count++;
+            return count;
+        }
+
+        private static VoxelLodBuildOptions CreateBatchBuildOptions(
+            VoxelLodBuildOptions source, VoxelLodBatchOptions batchOptions)
+        {
+            return new VoxelLodBuildOptions
+            {
+                ColorMode = source.ColorMode,
+                SingleColor = source.SingleColor,
+                AlphaCutoff = source.AlphaCutoff,
+                ExportFolder = source.ExportFolder,
+                IncludeInactiveObjects = !batchOptions.IgnoreInactiveObjects
+            };
         }
 
         private static void CleanupBatchMemoryIfNeeded(
@@ -397,9 +444,13 @@ namespace LocalModels.VoxelBridge
 
         public static VoxelLodBuildResult GenerateAutomatic(
             Object source, VoxelStyleProfile profile, VoxelLodBuildOptions options,
-            Func<float, string, bool> cancelProgress = null)
+            Func<float, string, bool> cancelProgress = null, int initialVoxelMultiplier = 1)
         {
             ValidateProfileAndOptions(profile, options);
+            if (initialVoxelMultiplier < 1 ||
+                (initialVoxelMultiplier & (initialVoxelMultiplier - 1)) != 0)
+                throw new ArgumentOutOfRangeException(nameof(initialVoxelMultiplier),
+                    "El multiplicador voxel inicial debe ser una potencia de dos mayor o igual que uno.");
             string familyId = Guid.NewGuid().ToString("N");
             string safeName = MakeSafeFileName(source.name);
             EnsureAssetFolder(options.ExportFolder);
@@ -416,7 +467,8 @@ namespace LocalModels.VoxelBridge
 
                 for (int lodIndex = 0; lodIndex < profile.LodCount; lodIndex++)
                 {
-                    int multiplier = profile.GetLodMultiplier(lodIndex);
+                    int multiplier = checked(
+                        initialVoxelMultiplier * profile.GetLodMultiplier(lodIndex));
                     float progressBase = (float)lodIndex / profile.LodCount;
                     var settings = new VoxelizationSettings
                     {
@@ -424,6 +476,7 @@ namespace LocalModels.VoxelBridge
                         ChunkCellSize = profile.ChunkCellSize,
                         Padding = profile.Padding,
                         FillInterior = profile.FillInterior,
+                        IncludeInactiveObjects = options.IncludeInactiveObjects,
                         ColorMode = options.ColorMode,
                         SingleColor = options.SingleColor,
                         AlphaCutoff = options.AlphaCutoff
@@ -452,6 +505,7 @@ namespace LocalModels.VoxelBridge
                     sourceName = source.name,
                     sourceAssetPath = AssetDatabase.GetAssetPath(source),
                     baseVoxelSize = profile.BaseVoxelSize,
+                    initialVoxelMultiplier = initialVoxelMultiplier,
                     chunkCellSize = profile.ChunkCellSize,
                     profileAssetPath = profilePath,
                     lods = entries.ToArray()
@@ -504,6 +558,7 @@ namespace LocalModels.VoxelBridge
                     sourceName = parent.sourceName,
                     sourceAssetPath = parent.sourceAssetPath,
                     baseVoxelSize = parent.baseVoxelSize > 0f ? parent.baseVoxelSize : profile.BaseVoxelSize,
+                    initialVoxelMultiplier = ResolveInitialVoxelMultiplier(null, profile, parent),
                     chunkCellSize = parent.chunkCellSize > 0 ? parent.chunkCellSize : profile.ChunkCellSize,
                     profileAssetPath = AssetDatabase.GetAssetPath(profile),
                     lods = new[]
@@ -522,6 +577,11 @@ namespace LocalModels.VoxelBridge
             string folderPath = Path.GetDirectoryName(parentVoxAssetPath)?.Replace('\\', '/') ?? "Assets";
             string targetPath = AssetDatabase.GenerateUniqueAssetPath(
                 $"{folderPath}/{MakeSafeFileName(parent.sourceName)}_LOD{targetLodIndex}.vox");
+            int initialVoxelMultiplier = ResolveInitialVoxelMultiplier(manifest, profile, parent);
+            if (manifest.baseVoxelSize <= 0f)
+                manifest.baseVoxelSize = parent.baseVoxelSize > 0f
+                    ? parent.baseVoxelSize
+                    : profile.BaseVoxelSize;
             int targetMultiplier;
             if (mode == VoxelLodGenerationMode.DuplicateParent)
             {
@@ -537,10 +597,11 @@ namespace LocalModels.VoxelBridge
             }
             else
             {
-                targetMultiplier = profile.GetLodMultiplier(targetLodIndex);
+                targetMultiplier = checked(
+                    initialVoxelMultiplier * profile.GetLodMultiplier(targetLodIndex));
                 VoxelGrid parentGrid = VoxelVolumeReader.Read(AssetPathToAbsolute(parentVoxAssetPath), parent);
                 VoxelGrid reduced = VoxelGridDownsampler.Downsample(parentGrid,
-                    profile.BaseVoxelSize * targetMultiplier, profile.Padding, profile.ChunkCellSize);
+                    manifest.baseVoxelSize * targetMultiplier, profile.Padding, profile.ChunkCellSize);
                 Bounds sourceBounds = BoundsFromMetadataOrGrid(parent, parentGrid);
                 WriteGrid(targetPath, reduced, sourceBounds, parent.sourceName, parent.sourceAssetPath,
                     manifest.familyId, manifestPath, targetLodIndex, targetMultiplier, mode,
@@ -557,6 +618,8 @@ namespace LocalModels.VoxelBridge
                 voxAssetPath = targetPath
             });
             entries.Sort((a, b) => a.lodIndex.CompareTo(b.lodIndex));
+            manifest.formatVersion = 2;
+            manifest.initialVoxelMultiplier = initialVoxelMultiplier;
             manifest.lods = entries.ToArray();
             manifest.profileAssetPath = AssetDatabase.GetAssetPath(profile);
             WriteJsonAsset(manifestPath, manifest);
@@ -568,6 +631,45 @@ namespace LocalModels.VoxelBridge
             AssetDatabase.ImportAsset(manifestPath, ImportAssetOptions.ForceSynchronousImport);
             return new VoxelLodBuildResult(manifestPath, prefabPath, new[] { targetPath });
         }
+
+        private static int ResolveInitialVoxelMultiplier(
+            VoxelLodSetManifest manifest, VoxelStyleProfile profile,
+            VoxelBridgeMetadata metadata)
+        {
+            if (manifest != null && IsPowerOfTwo(manifest.initialVoxelMultiplier))
+                return manifest.initialVoxelMultiplier;
+
+            VoxelLodEntry firstEntry = manifest?.lods?
+                .Where(entry => entry != null)
+                .OrderBy(entry => entry.lodIndex)
+                .FirstOrDefault();
+            if (firstEntry != null)
+            {
+                int localMultiplier = profile.GetLodMultiplier(firstEntry.lodIndex);
+                if (firstEntry.multiplier >= localMultiplier &&
+                    firstEntry.multiplier % localMultiplier == 0)
+                {
+                    int derived = firstEntry.multiplier / localMultiplier;
+                    if (IsPowerOfTwo(derived)) return derived;
+                }
+            }
+
+            if (metadata != null && metadata.lodIndex >= 0 &&
+                metadata.lodIndex < profile.LodCount)
+            {
+                int localMultiplier = profile.GetLodMultiplier(metadata.lodIndex);
+                if (metadata.lodMultiplier >= localMultiplier &&
+                    metadata.lodMultiplier % localMultiplier == 0)
+                {
+                    int derived = metadata.lodMultiplier / localMultiplier;
+                    if (IsPowerOfTwo(derived)) return derived;
+                }
+            }
+            return 1;
+        }
+
+        private static bool IsPowerOfTwo(int value) =>
+            value >= 1 && (value & (value - 1)) == 0;
 
         public static string RebuildPrefab(string manifestAssetPath)
         {

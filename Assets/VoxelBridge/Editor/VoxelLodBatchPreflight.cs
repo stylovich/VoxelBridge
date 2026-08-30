@@ -24,11 +24,14 @@ namespace LocalModels.VoxelBridge
         public readonly long EstimatedPeakBytes;
         public readonly long TotalDenseCells;
         public readonly long MemoryBudgetBytes;
+        public readonly int InitialLodIndex;
+        public readonly int InitialVoxelMultiplier;
         public readonly string Error;
 
         public bool IsValid => string.IsNullOrEmpty(Error);
         public bool IsOverBudget => IsValid && MemoryBudgetBytes > 0 &&
                                     EstimatedPeakBytes > MemoryBudgetBytes;
+        public bool WasAdapted => InitialVoxelMultiplier > 1;
         public VoxelLodBatchMemoryRisk Risk => !IsValid
             ? VoxelLodBatchMemoryRisk.Invalid
             : IsOverBudget
@@ -40,7 +43,8 @@ namespace LocalModels.VoxelBridge
         public VoxelLodBatchSourceEstimate(
             Object reuseKey, Object conversionSource, string sourceName,
             IEnumerable<VoxelGridPlan> lodPlans, long estimatedPeakBytes,
-            long totalDenseCells, long memoryBudgetBytes, string error)
+            long totalDenseCells, long memoryBudgetBytes, int initialLodIndex,
+            int initialVoxelMultiplier, string error)
         {
             ReuseKey = reuseKey;
             ConversionSource = conversionSource;
@@ -49,6 +53,8 @@ namespace LocalModels.VoxelBridge
             EstimatedPeakBytes = estimatedPeakBytes;
             TotalDenseCells = totalDenseCells;
             MemoryBudgetBytes = memoryBudgetBytes;
+            InitialLodIndex = Mathf.Max(0, initialLodIndex);
+            InitialVoxelMultiplier = Mathf.Max(1, initialVoxelMultiplier);
             Error = error;
         }
     }
@@ -64,6 +70,7 @@ namespace LocalModels.VoxelBridge
         public int ReusedCount => Mathf.Max(0, CandidateCount - IgnoredCount - Sources.Length);
         public int InvalidCount => Sources.Count(source => !source.IsValid);
         public int OverBudgetCount => Sources.Count(source => source.IsOverBudget);
+        public int AdaptedCount => Sources.Count(source => source.IsValid && source.WasAdapted);
         public int ElevatedCount => Sources.Count(source =>
             source.Risk == VoxelLodBatchMemoryRisk.Elevated);
         public long EstimatedPeakBytes => Sources.Length == 0
@@ -141,11 +148,15 @@ namespace LocalModels.VoxelBridge
                   $"{profile.ChunkCellSize}:{profile.FillInterior}:" +
                   string.Join(",", Enumerable.Range(0, profile.LodCount)
                       .Select(profile.GetLodMultiplier));
+            bool includeInactiveObjects = !batchOptions.IgnoreInactiveObjects;
             string options = lodOptions == null
                 ? "none"
-                : $"{lodOptions.ColorMode}:{lodOptions.AlphaCutoff:R}:{lodOptions.ExportFolder}";
+                : $"{lodOptions.ColorMode}:{lodOptions.AlphaCutoff:R}:{lodOptions.ExportFolder}:" +
+                  $"{includeInactiveObjects}";
             return Hash128.Compute(
-                $"{sources}#{profileValues}#{options}#{batchOptions.MaximumEstimatedMemoryBytes}")
+                $"{sources}#{profileValues}#{options}#{batchOptions.MaximumEstimatedMemoryBytes}:" +
+                $"{batchOptions.SkipSourcesOverMemoryBudget}:{batchOptions.AdaptInitialVoxelSize}:" +
+                $"{batchOptions.MaximumInitialLodIndex}:{batchOptions.IgnoreInactiveObjects}")
                 .ToString();
         }
 
@@ -163,42 +174,96 @@ namespace LocalModels.VoxelBridge
             VoxelLodBatchSourcePlan plan, VoxelStyleProfile profile,
             VoxelLodBuildOptions lodOptions, VoxelLodBatchOptions batchOptions)
         {
+            Bounds bounds;
+            long sourceOverhead;
             try
             {
-                Bounds bounds = MeshVoxelizer.GetSourceBounds(plan.ConversionSource);
-                var lodPlans = new List<VoxelGridPlan>(profile.LodCount);
-                long peakBytes = 0;
-                long totalCells = 0;
-                long sourceOverhead = EstimateSourceOverhead(plan.ConversionSource, lodOptions);
-                int bytesPerCell = profile.FillInterior
-                    ? DenseBytesPerCellWithFill
-                    : DenseBytesPerCellWithoutFill;
-                for (int lodIndex = 0; lodIndex < profile.LodCount; lodIndex++)
-                {
-                    float voxelSize = profile.BaseVoxelSize * profile.GetLodMultiplier(lodIndex);
-                    VoxelGridPlan gridPlan = VoxelGridPlanner.Create(
-                        bounds, voxelSize, profile.Padding, profile.ChunkCellSize);
-                    lodPlans.Add(gridPlan);
-                    totalCells += gridPlan.CellCount;
-                    long lodBytes = checked(gridPlan.CellCount * bytesPerCell +
-                                            sourceOverhead + FixedWorkingSetBytes);
-                    peakBytes = Math.Max(peakBytes, lodBytes);
-                }
-
-                return new VoxelLodBatchSourceEstimate(
-                    plan.ReuseKey, plan.ConversionSource, plan.Source.name, lodPlans,
-                    peakBytes, totalCells, batchOptions.MaximumEstimatedMemoryBytes, null);
+                bool includeInactiveObjects = !batchOptions.IgnoreInactiveObjects;
+                bounds = MeshVoxelizer.GetSourceBounds(
+                    plan.ConversionSource, includeInactiveObjects);
+                sourceOverhead = EstimateSourceOverhead(
+                    plan.ConversionSource, lodOptions.ColorMode, includeInactiveObjects);
             }
             catch (Exception exception)
             {
                 return new VoxelLodBatchSourceEstimate(
                     plan.ReuseKey, plan.ConversionSource, plan.Source.name,
                     Array.Empty<VoxelGridPlan>(), 0, 0,
-                    batchOptions.MaximumEstimatedMemoryBytes, exception.Message);
+                    batchOptions.MaximumEstimatedMemoryBytes, 0, 1, exception.Message);
             }
+
+            int maximumInitialLod = batchOptions.AdaptInitialVoxelSize
+                ? Mathf.Clamp(batchOptions.MaximumInitialLodIndex, 0, profile.LodCount - 1)
+                : 0;
+            VoxelLodBatchSourceEstimate lastValid = null;
+            string lastError = null;
+            int lastInitialLod = 0;
+            int lastInitialMultiplier = 1;
+            for (int initialLodIndex = 0; initialLodIndex <= maximumInitialLod; initialLodIndex++)
+            {
+                int initialMultiplier = profile.GetLodMultiplier(initialLodIndex);
+                lastInitialLod = initialLodIndex;
+                lastInitialMultiplier = initialMultiplier;
+                try
+                {
+                    VoxelLodBatchSourceEstimate estimate = EstimateAtMultiplier(
+                        plan, profile, lodOptions, batchOptions, bounds, sourceOverhead,
+                        initialLodIndex, initialMultiplier);
+                    lastValid = estimate;
+                    if (!estimate.IsOverBudget) return estimate;
+                }
+                catch (Exception exception)
+                {
+                    lastError = exception.Message;
+                }
+            }
+
+            if (lastValid != null) return lastValid;
+            string suffix = batchOptions.AdaptInitialVoxelSize && maximumInitialLod > 0
+                ? $" No se encontró una rejilla válida hasta LOD{maximumInitialLod} " +
+                  $"(×{lastInitialMultiplier})."
+                : string.Empty;
+            return new VoxelLodBatchSourceEstimate(
+                plan.ReuseKey, plan.ConversionSource, plan.Source.name,
+                Array.Empty<VoxelGridPlan>(), 0, 0,
+                batchOptions.MaximumEstimatedMemoryBytes, lastInitialLod,
+                lastInitialMultiplier, (lastError ?? "La fuente no se puede analizar.") + suffix);
         }
 
-        private static long EstimateSourceOverhead(Object source, VoxelLodBuildOptions options)
+        private static VoxelLodBatchSourceEstimate EstimateAtMultiplier(
+            VoxelLodBatchSourcePlan plan, VoxelStyleProfile profile,
+            VoxelLodBuildOptions lodOptions, VoxelLodBatchOptions batchOptions,
+            Bounds bounds, long sourceOverhead, int initialLodIndex,
+            int initialMultiplier)
+        {
+            var lodPlans = new List<VoxelGridPlan>(profile.LodCount);
+            long peakBytes = 0;
+            long totalCells = 0;
+            int bytesPerCell = profile.FillInterior
+                ? DenseBytesPerCellWithFill
+                : DenseBytesPerCellWithoutFill;
+            for (int lodIndex = 0; lodIndex < profile.LodCount; lodIndex++)
+            {
+                int effectiveMultiplier = checked(
+                    initialMultiplier * profile.GetLodMultiplier(lodIndex));
+                float voxelSize = profile.BaseVoxelSize * effectiveMultiplier;
+                VoxelGridPlan gridPlan = VoxelGridPlanner.Create(
+                    bounds, voxelSize, profile.Padding, profile.ChunkCellSize);
+                lodPlans.Add(gridPlan);
+                totalCells += gridPlan.CellCount;
+                long lodBytes = checked(gridPlan.CellCount * bytesPerCell +
+                                        sourceOverhead + FixedWorkingSetBytes);
+                peakBytes = Math.Max(peakBytes, lodBytes);
+            }
+
+            return new VoxelLodBatchSourceEstimate(
+                plan.ReuseKey, plan.ConversionSource, plan.Source.name, lodPlans,
+                peakBytes, totalCells, batchOptions.MaximumEstimatedMemoryBytes,
+                initialLodIndex, initialMultiplier, null);
+        }
+
+        private static long EstimateSourceOverhead(
+            Object source, VoxelColorMode colorMode, bool includeInactiveObjects)
         {
             var meshes = new HashSet<Mesh>();
             var materials = new HashSet<Material>();
@@ -210,7 +275,11 @@ namespace LocalModels.VoxelBridge
             {
                 foreach (MeshFilter filter in root.GetComponentsInChildren<MeshFilter>(true))
                 {
-                    if (filter.sharedMesh != null) meshes.Add(filter.sharedMesh);
+                    if (filter.sharedMesh == null ||
+                        (!includeInactiveObjects &&
+                         !MeshVoxelizer.IsActiveWithinRoot(root.transform, filter.transform)))
+                        continue;
+                    meshes.Add(filter.sharedMesh);
                     MeshRenderer renderer = filter.GetComponent<MeshRenderer>();
                     if (renderer == null) continue;
                     foreach (Material material in renderer.sharedMaterials)
@@ -219,7 +288,11 @@ namespace LocalModels.VoxelBridge
                 foreach (SkinnedMeshRenderer renderer in
                          root.GetComponentsInChildren<SkinnedMeshRenderer>(true))
                 {
-                    if (renderer.sharedMesh != null) meshes.Add(renderer.sharedMesh);
+                    if (renderer.sharedMesh == null ||
+                        (!includeInactiveObjects &&
+                         !MeshVoxelizer.IsActiveWithinRoot(root.transform, renderer.transform)))
+                        continue;
+                    meshes.Add(renderer.sharedMesh);
                     foreach (Material material in renderer.sharedMaterials)
                         if (material != null) materials.Add(material);
                 }
@@ -234,7 +307,7 @@ namespace LocalModels.VoxelBridge
                     bytes += (long)sourceMesh.GetIndexCount(submesh) * sizeof(int);
             }
 
-            if (options.ColorMode != VoxelColorMode.MaterialAndTexture) return bytes;
+            if (colorMode != VoxelColorMode.MaterialAndTexture) return bytes;
             foreach (Material material in materials)
             {
                 Texture texture = material.mainTexture;
