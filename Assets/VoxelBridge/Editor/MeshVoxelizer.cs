@@ -122,12 +122,15 @@ namespace LocalModels.VoxelBridge
                         }
                     }
                 }
+                bestDistances = null;
 
                 if (grid.CountOccupied() == 0)
                     throw new InvalidOperationException("No se generaron vóxeles. Prueba una resolución mayor o revisa la transparencia del material.");
 
                 if (settings.FillInterior)
                 {
+                    if (grid.Occupied.LongLength >= 8_000_000)
+                        GC.Collect();
                     if (cancelProgress != null && cancelProgress(0.94f, "Rellenando el interior"))
                         throw new OperationCanceledException("Voxelización cancelada.");
                     FillInterior(grid);
@@ -417,13 +420,11 @@ namespace LocalModels.VoxelBridge
                 }
             }
 
-            var interior = new bool[grid.Occupied.Length];
-            var assigned = new bool[grid.Occupied.Length];
             queue.Clear();
+            queue.TrimExcess();
             for (int i = 0; i < grid.Occupied.Length; i++)
             {
-                if (grid.Occupied[i]) { assigned[i] = true; queue.Enqueue(i); }
-                else if (!outside[i]) interior[i] = true;
+                if (grid.Occupied[i]) queue.Enqueue(i);
             }
 
             while (queue.Count > 0)
@@ -435,8 +436,7 @@ namespace LocalModels.VoxelBridge
                     int nx = x + dx[n], ny = y + dy[n], nz = z + dz[n];
                     if (nx < 0 || ny < 0 || nz < 0 || nx >= grid.Size.x || ny >= grid.Size.y || nz >= grid.Size.z) continue;
                     int next = grid.Index(nx, ny, nz);
-                    if (!interior[next] || assigned[next]) continue;
-                    assigned[next] = true;
+                    if (outside[next] || grid.Occupied[next]) continue;
                     grid.Occupied[next] = true;
                     grid.Colors[next] = grid.Colors[index];
                     queue.Enqueue(next);
@@ -470,13 +470,15 @@ namespace LocalModels.VoxelBridge
             {
                 foreach (MaterialSampler sampler in cache.Values) sampler.Dispose();
                 nullSampler?.Dispose();
+                cache.Clear();
+                nullSampler = null;
             }
         }
 
         private sealed class MaterialSampler : IDisposable
         {
             private readonly Color baseColor;
-            private readonly Color32[] pixels;
+            private Color32[] pixels;
             private readonly int width;
             private readonly int height;
             private readonly Vector2 scale = Vector2.one;
@@ -501,18 +503,19 @@ namespace LocalModels.VoxelBridge
                 RenderTexture temporary = RenderTexture.GetTemporary(width, height, 0, RenderTextureFormat.ARGB32,
                     RenderTextureReadWrite.Default);
                 RenderTexture previous = RenderTexture.active;
+                Texture2D readable = null;
                 try
                 {
                     Graphics.Blit(texture, temporary);
                     RenderTexture.active = temporary;
-                    var readable = new Texture2D(width, height, TextureFormat.RGBA32, false, false);
+                    readable = new Texture2D(width, height, TextureFormat.RGBA32, false, false);
                     readable.ReadPixels(new Rect(0, 0, width, height), 0, 0, false);
                     readable.Apply(false, false);
                     pixels = readable.GetPixels32();
-                    UnityEngine.Object.DestroyImmediate(readable);
                 }
                 finally
                 {
+                    if (readable != null) UnityEngine.Object.DestroyImmediate(readable);
                     RenderTexture.active = previous;
                     RenderTexture.ReleaseTemporary(temporary);
                 }
@@ -541,7 +544,7 @@ namespace LocalModels.VoxelBridge
                 return wrapMode == TextureWrapMode.Clamp ? Mathf.Clamp01(value) : Mathf.Repeat(value, 1f);
             }
 
-            public void Dispose() { }
+            public void Dispose() => pixels = null;
         }
     }
 }

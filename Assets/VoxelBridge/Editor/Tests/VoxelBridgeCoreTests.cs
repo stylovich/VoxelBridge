@@ -112,6 +112,46 @@ namespace LocalModels.VoxelBridge.Tests
         }
 
         [Test]
+        public void Voxelizer_FillInteriorFillsClosedCenterWithoutChangingExterior()
+        {
+            GameObject cube = null;
+            try
+            {
+                cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                var shellSettings = new VoxelizationSettings
+                {
+                    VoxelSize = 0.2f,
+                    ChunkCellSize = 16,
+                    Padding = 1,
+                    FillInterior = false,
+                    ColorMode = VoxelColorMode.SingleColor,
+                    SingleColor = new Color32(90, 140, 210, 255)
+                };
+                VoxelizationResult shell = MeshVoxelizer.Voxelize(cube, shellSettings);
+                var filledSettings = new VoxelizationSettings
+                {
+                    VoxelSize = shellSettings.VoxelSize,
+                    ChunkCellSize = shellSettings.ChunkCellSize,
+                    Padding = shellSettings.Padding,
+                    FillInterior = true,
+                    ColorMode = shellSettings.ColorMode,
+                    SingleColor = shellSettings.SingleColor
+                };
+                VoxelizationResult filled = MeshVoxelizer.Voxelize(cube, filledSettings);
+
+                Assert.That(filled.Grid.Size, Is.EqualTo(shell.Grid.Size));
+                Assert.That(filled.Grid.CountOccupied(), Is.GreaterThan(shell.Grid.CountOccupied()));
+                Vector3Int center = filled.Grid.Size / 2;
+                Assert.That(filled.Grid.Occupied[
+                    filled.Grid.Index(center.x, center.y, center.z)], Is.True);
+            }
+            finally
+            {
+                if (cube != null) Object.DestroyImmediate(cube);
+            }
+        }
+
+        [Test]
         public void Quantizer_UsesOnlyValidPaletteIndices()
         {
             var grid = new VoxelGrid(new Vector3Int(20, 20, 1), Vector3.zero, 1f);
