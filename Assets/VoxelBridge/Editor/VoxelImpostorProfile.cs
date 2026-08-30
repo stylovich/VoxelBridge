@@ -86,19 +86,6 @@ namespace LocalModels.VoxelBridge
             "0.001-0.002: edificios, hitos y perfil de alta distancia.")]
         [InspectorName("Altura de descarte")]
         [SerializeField, Range(0.0001f, 0.1f)] private float cullScreenHeight = 0.005f;
-        [Tooltip(
-            "Activa la transición con dithering del LODGroup entre los modelos voxel y el impostor. Oculta el cambio brusco de silueta, pero durante la transición pueden renderizarse ambos niveles y aumentar temporalmente el coste.\n\n" +
-            "Desactivado: perfil de rendimiento o cuando el cambio ocurre tan lejos que no se percibe.\n" +
-            "Activado: recomendado para perfiles equilibrado y alto, especialmente en objetos grandes.")]
-        [InspectorName("Usar Cross Fade")]
-        [SerializeField] private bool crossFade = true;
-        [Tooltip(
-            "Porción relativa del rango del LOD usada para mezclar ambos niveles cuando Cross Fade está activo. Un rango mayor suaviza la sustitución, pero mantiene ambos LOD visibles durante más tiempo. No tiene efecto si Cross Fade está desactivado.\n\n" +
-            "0.05: transición corta, perfil de rendimiento.\n" +
-            "0.15: equilibrado y recomendado para empezar.\n" +
-            "0.25-0.35: transición suave de alta calidad para edificios u objetos grandes.")]
-        [InspectorName("Anchura del Cross Fade")]
-        [SerializeField, Range(0f, 1f)] private float fadeTransitionWidth = 0.15f;
 
         public VoxelImpostorType ImpostorType => impostorType;
         public int TextureResolution => textureResolution;
@@ -108,8 +95,6 @@ namespace LocalModels.VoxelBridge
         public float SilhouetteTolerance => silhouetteTolerance;
         public float NormalScale => normalScale;
         public float CullScreenHeight => cullScreenHeight;
-        public bool CrossFade => crossFade;
-        public float FadeTransitionWidth => fadeTransitionWidth;
 
         internal static VoxelImpostorSettings CreateLow() => new()
         {
@@ -120,9 +105,7 @@ namespace LocalModels.VoxelBridge
             maxVertices = 6,
             silhouetteTolerance = 0.075f,
             normalScale = 0.02f,
-            cullScreenHeight = 0.01f,
-            crossFade = false,
-            fadeTransitionWidth = 0.05f
+            cullScreenHeight = 0.01f
         };
 
         internal static VoxelImpostorSettings CreateMedium() => new()
@@ -134,9 +117,7 @@ namespace LocalModels.VoxelBridge
             maxVertices = 8,
             silhouetteTolerance = 0.15f,
             normalScale = 0.01f,
-            cullScreenHeight = 0.005f,
-            crossFade = true,
-            fadeTransitionWidth = 0.15f
+            cullScreenHeight = 0.005f
         };
 
         internal static VoxelImpostorSettings CreateHigh() => new()
@@ -148,9 +129,7 @@ namespace LocalModels.VoxelBridge
             maxVertices = 12,
             silhouetteTolerance = 0.2f,
             normalScale = 0.005f,
-            cullScreenHeight = 0.0015f,
-            crossFade = true,
-            fadeTransitionWidth = 0.25f
+            cullScreenHeight = 0.0015f
         };
 
         internal static VoxelImpostorSettings CreateArchitecture() => new()
@@ -162,9 +141,7 @@ namespace LocalModels.VoxelBridge
             maxVertices = 10,
             silhouetteTolerance = 0.15f,
             normalScale = 0.01f,
-            cullScreenHeight = 0.0005f,
-            crossFade = true,
-            fadeTransitionWidth = 0.3f
+            cullScreenHeight = 0.0005f
         };
 
         public bool TryValidate(float lastVoxelTransitionHeight, out string error)
@@ -192,10 +169,9 @@ namespace LocalModels.VoxelBridge
                 return false;
             }
             if (silhouetteTolerance < 0f || silhouetteTolerance > 0.2f ||
-                normalScale < 0f || normalScale > 1f ||
-                fadeTransitionWidth < 0f || fadeTransitionWidth > 1f)
+                normalScale < 0f || normalScale > 1f)
             {
-                error = "La tolerancia, la escala de normales o la transición está fuera de rango.";
+                error = "La tolerancia o la escala de normales está fuera de rango.";
                 return false;
             }
 
@@ -208,7 +184,7 @@ namespace LocalModels.VoxelBridge
         menuName = "Voxel Bridge/Configuración de perfiles de impostor")]
     public sealed class VoxelImpostorProfile : ScriptableObject
     {
-        private const int CurrentDataVersion = 2;
+        private const int CurrentDataVersion = 3;
 
         [SerializeField, HideInInspector] private int dataVersion;
         [Tooltip(
@@ -218,12 +194,12 @@ namespace LocalModels.VoxelBridge
         [SerializeField] private VoxelImpostorSettings low = VoxelImpostorSettings.CreateLow();
         [Tooltip(
             "Preset recomendado para la mayoría de vehículos, props y objetos de tamaño medio. " +
-            "Equilibra estabilidad angular, memoria de atlas y suavidad de transición.")]
+            "Equilibra estabilidad angular, memoria de atlas y distancia de descarte.")]
         [InspectorName("Medio · Equilibrado")]
         [SerializeField] private VoxelImpostorSettings medium = VoxelImpostorSettings.CreateMedium();
         [Tooltip(
             "Preset para vehículos voladores, objetos móviles importantes y modelos que pueden observarse " +
-            "desde cualquier dirección. Aumenta memoria, tiempo de horneado y duración del Cross Fade.")]
+            "desde cualquier dirección. Aumenta la memoria y el tiempo de horneado.")]
         [InspectorName("Alto · Gran distancia")]
         [SerializeField] private VoxelImpostorSettings high = VoxelImpostorSettings.CreateHigh();
         [Tooltip(

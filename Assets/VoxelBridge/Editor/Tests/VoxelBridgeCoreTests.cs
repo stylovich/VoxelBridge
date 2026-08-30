@@ -82,19 +82,37 @@ namespace LocalModels.VoxelBridge.Tests
                 Assert.That(architecture.TextureResolution, Is.EqualTo(2048));
                 Assert.That(low.Frames, Is.LessThan(medium.Frames));
                 Assert.That(medium.Frames, Is.LessThan(high.Frames));
-                Assert.That(low.CrossFade, Is.False);
-                Assert.That(medium.CrossFade, Is.True);
                 Assert.That(high.CullScreenHeight, Is.LessThan(medium.CullScreenHeight));
                 Assert.That(architecture.ImpostorType,
                     Is.EqualTo(VoxelImpostorType.HemiOctahedron));
                 Assert.That(architecture.MaxVertices, Is.EqualTo(10));
                 Assert.That(architecture.CullScreenHeight, Is.EqualTo(0.0005f).Within(1e-7f));
-                Assert.That(architecture.FadeTransitionWidth, Is.EqualTo(0.3f).Within(1e-6f));
             }
             finally
             {
                 Object.DestroyImmediate(profile);
             }
+        }
+
+        [Test]
+        public void ImpostorLodRanges_ExtendLaterVoxelLevelsWithoutMovingLod0()
+        {
+            var voxelLods = new[]
+            {
+                new LOD(0.37f, System.Array.Empty<Renderer>()),
+                new LOD(0.22f, System.Array.Empty<Renderer>()),
+                new LOD(0.12f, System.Array.Empty<Renderer>())
+            };
+
+            AmplifyImpostorIntegration.ExpandVoxelLodRangesTowardImpostor(
+                voxelLods, 0.01f);
+
+            Assert.That(voxelLods[0].screenRelativeTransitionHeight,
+                Is.EqualTo(0.37f).Within(1e-6f));
+            Assert.That(voxelLods[1].screenRelativeTransitionHeight,
+                Is.EqualTo(0.17f).Within(1e-6f));
+            Assert.That(voxelLods[2].screenRelativeTransitionHeight,
+                Is.EqualTo(0.12f + (0.01f - 0.12f) / 3f).Within(1e-6f));
         }
 
         [Test]
@@ -1435,9 +1453,7 @@ namespace LocalModels.VoxelBridge.Tests
                     quality = VoxelImpostorQuality.High,
                     amplifyVersion = AmplifyImpostorIntegration.SupportedVersion,
                     sourceLodIndex = 0,
-                    cullScreenHeight = 0.01f,
-                    crossFade = true,
-                    fadeTransitionWidth = 0.15f
+                    cullScreenHeight = 0.01f
                 };
                 VoxelLodPipeline.SaveManifest(build.ManifestAssetPath, manifestWithImpostor);
                 Assert.That(VoxelLodPipeline.TryReadManifest(
@@ -1451,13 +1467,21 @@ namespace LocalModels.VoxelBridge.Tests
                 prefab = AssetDatabase.LoadAssetAtPath<GameObject>(build.PrefabAssetPath);
                 LODGroup prefabLodGroup = prefab.GetComponent<LODGroup>();
                 Assert.That(prefabLodGroup.lodCount, Is.EqualTo(3));
-                Assert.That(prefabLodGroup.fadeMode, Is.EqualTo(LODFadeMode.CrossFade));
+                Assert.That(prefabLodGroup.fadeMode, Is.EqualTo(LODFadeMode.None));
+                Assert.That(prefabLodGroup.animateCrossFading, Is.False);
                 LOD[] lodsWithImpostor = prefabLodGroup.GetLODs();
+                Assert.That(lodsWithImpostor[0].screenRelativeTransitionHeight,
+                    Is.EqualTo(adaptiveLods[0].screenRelativeTransitionHeight)
+                        .Within(1e-6f));
                 Assert.That(lodsWithImpostor[1].screenRelativeTransitionHeight,
-                    Is.EqualTo(adaptiveManifest.lods[1].screenRelativeTransitionHeight)
+                    Is.EqualTo(Mathf.Lerp(
+                        adaptiveManifest.lods[1].screenRelativeTransitionHeight,
+                        0.01f, 1f / 3f))
                         .Within(1e-6f));
                 Assert.That(lodsWithImpostor[2].screenRelativeTransitionHeight,
                     Is.EqualTo(0.01f).Within(1e-6f));
+                Assert.That(lodsWithImpostor.All(lod =>
+                    Mathf.Approximately(lod.fadeTransitionWidth, 0f)), Is.True);
                 Assert.That(lodsWithImpostor[2].renderers, Has.Length.EqualTo(1));
                 Assert.That(lodsWithImpostor[2].renderers[0].gameObject.name, Is.EqualTo("Impostor"));
                 Assert.That(VoxelLodPipeline.TryFindManifestForAsset(impostorAssetPath,

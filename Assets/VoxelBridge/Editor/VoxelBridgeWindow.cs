@@ -776,13 +776,18 @@ namespace LocalModels.VoxelBridge
                 if (!validProfile)
                     EditorGUILayout.HelpBox(error, MessageType.Error);
                 else
+                {
+                    float finalVoxelTransition =
+                        AmplifyImpostorIntegration.GetExpandedLastVoxelTransition(
+                            lastVoxelTransition, settings.CullScreenHeight,
+                            manifest.lods?.Length ?? 0);
                     EditorGUILayout.HelpBox(
                         $"{settings.ImpostorType} · atlas {settings.TextureResolution} · " +
                         $"{settings.Frames}x{settings.Frames} vistas · padding {settings.PixelPadding}px\n" +
-                        $"LOD voxel → impostor: {lastVoxelTransition:0.####} · descarte: " +
-                        $"{settings.CullScreenHeight:0.####} · Cross Fade: " +
-                        (settings.CrossFade ? settings.FadeTransitionWidth.ToString("0.##") : "desactivado"),
+                        $"Último LOD voxel → impostor: {finalVoxelTransition:0.####} · " +
+                        $"descarte: {settings.CullScreenHeight:0.####} · Fade Mode: None",
                         MessageType.None);
+                }
             }
 
             Object currentImpostor = hasManifest && manifest.impostor != null

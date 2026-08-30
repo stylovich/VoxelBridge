@@ -10,10 +10,10 @@ namespace LocalModels.VoxelBridge
         private const string ProfileSummary =
             "Esta configuración central contiene los cuatro perfiles que aparecen en la ventana de Voxel Bridge. " +
             "Cada familia recuerda el nivel elegido; no necesitas crear ni intercambiar archivos de perfil.\n\n" +
-            "BAJO · Atlas 512 · 8×8 vistas · HemiOctahedron · sin Cross Fade.\n" +
-            "MEDIO · Atlas 1024 · 12×12 vistas · Octahedron · Cross Fade 0.15.\n" +
-            "ALTO · Atlas 2048 · 16×16 vistas · Octahedron · Cross Fade 0.25.\n" +
-            "ARQUITECTURA · Atlas 2048 · 16×16 vistas · HemiOctahedron · Cross Fade 0.30.";
+            "BAJO · Atlas 512 · 8×8 vistas · HemiOctahedron.\n" +
+            "MEDIO · Atlas 1024 · 12×12 vistas · Octahedron.\n" +
+            "ALTO · Atlas 2048 · 16×16 vistas · Octahedron.\n" +
+            "ARQUITECTURA · Atlas 2048 · 16×16 vistas · HemiOctahedron.";
 
         private void OnEnable()
         {

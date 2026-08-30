@@ -80,8 +80,6 @@ namespace LocalModels.VoxelBridge
         public string amplifyVersion;
         public int sourceLodIndex;
         public float cullScreenHeight;
-        public bool crossFade;
-        public float fadeTransitionWidth;
     }
 
     [Serializable]

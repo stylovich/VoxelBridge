@@ -245,9 +245,7 @@ namespace LocalModels.VoxelBridge
                 quality = quality,
                 amplifyVersion = api.Version,
                 sourceLodIndex = 0,
-                cullScreenHeight = settings.CullScreenHeight,
-                crossFade = settings.CrossFade,
-                fadeTransitionWidth = settings.FadeTransitionWidth
+                cullScreenHeight = settings.CullScreenHeight
             };
             VoxelLodPipeline.SaveManifest(manifestAssetPath, manifest);
             prefabPath = VoxelLodPipeline.RebuildPrefab(manifestAssetPath);
@@ -436,17 +434,40 @@ namespace LocalModels.VoxelBridge
             renderer.sharedMaterial = material;
 
             var lods = new LOD[voxelLods.Length + 1];
+            ExpandVoxelLodRangesTowardImpostor(voxelLods, entry.cullScreenHeight);
             Array.Copy(voxelLods, lods, voxelLods.Length);
             lods[lods.Length - 1] = new LOD(entry.cullScreenHeight, new Renderer[] { renderer });
-            float fadeWidth = entry.crossFade ? Mathf.Clamp01(entry.fadeTransitionWidth) : 0f;
-            for (int i = 0; i < lods.Length; i++) lods[i].fadeTransitionWidth = fadeWidth;
+            for (int i = 0; i < lods.Length; i++) lods[i].fadeTransitionWidth = 0f;
 
-            group.fadeMode = entry.crossFade ? LODFadeMode.CrossFade : LODFadeMode.None;
+            group.fadeMode = LODFadeMode.None;
             group.animateCrossFading = false;
             group.SetLODs(lods);
             group.RecalculateBounds();
             return true;
         }
+
+        internal static void ExpandVoxelLodRangesTowardImpostor(
+            LOD[] voxelLods, float impostorCullHeight)
+        {
+            if (voxelLods == null || voxelLods.Length <= 1) return;
+
+            float[] originalHeights = voxelLods
+                .Select(lod => lod.screenRelativeTransitionHeight)
+                .ToArray();
+            int lastIndex = voxelLods.Length - 1;
+            for (int index = 1; index < lastIndex; index++)
+                voxelLods[index].screenRelativeTransitionHeight =
+                    Mathf.Lerp(originalHeights[index], originalHeights[index + 1], 0.5f);
+            voxelLods[lastIndex].screenRelativeTransitionHeight =
+                GetExpandedLastVoxelTransition(
+                    originalHeights[lastIndex], impostorCullHeight, voxelLods.Length);
+        }
+
+        internal static float GetExpandedLastVoxelTransition(
+            float originalTransition, float impostorCullHeight, int voxelLodCount) =>
+            voxelLodCount > 1
+                ? Mathf.Lerp(originalTransition, impostorCullHeight, 1f / 3f)
+                : originalTransition;
 
         private static void ConfigureData(Api api, Object data, VoxelImpostorSettings settings)
         {
