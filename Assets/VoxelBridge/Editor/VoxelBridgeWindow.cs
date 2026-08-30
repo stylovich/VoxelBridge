@@ -21,6 +21,9 @@ namespace LocalModels.VoxelBridge
             VoxelPrefabOverrideHandling.UsePrefabSource;
         [SerializeField] private bool batchPlaceInScene;
         [SerializeField] private bool batchDisableOriginalRoot = true;
+        [SerializeField, Min(256)] private int batchMemoryBudgetMb = 1024;
+        [SerializeField] private bool batchSkipOverMemoryBudget = true;
+        private VoxelLodBatchPreflight batchPreflight;
         private VoxelStyleProfile styleProfile;
         private VoxelImpostorProfile impostorProfile;
         [SerializeField] private VoxelImpostorQuality impostorQuality = VoxelImpostorQuality.Medium;
@@ -252,6 +255,10 @@ namespace LocalModels.VoxelBridge
             VoxelLodBatchOptions previewOptions = CreateBatchOptions();
             VoxelLodBatchSourcePlan[] batchPlans =
                 VoxelLodPipeline.GetAutomaticBatchPlans(batchParent, previewOptions);
+            string preflightSignature = VoxelLodBatchAnalyzer.CreateSignature(
+                batchPlans, styleProfile, CreateLodOptions(), previewOptions);
+            if (batchPreflight != null && batchPreflight.Signature != preflightSignature)
+                batchPreflight = null;
             int directChildCount = batchParent != null ? batchParent.transform.childCount : 0;
             if (batchParent != null)
             {
@@ -268,6 +275,44 @@ namespace LocalModels.VoxelBridge
                     $"{reuseCount} reutilización(es) · {modifiedCount} instancia(s) modificadas · " +
                     $"{ignoredCount} ignoradas · {skippedCount} hijo(s) sin malla.",
                     batchPlans.Any(plan => !plan.Ignored) ? MessageType.None : MessageType.Warning);
+            }
+
+            EditorGUILayout.Space(4);
+            EditorGUILayout.LabelField("Seguridad de memoria", EditorStyles.miniBoldLabel);
+            batchMemoryBudgetMb = Mathf.Clamp(EditorGUILayout.IntField(
+                new GUIContent("Presupuesto por modelo (MiB)",
+                    "Pico estimado permitido para una conversión única. 1024 MiB es un límite conservador para este equipo de 32 GB."),
+                batchMemoryBudgetMb), 256, 8192);
+            batchSkipOverMemoryBudget = EditorGUILayout.Toggle(
+                new GUIContent("Omitir modelos sobre presupuesto",
+                    "Evita iniciar fuentes cuyo pico estimado supera el límite. Se registran como error y el resto del lote continúa."),
+                batchSkipOverMemoryBudget);
+            using (new EditorGUI.DisabledScope(batchPlans.All(plan => plan.Ignored) ||
+                                               styleProfile == null ||
+                                               !styleProfile.TryValidate(out _)))
+            {
+                if (GUILayout.Button("Analizar memoria del lote")) AnalyzeAutomaticBatch();
+            }
+            if (batchPreflight != null)
+            {
+                MessageType analysisType = batchPreflight.InvalidCount > 0 ||
+                                           batchPreflight.OverBudgetCount > 0
+                    ? MessageType.Warning
+                    : MessageType.Info;
+                EditorGUILayout.HelpBox(
+                    $"{batchPreflight.UniqueConversionCount} fuente(s) única(s) · " +
+                    $"pico estimado {VoxelLodBatchAnalyzer.FormatBytes(batchPreflight.EstimatedPeakBytes)} · " +
+                    $"{batchPreflight.TotalDenseCells:N0} celdas entre todos los LODs · " +
+                    $"{batchPreflight.OverBudgetCount} sobre presupuesto · " +
+                    $"{batchPreflight.InvalidCount} inválidas.", analysisType);
+                foreach (VoxelLodBatchSourceEstimate estimate in batchPreflight.Sources
+                             .Where(item => item.Risk is VoxelLodBatchMemoryRisk.OverBudget or
+                                 VoxelLodBatchMemoryRisk.Invalid)
+                             .Take(6))
+                    EditorGUILayout.LabelField(
+                        $"• {estimate.SourceName}: " + (estimate.IsValid
+                            ? VoxelLodBatchAnalyzer.FormatBytes(estimate.EstimatedPeakBytes)
+                            : estimate.Error), EditorStyles.wordWrappedMiniLabel);
             }
 
             bool canPlaceBatch = VoxelLodBatchScenePlacement.CanPlace(batchParent);
@@ -607,8 +652,41 @@ namespace LocalModels.VoxelBridge
         private VoxelLodBatchOptions CreateBatchOptions() => new()
         {
             ReusePrefabSources = batchReusePrefabSources,
-            ModifiedPrefabHandling = batchModifiedPrefabHandling
+            ModifiedPrefabHandling = batchModifiedPrefabHandling,
+            MaximumEstimatedMemoryBytes = Mathf.Max(256, batchMemoryBudgetMb) *
+                                          VoxelLodBatchAnalyzer.Mebibyte,
+            SkipSourcesOverMemoryBudget = batchSkipOverMemoryBudget,
+            Preflight = batchPreflight
         };
+
+        private void AnalyzeAutomaticBatch()
+        {
+            try
+            {
+                VoxelLodBatchOptions batchOptions = CreateBatchOptions();
+                batchOptions.Preflight = null;
+                VoxelLodBatchSourcePlan[] plans =
+                    VoxelLodPipeline.GetAutomaticBatchPlans(batchParent, batchOptions);
+                batchPreflight = VoxelLodBatchAnalyzer.Analyze(
+                    plans, styleProfile, CreateLodOptions(), batchOptions,
+                    (progress, message) => EditorUtility.DisplayCancelableProgressBar(
+                        "Voxel Bridge · Análisis de memoria", message, progress));
+                status = $"Análisis terminado: {batchPreflight.UniqueConversionCount} fuente(s) únicas, " +
+                         $"pico {VoxelLodBatchAnalyzer.FormatBytes(batchPreflight.EstimatedPeakBytes)}.";
+            }
+            catch (OperationCanceledException)
+            {
+                status = "Análisis de memoria cancelado.";
+            }
+            catch (Exception exception)
+            {
+                ShowException(exception);
+            }
+            finally
+            {
+                EditorUtility.ClearProgressBar();
+            }
+        }
 
         private void GenerateAutomaticLods()
         {
@@ -649,11 +727,34 @@ namespace LocalModels.VoxelBridge
         {
             try
             {
+                VoxelLodBatchOptions batchOptions = CreateBatchOptions();
+                VoxelLodBatchSourcePlan[] plans =
+                    VoxelLodPipeline.GetAutomaticBatchPlans(batchParent, batchOptions);
+                string signature = VoxelLodBatchAnalyzer.CreateSignature(
+                    plans, styleProfile, CreateLodOptions(), batchOptions);
+                if (batchPreflight == null || batchPreflight.Signature != signature)
+                {
+                    batchOptions.Preflight = null;
+                    batchPreflight = VoxelLodBatchAnalyzer.Analyze(
+                        plans, styleProfile, CreateLodOptions(), batchOptions,
+                        (progress, message) => EditorUtility.DisplayCancelableProgressBar(
+                            "Voxel Bridge · Análisis previo", message, progress));
+                }
+                batchOptions.Preflight = batchPreflight;
+                if (!batchSkipOverMemoryBudget && batchPreflight.OverBudgetCount > 0 &&
+                    !EditorUtility.DisplayDialog("Voxel Bridge · Riesgo de memoria",
+                        $"{batchPreflight.OverBudgetCount} fuente(s) superan el presupuesto de " +
+                        $"{batchMemoryBudgetMb} MiB. Continuar puede cerrar Unity por falta de memoria.",
+                        "Continuar", "Cancelar"))
+                {
+                    status = "Generación por lotes cancelada antes de voxelizar.";
+                    return;
+                }
                 VoxelLodBatchBuildResult result = VoxelLodPipeline.GenerateAutomaticBatch(
                     batchParent, styleProfile, CreateLodOptions(),
                     (progress, message) => EditorUtility.DisplayCancelableProgressBar(
                         "Voxel Bridge · Generación por lotes", message, progress),
-                    CreateBatchOptions());
+                    batchOptions);
 
                 foreach (VoxelLodBatchItemResult failed in result.Items.Where(item => item.Failed))
                     Debug.LogWarning($"Voxel Bridge omitió '{failed.Source.name}': {failed.Error}", failed.Source);

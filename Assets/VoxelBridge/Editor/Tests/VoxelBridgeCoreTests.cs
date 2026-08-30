@@ -620,6 +620,65 @@ namespace LocalModels.VoxelBridge.Tests
         }
 
         [Test]
+        public void BatchPreflight_EstimatesEachReusableSourceOnceAndAppliesBudget()
+        {
+            const string testRoot = "Assets/VoxelBridgePreflightTestOutput";
+            GameObject sourceObject = null;
+            GameObject parent = null;
+            VoxelStyleProfile profile = null;
+            try
+            {
+                VoxelLodPipeline.EnsureAssetFolder(testRoot);
+                sourceObject = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                GameObject prefab = PrefabUtility.SaveAsPrefabAsset(
+                    sourceObject, testRoot + "/PreflightCube.prefab");
+                Object.DestroyImmediate(sourceObject);
+                sourceObject = null;
+
+                parent = new GameObject("PreflightParent");
+                PrefabUtility.InstantiatePrefab(prefab, parent.transform);
+                PrefabUtility.InstantiatePrefab(prefab, parent.transform);
+                profile = ScriptableObject.CreateInstance<VoxelStyleProfile>();
+                var serializedProfile = new SerializedObject(profile);
+                serializedProfile.FindProperty("baseVoxelSize").floatValue = 0.25f;
+                SerializedProperty multipliers = serializedProfile.FindProperty("lodMultipliers");
+                multipliers.arraySize = 2;
+                multipliers.GetArrayElementAtIndex(0).intValue = 1;
+                multipliers.GetArrayElementAtIndex(1).intValue = 2;
+                serializedProfile.ApplyModifiedPropertiesWithoutUndo();
+
+                var lodOptions = new VoxelLodBuildOptions
+                {
+                    ColorMode = VoxelColorMode.SingleColor,
+                    ExportFolder = testRoot
+                };
+                var batchOptions = new VoxelLodBatchOptions
+                {
+                    MaximumEstimatedMemoryBytes = 1
+                };
+                VoxelLodBatchSourcePlan[] plans =
+                    VoxelLodPipeline.GetAutomaticBatchPlans(parent, batchOptions);
+                VoxelLodBatchPreflight preflight = VoxelLodBatchAnalyzer.Analyze(
+                    plans, profile, lodOptions, batchOptions);
+
+                Assert.That(preflight.CandidateCount, Is.EqualTo(2));
+                Assert.That(preflight.UniqueConversionCount, Is.EqualTo(1));
+                Assert.That(preflight.ReusedCount, Is.EqualTo(1));
+                Assert.That(preflight.Sources[0].LodPlans, Has.Length.EqualTo(2));
+                Assert.That(preflight.Sources[0].EstimatedPeakBytes, Is.GreaterThan(0));
+                Assert.That(preflight.Sources[0].Risk,
+                    Is.EqualTo(VoxelLodBatchMemoryRisk.OverBudget));
+            }
+            finally
+            {
+                if (parent != null) Object.DestroyImmediate(parent);
+                if (sourceObject != null) Object.DestroyImmediate(sourceObject);
+                if (profile != null) Object.DestroyImmediate(profile);
+                AssetDatabase.DeleteAsset(testRoot);
+            }
+        }
+
+        [Test]
         public void AutomaticLodPipeline_CreatesChunkedVoxFamilyAndLodPrefab()
         {
             if (!VoxelImporterIntegration.IsInstalled)

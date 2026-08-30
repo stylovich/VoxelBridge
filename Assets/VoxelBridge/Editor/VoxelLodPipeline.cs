@@ -42,6 +42,9 @@ namespace LocalModels.VoxelBridge
         public bool ReusePrefabSources = true;
         public VoxelPrefabOverrideHandling ModifiedPrefabHandling =
             VoxelPrefabOverrideHandling.UsePrefabSource;
+        public long MaximumEstimatedMemoryBytes = 1024L * 1024L * 1024L;
+        public bool SkipSourcesOverMemoryBudget = true;
+        public VoxelLodBatchPreflight Preflight;
     }
 
     internal sealed class VoxelLodBatchSourcePlan
@@ -96,6 +99,7 @@ namespace LocalModels.VoxelBridge
         public readonly VoxelLodBatchItemResult[] Items;
         public readonly int CandidateCount;
         public readonly bool Cancelled;
+        public readonly VoxelLodBatchPreflight Preflight;
 
         public int SucceededCount => Items.Count(item => item.Succeeded);
         public int FailedCount => Items.Count(item => item.Failed);
@@ -106,11 +110,13 @@ namespace LocalModels.VoxelBridge
                                   FailedCount == 0 && IgnoredCount == 0;
 
         public VoxelLodBatchBuildResult(
-            IEnumerable<VoxelLodBatchItemResult> items, int candidateCount, bool cancelled)
+            IEnumerable<VoxelLodBatchItemResult> items, int candidateCount, bool cancelled,
+            VoxelLodBatchPreflight preflight = null)
         {
             Items = items.ToArray();
             CandidateCount = candidateCount;
             Cancelled = cancelled;
+            Preflight = preflight;
         }
     }
 
@@ -167,6 +173,14 @@ namespace LocalModels.VoxelBridge
                 throw new InvalidOperationException(
                     "El objeto padre no contiene hijos directos con mallas para voxelizar.");
 
+            batchOptions ??= new VoxelLodBatchOptions();
+            VoxelLodBatchPreflight preflight = batchOptions.Preflight;
+            string expectedSignature = VoxelLodBatchAnalyzer.CreateSignature(
+                plans, profile, options, batchOptions);
+            if (preflight == null || preflight.Signature != expectedSignature)
+                preflight = VoxelLodBatchAnalyzer.Analyze(
+                    plans, profile, options, batchOptions, cancelProgress);
+
             var items = new List<VoxelLodBatchItemResult>();
             var outcomes = new Dictionary<Object, VoxelLodBatchConversionOutcome>();
             for (int sourceIndex = 0; sourceIndex < plans.Length; sourceIndex++)
@@ -176,7 +190,7 @@ namespace LocalModels.VoxelBridge
                 float progressBase = (float)sourceIndex / plans.Length;
                 if (cancelProgress != null && cancelProgress(progressBase,
                         $"Modelo {sourceIndex + 1} de {plans.Length}: preparando {current.name}"))
-                    return new VoxelLodBatchBuildResult(items, plans.Length, true);
+                    return new VoxelLodBatchBuildResult(items, plans.Length, true, preflight);
 
                 if (plan.Ignored)
                 {
@@ -188,6 +202,23 @@ namespace LocalModels.VoxelBridge
                 {
                     items.Add(new VoxelLodBatchItemResult(
                         plan, previous.BuildResult, true, previous.Error));
+                    continue;
+                }
+
+                VoxelLodBatchSourceEstimate estimate = preflight.Find(plan.ReuseKey);
+                string preflightError = estimate == null
+                    ? "No se encontró el análisis previo de esta fuente."
+                    : estimate.Error;
+                if (string.IsNullOrEmpty(preflightError) &&
+                    batchOptions.SkipSourcesOverMemoryBudget && estimate.IsOverBudget)
+                    preflightError =
+                        $"Memoria estimada {VoxelLodBatchAnalyzer.FormatBytes(estimate.EstimatedPeakBytes)}, " +
+                        $"por encima del presupuesto de {VoxelLodBatchAnalyzer.FormatBytes(estimate.MemoryBudgetBytes)}.";
+                if (!string.IsNullOrEmpty(preflightError))
+                {
+                    var rejected = new VoxelLodBatchConversionOutcome(default, preflightError);
+                    outcomes.Add(plan.ReuseKey, rejected);
+                    items.Add(new VoxelLodBatchItemResult(plan, default, false, preflightError));
                     continue;
                 }
 
@@ -204,7 +235,7 @@ namespace LocalModels.VoxelBridge
                 }
                 catch (OperationCanceledException)
                 {
-                    return new VoxelLodBatchBuildResult(items, plans.Length, true);
+                    return new VoxelLodBatchBuildResult(items, plans.Length, true, preflight);
                 }
                 catch (Exception exception)
                 {
@@ -214,7 +245,7 @@ namespace LocalModels.VoxelBridge
                 }
             }
 
-            return new VoxelLodBatchBuildResult(items, plans.Length, false);
+            return new VoxelLodBatchBuildResult(items, plans.Length, false, preflight);
         }
 
         private static VoxelLodBatchSourcePlan CreateAutomaticBatchPlan(
