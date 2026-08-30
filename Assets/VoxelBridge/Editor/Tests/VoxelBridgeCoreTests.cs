@@ -101,6 +101,125 @@ namespace LocalModels.VoxelBridge.Tests
         }
 
         [Test]
+        public void ImpostorBatch_DeduplicatesFamiliesContinuesAfterFailureAndCanCancel()
+        {
+            VoxelImpostorProfile profile = ScriptableObject.CreateInstance<VoxelImpostorProfile>();
+            try
+            {
+                int calls = 0;
+                VoxelImpostorBatchBuildResult result =
+                    AmplifyImpostorIntegration.GenerateForManifests(
+                        new[]
+                        {
+                            "Assets/A.voxset.json",
+                            "Assets/A.voxset.json",
+                            "Assets/B.voxset.json"
+                        },
+                        profile, VoxelImpostorQuality.Medium, null,
+                        (path, unusedProfile, unusedQuality) =>
+                        {
+                            calls++;
+                            if (path.EndsWith("B.voxset.json"))
+                                throw new System.InvalidOperationException("Fallo controlado");
+                            return new VoxelImpostorBuildResult(
+                                path + ".asset", path + ".prefab");
+                        });
+
+                Assert.That(calls, Is.EqualTo(2));
+                Assert.That(result.CandidateCount, Is.EqualTo(2));
+                Assert.That(result.GeneratedCount, Is.EqualTo(1));
+                Assert.That(result.FailedCount, Is.EqualTo(1));
+                Assert.That(result.Failures[0].ManifestAssetPath,
+                    Is.EqualTo("Assets/B.voxset.json"));
+                Assert.That(result.Cancelled, Is.False);
+
+                VoxelImpostorBatchBuildResult cancelled =
+                    AmplifyImpostorIntegration.GenerateForManifests(
+                        new[] { "Assets/C.voxset.json" }, profile,
+                        VoxelImpostorQuality.Low, (progress, message) => true,
+                        (path, unusedProfile, unusedQuality) => throw new AssertionException(
+                            "El generador no debe ejecutarse después de cancelar."));
+                Assert.That(cancelled.Cancelled, Is.True);
+                Assert.That(cancelled.GeneratedCount, Is.Zero);
+                Assert.That(cancelled.RemainingCount, Is.EqualTo(1));
+            }
+            finally
+            {
+                Object.DestroyImmediate(profile);
+            }
+        }
+
+        [Test]
+        public void ImpostorBatch_BakesAmplifyAssetAndAppendsFinalLod()
+        {
+            if (!VoxelImporterIntegration.IsInstalled)
+                Assert.Ignore("Voxel Importer es opcional y no está instalado.");
+            AmplifyImpostorCompatibility compatibility =
+                AmplifyImpostorIntegration.GetCompatibility();
+            if (!compatibility.CanBake)
+                Assert.Ignore(compatibility.Message);
+
+            const string testRoot = "Assets/VoxelBridgeAmplifyBatchTestOutput";
+            GameObject source = null;
+            VoxelStyleProfile voxelProfile = null;
+            VoxelImpostorProfile impostorProfile = null;
+            try
+            {
+                source = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                source.name = "AmplifyBatchCube";
+                voxelProfile = ScriptableObject.CreateInstance<VoxelStyleProfile>();
+                var serializedProfile = new SerializedObject(voxelProfile);
+                serializedProfile.FindProperty("baseVoxelSize").floatValue = 0.5f;
+                serializedProfile.FindProperty("chunkCellSize").intValue = 16;
+                SerializedProperty multipliers =
+                    serializedProfile.FindProperty("lodMultipliers");
+                multipliers.arraySize = 1;
+                multipliers.GetArrayElementAtIndex(0).intValue = 1;
+                SerializedProperty transitions =
+                    serializedProfile.FindProperty("lodScreenHeights");
+                transitions.arraySize = 1;
+                transitions.GetArrayElementAtIndex(0).floatValue = 0.05f;
+                serializedProfile.ApplyModifiedPropertiesWithoutUndo();
+                impostorProfile = ScriptableObject.CreateInstance<VoxelImpostorProfile>();
+
+                VoxelLodBuildResult build = VoxelLodPipeline.GenerateAutomatic(
+                    source, voxelProfile, new VoxelLodBuildOptions
+                    {
+                        ColorMode = VoxelColorMode.SingleColor,
+                        SingleColor = new Color32(120, 160, 200, 255),
+                        ExportFolder = testRoot
+                    });
+                VoxelImpostorBatchBuildResult batch =
+                    AmplifyImpostorIntegration.GenerateForManifests(
+                        new[] { build.ManifestAssetPath }, impostorProfile,
+                        VoxelImpostorQuality.Low);
+
+                Assert.That(batch.Cancelled, Is.False);
+                Assert.That(batch.GeneratedCount, Is.EqualTo(1));
+                Assert.That(batch.FailedCount, Is.Zero);
+                Assert.That(AssetDatabase.LoadMainAssetAtPath(
+                    batch.Builds[0].ImpostorAssetPath), Is.Not.Null);
+                Assert.That(VoxelLodPipeline.TryReadManifest(
+                    build.ManifestAssetPath, out VoxelLodSetManifest manifest), Is.True);
+                Assert.That(manifest.impostor, Is.Not.Null);
+                Assert.That(manifest.impostor.quality, Is.EqualTo(VoxelImpostorQuality.Low));
+                GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(
+                    batch.Builds[0].PrefabAssetPath);
+                Assert.That(prefab, Is.Not.Null);
+                Assert.That(prefab.GetComponent<LODGroup>().lodCount, Is.EqualTo(2));
+                Assert.That(AmplifyImpostorIntegration.FindPendingManifestAssetPaths(testRoot),
+                    Does.Not.Contain(build.ManifestAssetPath));
+            }
+            finally
+            {
+                if (source != null) Object.DestroyImmediate(source);
+                if (voxelProfile != null) Object.DestroyImmediate(voxelProfile);
+                if (impostorProfile != null) Object.DestroyImmediate(impostorProfile);
+                AssetDatabase.DeleteAsset(testRoot);
+            }
+        }
+
+        [Test]
         public void TriangleBoxIntersection_DetectsHitAndMiss()
         {
             Assert.That(MeshVoxelizer.TriangleIntersectsBox(
@@ -1009,6 +1128,8 @@ namespace LocalModels.VoxelBridge.Tests
                 VoxelLodBuildResult build = VoxelLodPipeline.GenerateAutomatic(root, profile, options);
 
                 Assert.That(build.VoxAssetPaths.Length, Is.EqualTo(2));
+                Assert.That(AmplifyImpostorIntegration.FindPendingManifestAssetPaths(testRoot),
+                    Does.Contain(build.ManifestAssetPath));
                 Assert.That(File.Exists(VoxelLodPipeline.AssetPathToAbsolute(build.ManifestAssetPath)), Is.True);
                 Assert.That(VoxelImporterIntegration.TryLoadMetadata(build.VoxAssetPaths[0],
                     out VoxelBridgeMetadata lod0, out string error), Is.True, error);
@@ -1103,6 +1224,8 @@ namespace LocalModels.VoxelBridge.Tests
                     build.ManifestAssetPath, out VoxelLodSetManifest savedImpostorManifest), Is.True);
                 Assert.That(savedImpostorManifest.impostor.quality,
                     Is.EqualTo(VoxelImpostorQuality.High));
+                Assert.That(AmplifyImpostorIntegration.FindPendingManifestAssetPaths(testRoot),
+                    Does.Not.Contain(build.ManifestAssetPath));
                 Assert.That(VoxelLodPipeline.RebuildPrefab(build.ManifestAssetPath),
                     Is.EqualTo(build.PrefabAssetPath));
                 prefab = AssetDatabase.LoadAssetAtPath<GameObject>(build.PrefabAssetPath);

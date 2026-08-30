@@ -31,6 +31,7 @@ namespace LocalModels.VoxelBridge
         [SerializeField] private bool batchIgnoreInactiveObjects = true;
         [SerializeField] private bool batchResumeInterrupted = true;
         [SerializeField, Range(1, 25)] private int batchCleanupInterval = 1;
+        [SerializeField] private bool batchGenerateImpostors = true;
         [SerializeField] private bool batchShowPlanDetails;
         private VoxelLodBatchPreflight batchPreflight;
         private VoxelStyleProfile styleProfile;
@@ -440,6 +441,8 @@ namespace LocalModels.VoxelBridge
                         EditorStyles.wordWrappedMiniLabel);
             }
 
+            bool batchImpostorsReady = DrawBatchImpostorOptions();
+
             bool canPlaceBatch = VoxelLodBatchScenePlacement.CanPlace(batchParent);
             using (new EditorGUI.DisabledScope(!canPlaceBatch))
                 batchPlaceInScene = EditorGUILayout.Toggle(
@@ -473,12 +476,62 @@ namespace LocalModels.VoxelBridge
 
             bool canGenerateBatch = batchPlans.Any(plan => !plan.Ignored) && styleProfile != null &&
                                     styleProfile.TryValidate(out _) &&
-                                    VoxelLodPipeline.IsAssetFolder(exportFolder);
+                                    VoxelLodPipeline.IsAssetFolder(exportFolder) &&
+                                    batchImpostorsReady;
             using (new EditorGUI.DisabledScope(!canGenerateBatch))
             {
-                if (GUILayout.Button("Generar familias de todos los hijos", GUILayout.Height(38)))
+                string label = batchGenerateImpostors
+                    ? "Generar familias e impostores de todos los hijos"
+                    : "Generar familias de todos los hijos";
+                if (GUILayout.Button(label, GUILayout.Height(38)))
                     GenerateAutomaticBatch();
             }
+        }
+
+        private bool DrawBatchImpostorOptions()
+        {
+            EditorGUILayout.Space(4);
+            EditorGUILayout.LabelField("Impostores del lote", EditorStyles.miniBoldLabel);
+            batchGenerateImpostors = EditorGUILayout.Toggle(
+                new GUIContent("Generar impostor final",
+                    "Hornea un impostor después de cada familia voxel única y lo añade como último nivel del LODGroup. Las instancias reutilizadas comparten el mismo impostor."),
+                batchGenerateImpostors);
+            if (!batchGenerateImpostors) return true;
+
+            AmplifyImpostorCompatibility compatibility =
+                AmplifyImpostorIntegration.GetCompatibility();
+            MessageType compatibilityMessage = compatibility.Status switch
+            {
+                AmplifyImpostorCompatibilityStatus.Ready => MessageType.Info,
+                AmplifyImpostorCompatibilityStatus.NotInstalled => MessageType.Warning,
+                _ => MessageType.Error
+            };
+            EditorGUILayout.HelpBox(compatibility.Message, compatibilityMessage);
+
+            if (impostorProfile == null)
+            {
+                EditorGUILayout.HelpBox(
+                    "Asigna o crea la configuración central de perfiles de impostor.",
+                    MessageType.Error);
+                if (GUILayout.Button("Crear configuración de perfiles de impostor"))
+                    CreateDefaultImpostorProfile();
+                return false;
+            }
+
+            DrawImpostorQualitySelector();
+            if (styleProfile != null && styleProfile.LodCount > 0 &&
+                !impostorProfile.TryValidate(impostorQuality,
+                    styleProfile.GetLodScreenHeight(styleProfile.LodCount - 1),
+                    out string profileError))
+            {
+                EditorGUILayout.HelpBox(profileError, MessageType.Error);
+                return false;
+            }
+
+            EditorGUILayout.HelpBox(
+                "El horneado se realiza en serie y una sola vez por familia. Un error de Amplify conserva la familia voxel y permite continuar con las restantes.",
+                MessageType.None);
+            return compatibility.CanBake;
         }
 
         private void DrawColorSettings()
@@ -704,6 +757,19 @@ namespace LocalModels.VoxelBridge
                 if (GUILayout.Button("Generar o actualizar impostor final", GUILayout.Height(36)))
                     GenerateImpostor();
             }
+
+            EditorGUILayout.Space(6);
+            EditorGUILayout.LabelField("Familias existentes", EditorStyles.miniBoldLabel);
+            EditorGUILayout.HelpBox(
+                "Procesa las familias de la carpeta de exportación cuyo manifiesto todavía no contiene un impostor válido. Utiliza el perfil seleccionado y no vuelve a voxelizar los modelos.",
+                MessageType.None);
+            bool canGeneratePending = compatibility.CanBake && impostorProfile != null &&
+                                      VoxelLodPipeline.IsAssetFolder(exportFolder);
+            using (new EditorGUI.DisabledScope(!canGeneratePending))
+            {
+                if (GUILayout.Button("Generar impostores pendientes en la carpeta"))
+                    GeneratePendingImpostors();
+            }
         }
 
         private void DrawImpostorQualitySelector()
@@ -914,6 +980,16 @@ namespace LocalModels.VoxelBridge
                         "Voxel Bridge · Generación por lotes", message, progress),
                     batchOptions);
 
+                VoxelImpostorBatchBuildResult impostorResult = null;
+                if (batchGenerateImpostors && !result.Cancelled && result.SucceededCount > 0)
+                {
+                    impostorResult = AmplifyImpostorIntegration.GenerateForBatch(
+                        result, impostorProfile, impostorQuality,
+                        (progress, message) => EditorUtility.DisplayCancelableProgressBar(
+                            "Voxel Bridge · Impostores por lotes", message, progress));
+                    LogImpostorFailures(impostorResult);
+                }
+
                 foreach (VoxelLodBatchItemResult failed in result.Items.Where(item => item.Failed))
                     Debug.LogWarning($"Voxel Bridge omitió '{failed.Source.name}': {failed.Error}", failed.Source);
 
@@ -938,6 +1014,14 @@ namespace LocalModels.VoxelBridge
                          $"{result.ResumedCount} recuperadas desde checkpoint, " +
                          $"{result.ReusedCount} instancia(s) reutilizadas, {result.FailedCount} con errores y " +
                          $"{result.IgnoredCount} ignoradas.";
+                if (impostorResult != null)
+                {
+                    status += $" {impostorResult.GeneratedCount} impostor(es) generados y " +
+                              $"{impostorResult.FailedCount} con errores.";
+                    if (impostorResult.Cancelled)
+                        status += $" Horneado cancelado; quedan " +
+                                  $"{impostorResult.RemainingCount} familia(s) pendientes.";
+                }
                 if (placement.HasValue)
                 {
                     if (placement.Value.OriginalRootDisabled)
@@ -947,7 +1031,8 @@ namespace LocalModels.VoxelBridge
                     else
                         status += $" Se creó '{placement.Value.Root.name}' desactivada porque el reemplazo no era completo.";
                 }
-                if (result.SucceededCount == 0 && result.FailedCount > 0)
+                if ((result.SucceededCount == 0 && result.FailedCount > 0) ||
+                    impostorResult is { FailedCount: > 0 })
                     EditorUtility.DisplayDialog("Voxel Bridge · Lote con errores", status +
                         " Revisa la Console para ver el detalle de cada objeto.", "Cerrar");
             }
@@ -976,7 +1061,11 @@ namespace LocalModels.VoxelBridge
                 manualTargetLod = Mathf.Min(1, styleProfile.LodCount - 1);
             }
             lastPrefabAsset = AssetDatabase.LoadMainAssetAtPath(result.PrefabAssetPath);
-            lastImpostorAsset = null;
+            lastImpostorAsset = VoxelLodPipeline.TryReadManifest(
+                    result.ManifestAssetPath, out VoxelLodSetManifest manifest) &&
+                manifest.impostor != null
+                    ? AssetDatabase.LoadMainAssetAtPath(manifest.impostor.assetPath)
+                    : null;
         }
 
         private static string GetBatchOverrideDescription(VoxelPrefabOverrideHandling handling) =>
@@ -1051,6 +1140,73 @@ namespace LocalModels.VoxelBridge
             finally
             {
                 EditorUtility.ClearProgressBar();
+            }
+        }
+
+        private void GeneratePendingImpostors()
+        {
+            try
+            {
+                string[] manifests =
+                    AmplifyImpostorIntegration.FindPendingManifestAssetPaths(exportFolder);
+                if (manifests.Length == 0)
+                {
+                    status = "No hay familias pendientes de impostor en la carpeta de exportación.";
+                    return;
+                }
+                if (!EditorUtility.DisplayDialog(
+                        "Voxel Bridge · Generar impostores pendientes",
+                        $"Se procesarán {manifests.Length} familia(s) con el perfil " +
+                        $"'{VoxelImpostorProfile.GetQualityName(impostorQuality)}'. " +
+                        "Las familias pueden conservarse aunque un horneado individual falle.",
+                        "Generar", "Cancelar"))
+                {
+                    status = "Generación de impostores pendientes cancelada antes de iniciar.";
+                    return;
+                }
+
+                VoxelImpostorBatchBuildResult result =
+                    AmplifyImpostorIntegration.GenerateForManifests(
+                        manifests, impostorProfile, impostorQuality,
+                        (progress, message) => EditorUtility.DisplayCancelableProgressBar(
+                            "Voxel Bridge · Impostores pendientes", message, progress));
+                LogImpostorFailures(result);
+
+                if (result.Builds.Length > 0)
+                {
+                    VoxelImpostorBuildResult last = result.Builds[result.Builds.Length - 1];
+                    TryLoadFamilyFromAsset(
+                        AssetDatabase.LoadMainAssetAtPath(last.PrefabAssetPath));
+                    SelectAndPing(lastPrefabAsset);
+                }
+
+                status = result.Cancelled ? "Horneado de impostores cancelado." : "Horneado terminado.";
+                status += $" {result.GeneratedCount} impostor(es) generados, " +
+                          $"{result.FailedCount} con errores y " +
+                          $"{result.RemainingCount} pendientes.";
+                if (result.FailedCount > 0)
+                    EditorUtility.DisplayDialog("Voxel Bridge · Impostores con errores", status +
+                        " Revisa la Console para ver el detalle de cada familia.", "Cerrar");
+            }
+            catch (Exception exception)
+            {
+                ShowException(exception);
+            }
+            finally
+            {
+                EditorUtility.ClearProgressBar();
+            }
+        }
+
+        private static void LogImpostorFailures(VoxelImpostorBatchBuildResult result)
+        {
+            if (result == null) return;
+            foreach (VoxelImpostorBatchFailure failure in result.Failures)
+            {
+                Object context = AssetDatabase.LoadMainAssetAtPath(failure.ManifestAssetPath);
+                Debug.LogWarning(
+                    $"Voxel Bridge no pudo generar el impostor de " +
+                    $"'{failure.ManifestAssetPath}': {failure.Error}", context);
             }
         }
 

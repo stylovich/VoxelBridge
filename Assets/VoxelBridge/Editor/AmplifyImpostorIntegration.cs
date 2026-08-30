@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -44,6 +45,40 @@ namespace LocalModels.VoxelBridge
         {
             ImpostorAssetPath = impostorAssetPath;
             PrefabAssetPath = prefabAssetPath;
+        }
+    }
+
+    internal readonly struct VoxelImpostorBatchFailure
+    {
+        public readonly string ManifestAssetPath;
+        public readonly string Error;
+
+        public VoxelImpostorBatchFailure(string manifestAssetPath, string error)
+        {
+            ManifestAssetPath = manifestAssetPath;
+            Error = error;
+        }
+    }
+
+    internal sealed class VoxelImpostorBatchBuildResult
+    {
+        public readonly int CandidateCount;
+        public readonly VoxelImpostorBuildResult[] Builds;
+        public readonly VoxelImpostorBatchFailure[] Failures;
+        public readonly bool Cancelled;
+
+        public int GeneratedCount => Builds.Length;
+        public int FailedCount => Failures.Length;
+        public int RemainingCount => Mathf.Max(0, CandidateCount - GeneratedCount - FailedCount);
+
+        public VoxelImpostorBatchBuildResult(
+            int candidateCount, IEnumerable<VoxelImpostorBuildResult> builds,
+            IEnumerable<VoxelImpostorBatchFailure> failures, bool cancelled)
+        {
+            CandidateCount = candidateCount;
+            Builds = builds.ToArray();
+            Failures = failures.ToArray();
+            Cancelled = cancelled;
         }
     }
 
@@ -217,6 +252,89 @@ namespace LocalModels.VoxelBridge
             VoxelLodPipeline.SaveManifest(manifestAssetPath, manifest);
             prefabPath = VoxelLodPipeline.RebuildPrefab(manifestAssetPath);
             return new VoxelImpostorBuildResult(impostorAssetPath, prefabPath);
+        }
+
+        internal static VoxelImpostorBatchBuildResult GenerateForBatch(
+            VoxelLodBatchBuildResult batch, VoxelImpostorProfile profile,
+            VoxelImpostorQuality quality, Func<float, string, bool> cancelProgress = null,
+            Func<string, VoxelImpostorProfile, VoxelImpostorQuality,
+                VoxelImpostorBuildResult> generate = null)
+        {
+            if (batch == null) throw new ArgumentNullException(nameof(batch));
+            return GenerateForManifests(
+                batch.Items.Where(item => item.Succeeded)
+                    .Select(item => item.BuildResult.ManifestAssetPath),
+                profile, quality, cancelProgress, generate);
+        }
+
+        internal static VoxelImpostorBatchBuildResult GenerateForManifests(
+            IEnumerable<string> manifestAssetPaths, VoxelImpostorProfile profile,
+            VoxelImpostorQuality quality, Func<float, string, bool> cancelProgress = null,
+            Func<string, VoxelImpostorProfile, VoxelImpostorQuality,
+                VoxelImpostorBuildResult> generate = null)
+        {
+            if (manifestAssetPaths == null)
+                throw new ArgumentNullException(nameof(manifestAssetPaths));
+            if (profile == null) throw new ArgumentNullException(nameof(profile));
+
+            string[] paths = manifestAssetPaths
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Select(VoxelLodPipeline.NormalizeAssetPath)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            var builds = new List<VoxelImpostorBuildResult>();
+            var failures = new List<VoxelImpostorBatchFailure>();
+            generate ??= GenerateOrUpdate;
+
+            for (int index = 0; index < paths.Length; index++)
+            {
+                string path = paths[index];
+                if (cancelProgress != null && cancelProgress(
+                        (float)index / paths.Length,
+                        $"Impostor {index + 1} de {paths.Length} · {Path.GetFileName(path)}"))
+                    return new VoxelImpostorBatchBuildResult(
+                        paths.Length, builds, failures, true);
+
+                try
+                {
+                    builds.Add(generate(path, profile, quality));
+                }
+                catch (OperationCanceledException)
+                {
+                    return new VoxelImpostorBatchBuildResult(
+                        paths.Length, builds, failures, true);
+                }
+                catch (Exception exception)
+                {
+                    failures.Add(new VoxelImpostorBatchFailure(path, exception.Message));
+                }
+                finally
+                {
+                    VoxelLodBatchMemoryCleaner.ReleaseUnusedMemory(profile);
+                }
+            }
+
+            cancelProgress?.Invoke(1f, $"Impostores terminados: {builds.Count} de {paths.Length}");
+            return new VoxelImpostorBatchBuildResult(paths.Length, builds, failures, false);
+        }
+
+        internal static string[] FindPendingManifestAssetPaths(string exportAssetFolder)
+        {
+            exportAssetFolder = VoxelLodPipeline.NormalizeAssetPath(exportAssetFolder);
+            if (!VoxelLodPipeline.IsAssetFolder(exportAssetFolder)) return Array.Empty<string>();
+
+            return AssetDatabase.FindAssets("t:TextAsset", new[] { exportAssetFolder })
+                .Select(AssetDatabase.GUIDToAssetPath)
+                .Where(path => path.EndsWith(".voxset.json", StringComparison.OrdinalIgnoreCase))
+                .Where(path => VoxelLodPipeline.TryReadManifest(
+                    path, out VoxelLodSetManifest manifest) &&
+                    (manifest.impostor == null ||
+                     string.IsNullOrWhiteSpace(manifest.impostor.assetPath) ||
+                     !File.Exists(VoxelLodPipeline.AssetPathToAbsolute(
+                         manifest.impostor.assetPath))))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
         }
 
         internal static bool TryGetLastVoxelTransition(
