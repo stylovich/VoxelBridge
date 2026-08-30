@@ -565,6 +565,61 @@ namespace LocalModels.VoxelBridge.Tests
         }
 
         [Test]
+        public void AutomaticBatch_ReusesOriginalSourceForNestedPrefabInstances()
+        {
+            const string testRoot = "Assets/VoxelBridgeNestedBatchTestOutput";
+            GameObject reusableSource = null;
+            GameObject containerSource = null;
+            GameObject containerInstance = null;
+            try
+            {
+                VoxelLodPipeline.EnsureAssetFolder(testRoot);
+                reusableSource = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                reusableSource.name = "ReusableNestedPart";
+                GameObject reusablePrefab = PrefabUtility.SaveAsPrefabAsset(
+                    reusableSource, testRoot + "/ReusableNestedPart.prefab");
+                Object.DestroyImmediate(reusableSource);
+                reusableSource = null;
+                Assert.That(reusablePrefab, Is.Not.Null);
+
+                containerSource = new GameObject("Container");
+                var first = PrefabUtility.InstantiatePrefab(
+                    reusablePrefab, containerSource.transform) as GameObject;
+                var second = PrefabUtility.InstantiatePrefab(
+                    reusablePrefab, containerSource.transform) as GameObject;
+                Assert.That(first, Is.Not.Null);
+                Assert.That(second, Is.Not.Null);
+                first.name = "Part_A";
+                second.name = "Part_B";
+                second.transform.localPosition = Vector3.right * 2f;
+                GameObject containerPrefab = PrefabUtility.SaveAsPrefabAsset(
+                    containerSource, testRoot + "/Container.prefab");
+                Object.DestroyImmediate(containerSource);
+                containerSource = null;
+                Assert.That(containerPrefab, Is.Not.Null);
+
+                containerInstance = PrefabUtility.InstantiatePrefab(containerPrefab) as GameObject;
+                Assert.That(containerInstance, Is.Not.Null);
+                VoxelLodBatchSourcePlan[] plans = VoxelLodPipeline.GetAutomaticBatchPlans(
+                    containerInstance, new VoxelLodBatchOptions());
+
+                Assert.That(plans, Has.Length.EqualTo(2));
+                Assert.That(plans[0].ConversionSource, Is.EqualTo(reusablePrefab));
+                Assert.That(plans[1].ConversionSource, Is.EqualTo(reusablePrefab));
+                Assert.That(plans[0].ReuseKey, Is.EqualTo(plans[1].ReuseKey));
+                Assert.That(plans[0].HasPrefabOverrides, Is.False);
+                Assert.That(plans[1].HasPrefabOverrides, Is.False);
+            }
+            finally
+            {
+                if (containerInstance != null) Object.DestroyImmediate(containerInstance);
+                if (containerSource != null) Object.DestroyImmediate(containerSource);
+                if (reusableSource != null) Object.DestroyImmediate(reusableSource);
+                AssetDatabase.DeleteAsset(testRoot);
+            }
+        }
+
+        [Test]
         public void AutomaticLodPipeline_CreatesChunkedVoxFamilyAndLodPrefab()
         {
             if (!VoxelImporterIntegration.IsInstalled)

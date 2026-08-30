@@ -220,10 +220,12 @@ namespace LocalModels.VoxelBridge
         private static VoxelLodBatchSourcePlan CreateAutomaticBatchPlan(
             GameObject source, VoxelLodBatchOptions batchOptions)
         {
-            if (!TryGetImmediatePrefabSource(source, out GameObject prefabSource))
+            if (!TryGetPrefabSource(source, out GameObject prefabSource,
+                    out GameObject instanceRoot))
                 return new VoxelLodBatchSourcePlan(source, source, source, false, false);
 
-            bool hasOverrides = PrefabUtility.HasPrefabInstanceAnyOverrides(source, false);
+            bool hasOverrides = HasPrefabOverridesInScope(
+                source, prefabSource, instanceRoot);
             if (hasOverrides && batchOptions.ModifiedPrefabHandling ==
                 VoxelPrefabOverrideHandling.IgnoreInstance)
                 return new VoxelLodBatchSourcePlan(source, null, source, true, true);
@@ -241,15 +243,67 @@ namespace LocalModels.VoxelBridge
                 source, conversionSource, reuseKey, hasOverrides, false);
         }
 
-        private static bool TryGetImmediatePrefabSource(
-            GameObject source, out GameObject prefabSource)
+        private static bool TryGetPrefabSource(
+            GameObject source, out GameObject prefabSource, out GameObject instanceRoot)
         {
             prefabSource = null;
+            instanceRoot = null;
             if (source == null) return false;
-            GameObject instanceRoot = PrefabUtility.GetNearestPrefabInstanceRoot(source);
-            if (instanceRoot != source) return false;
-            prefabSource = PrefabUtility.GetCorrespondingObjectFromSource(source);
+            instanceRoot = PrefabUtility.GetNearestPrefabInstanceRoot(source);
+            if (instanceRoot == null) return false;
+
+            prefabSource = PrefabUtility.GetCorrespondingObjectFromOriginalSource(source);
+            if (prefabSource == null)
+                prefabSource = PrefabUtility.GetCorrespondingObjectFromSource(source);
             return prefabSource != null && AssetDatabase.Contains(prefabSource);
+        }
+
+        private static bool HasPrefabOverridesInScope(
+            GameObject source, GameObject prefabSource, GameObject instanceRoot)
+        {
+            if (source == instanceRoot)
+                return PrefabUtility.HasPrefabInstanceAnyOverrides(instanceRoot, false);
+            if (!PrefabUtility.HasPrefabInstanceAnyOverrides(instanceRoot, false))
+                return false;
+
+            PropertyModification[] modifications =
+                PrefabUtility.GetPropertyModifications(instanceRoot);
+            if (modifications != null && modifications.Any(modification =>
+                    IsAssetObjectInScope(modification.target, prefabSource)))
+                return true;
+
+            if (PrefabUtility.GetAddedGameObjects(instanceRoot).Any(added =>
+                    IsInstanceObjectInScope(added.instanceGameObject, source)))
+                return true;
+            if (PrefabUtility.GetAddedComponents(instanceRoot).Any(added =>
+                    IsInstanceObjectInScope(added.instanceComponent, source)))
+                return true;
+            if (PrefabUtility.GetRemovedGameObjects(instanceRoot).Any(removed =>
+                    IsAssetObjectInScope(removed.assetGameObject, prefabSource)))
+                return true;
+            return PrefabUtility.GetRemovedComponents(instanceRoot).Any(removed =>
+                IsAssetObjectInScope(removed.assetComponent, prefabSource));
+        }
+
+        private static bool IsInstanceObjectInScope(Object candidate, GameObject source)
+        {
+            GameObject candidateObject = candidate as GameObject;
+            if (candidate is Component component) candidateObject = component.gameObject;
+            return candidateObject != null &&
+                   (candidateObject == source || candidateObject.transform.IsChildOf(source.transform));
+        }
+
+        private static bool IsAssetObjectInScope(Object candidate, GameObject prefabSource)
+        {
+            GameObject candidateObject = candidate as GameObject;
+            if (candidate is Component component) candidateObject = component.gameObject;
+            if (candidateObject == null) return false;
+
+            GameObject original = PrefabUtility.GetCorrespondingObjectFromOriginalSource(
+                candidateObject);
+            if (original != null) candidateObject = original;
+            return candidateObject == prefabSource ||
+                   candidateObject.transform.IsChildOf(prefabSource.transform);
         }
 
         public static VoxelLodBuildResult GenerateAutomatic(
