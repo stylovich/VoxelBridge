@@ -68,6 +68,7 @@ namespace LocalModels.VoxelBridge
         public int multiplier = 1;
         public VoxelLodGenerationMode generationMode;
         public string voxAssetPath;
+        public float screenRelativeTransitionHeight;
     }
 
     [Serializable]
@@ -86,7 +87,7 @@ namespace LocalModels.VoxelBridge
     [Serializable]
     internal sealed class VoxelLodSetManifest
     {
-        public int formatVersion = 2;
+        public int formatVersion = 4;
         public string familyId;
         public string sourceName;
         public string sourceAssetPath;
@@ -95,6 +96,7 @@ namespace LocalModels.VoxelBridge
         public int chunkCellSize;
         public string profileAssetPath;
         public string prefabAssetPath;
+        public float lodGroupSize;
         public VoxelLodEntry[] lods;
         public VoxelImpostorEntry impostor;
     }

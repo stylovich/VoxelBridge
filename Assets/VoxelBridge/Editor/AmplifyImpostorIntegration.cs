@@ -344,12 +344,24 @@ namespace LocalModels.VoxelBridge
             if (manifest?.lods == null || manifest.lods.Length == 0) return false;
 
             int lastLodIndex = manifest.lods.Max(entry => entry.lodIndex);
+            VoxelLodEntry lastEntry = manifest.lods
+                .Where(entry => entry != null)
+                .OrderBy(entry => entry.lodIndex)
+                .LastOrDefault();
+            if (lastEntry != null && lastEntry.screenRelativeTransitionHeight > 0f)
+            {
+                transitionHeight = Mathf.Clamp01(lastEntry.screenRelativeTransitionHeight);
+                return transitionHeight > 0f;
+            }
+
             VoxelStyleProfile voxelProfile = string.IsNullOrEmpty(manifest.profileAssetPath)
                 ? null
                 : AssetDatabase.LoadAssetAtPath<VoxelStyleProfile>(manifest.profileAssetPath);
             if (voxelProfile != null)
             {
-                transitionHeight = voxelProfile.GetLodScreenHeight(lastLodIndex);
+                transitionHeight = manifest.lodGroupSize > 0f
+                    ? voxelProfile.GetLodScreenHeight(lastLodIndex, manifest.lodGroupSize)
+                    : voxelProfile.GetLodScreenHeight(lastLodIndex);
                 return transitionHeight > 0f;
             }
 

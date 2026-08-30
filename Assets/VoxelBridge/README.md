@@ -30,6 +30,19 @@ Una familia en construcción contiene una marca privada de Voxel Bridge. Ante un
 
 Cada LOD automático se voxeliza de nuevo desde la malla fuente. Sin adaptación, LOD0 usa la unidad base, LOD1 usa `base × 2`, LOD2 `base × 4`, etc. En una familia adaptada, el LOD0 local comienza en el nivel elegido por el análisis y los siguientes conservan la progresión relativa; una familia iniciada en `base × 4` utiliza `×4`, `×8`, `×16`, etc. El manifiesto conserva tanto la unidad base global como el multiplicador inicial para que la reducción manual mantenga la misma escala. Las rejillas se alinean al mismo lattice físico para evitar cambios arbitrarios de tamaño o posición entre assets y niveles.
 
+### Transiciones LOD por tamaño
+
+`Modo de transición` controla cómo se aplican las alturas de pantalla definidas en `Lod Screen Heights`:
+
+- `Fija por pantalla` utiliza los porcentajes sin modificarlos.
+- `Adaptativa por tamaño` escala toda la curva según el tamaño final calculado por el `LODGroup`.
+
+El modo adaptativo utiliza la relación `tamaño del modelo / tamaño de referencia`, elevada a la `Intensidad de adaptación`. Una intensidad de `0` equivale al modo fijo, `0.5` compensa los extremos manteniendo diferencias naturales entre tamaños y `1` aproxima las transiciones a distancias físicas similares. `Factor mínimo` y `Factor máximo` limitan la compensación para evitar cambios demasiado cercanos o lejanos.
+
+Para una curva base ajustada con un vehículo grande se recomienda comenzar con un tamaño de referencia de `4 m`, intensidad `0.5` y factores `0.35–2`. Con transiciones base `0.30 / 0.18 / 0.10`, un modelo de `0.5 m` obtiene aproximadamente `0.106 / 0.064 / 0.035`, el modelo de referencia conserva los valores originales y una estructura de `40 m` queda limitada a `0.60 / 0.36 / 0.20`.
+
+El manifiesto guarda el tamaño del grupo y la transición efectiva de cada nivel. La reconstrucción del prefab conserva esos valores para el impostor y actualiza familias anteriores con la configuración vigente del perfil.
+
 La familia generada contiene:
 
 - un `.vox` editable por cada LOD;
@@ -66,7 +79,7 @@ Para vehículos terrestres usa `Medio` en tráfico o elementos secundarios y `Al
 
 Los grupos decorativos menores de un metro normalmente no justifican una cadena larga. Si LOD1 deja menos de unas 5-6 celdas en el eje principal, usa solamente LOD0 y después impostor o descarte; si todavía conserva una silueta reconocible, usa LOD0 → LOD1 → impostor/descarte. Para objetos únicos que desaparecen pronto suele ser más barato omitir el impostor. Resérvalo para grupos completos —por ejemplo un conjunto de basura o cajas— que se repitan muchas veces o deban seguir visibles a distancia. El impostor siempre se añade después del último LOD voxel definido por el `VoxelStyleProfile`, así que un perfil voxel de uno o dos niveles produce directamente esos dos flujos.
 
-Al reducir la cantidad de LODs también ajusta `Lod Screen Heights`: los valores generales 0.6/0.3 harían que un prop pequeño cambie o desaparezca demasiado cerca. Como punto de partida, usa `{ 0.05 }` para LOD0 → impostor y `{ 0.15, 0.04 }` para LOD0 → LOD1 → impostor; el perfil de impostor Bajo terminará de descartarlo en 0.01. Si omites el impostor, usa aproximadamente 0.01 como altura final de descarte y comprueba el resultado con la cámara real.
+Al reducir la cantidad de LODs, el modo adaptativo puede partir de la misma curva general y compensar automáticamente el tamaño del prop. Para un perfil fijo específico, usa `{ 0.05 }` para LOD0 → impostor y `{ 0.15, 0.04 }` para LOD0 → LOD1 → impostor; el perfil de impostor Bajo terminará de descartarlo en 0.01. Si se omite el impostor, utiliza aproximadamente 0.01 como altura final de descarte y comprueba el resultado con la cámara real.
 
 ## LOD manual
 

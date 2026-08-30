@@ -710,7 +710,7 @@ namespace LocalModels.VoxelBridge
                 voxAssetPath = targetPath
             });
             entries.Sort((a, b) => a.lodIndex.CompareTo(b.lodIndex));
-            manifest.formatVersion = 2;
+            manifest.formatVersion = Mathf.Max(4, manifest.formatVersion);
             manifest.initialVoxelMultiplier = initialVoxelMultiplier;
             manifest.lods = entries.ToArray();
             manifest.profileAssetPath = AssetDatabase.GetAssetPath(profile);
@@ -919,13 +919,36 @@ namespace LocalModels.VoxelBridge
                         throw new InvalidDataException($"El LOD {entry.lodIndex} no contiene renderers.");
                     float height = profile != null
                         ? profile.GetLodScreenHeight(entry.lodIndex)
-                        : Mathf.Max(0.01f, 0.6f * Mathf.Pow(0.5f, entry.lodIndex));
+                        : entry.screenRelativeTransitionHeight > 0f
+                            ? Mathf.Clamp01(entry.screenRelativeTransitionHeight)
+                            : Mathf.Max(0.01f, 0.6f * Mathf.Pow(0.5f, entry.lodIndex));
                     lods[i] = new LOD(height, renderers);
                 }
                 var group = root.AddComponent<LODGroup>();
                 group.fadeMode = LODFadeMode.None;
                 group.SetLODs(lods);
                 group.RecalculateBounds();
+
+                manifest.lodGroupSize = group.size;
+                if (profile != null)
+                {
+                    for (int i = 0; i < entries.Length; i++)
+                    {
+                        float height = profile.GetLodScreenHeight(
+                            entries[i].lodIndex, manifest.lodGroupSize);
+                        entries[i].screenRelativeTransitionHeight = height;
+                        lods[i].screenRelativeTransitionHeight = height;
+                    }
+                    group.SetLODs(lods);
+                    group.RecalculateBounds();
+                }
+                else
+                {
+                    for (int i = 0; i < entries.Length; i++)
+                        entries[i].screenRelativeTransitionHeight =
+                            lods[i].screenRelativeTransitionHeight;
+                }
+                manifest.formatVersion = Mathf.Max(4, manifest.formatVersion);
 
                 if (manifest.impostor != null &&
                     !string.IsNullOrWhiteSpace(manifest.impostor.assetPath) &&

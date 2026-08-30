@@ -521,7 +521,7 @@ namespace LocalModels.VoxelBridge
             DrawImpostorQualitySelector();
             if (styleProfile != null && styleProfile.LodCount > 0 &&
                 !impostorProfile.TryValidate(impostorQuality,
-                    styleProfile.GetLodScreenHeight(styleProfile.LodCount - 1),
+                    styleProfile.GetMinimumLodScreenHeight(styleProfile.LodCount - 1),
                     out string profileError))
             {
                 EditorGUILayout.HelpBox(profileError, MessageType.Error);

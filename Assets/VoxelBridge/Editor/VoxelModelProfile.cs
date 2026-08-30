@@ -3,6 +3,14 @@ using UnityEngine;
 
 namespace LocalModels.VoxelBridge
 {
+    internal enum VoxelLodTransitionMode
+    {
+        [InspectorName("Fija por pantalla")]
+        FixedScreenHeight,
+        [InspectorName("Adaptativa por tamaño")]
+        AdaptiveByModelSize
+    }
+
     [CreateAssetMenu(fileName = "VoxelStyleProfile", menuName = "Voxel Bridge/Perfil de estilo voxel")]
     public sealed class VoxelStyleProfile : ScriptableObject
     {
@@ -20,6 +28,22 @@ namespace LocalModels.VoxelBridge
         [SerializeField] private bool hideInternalCavities = true;
         [Tooltip("Altura relativa de pantalla de transición para cada nivel del LODGroup.")]
         [SerializeField] private float[] lodScreenHeights = { 0.6f, 0.3f, 0.1f };
+        [Tooltip("Fijo usa los porcentajes de pantalla sin modificarlos. Adaptativo ajusta toda la curva según el tamaño final del modelo.")]
+        [InspectorName("Modo de transición")]
+        [SerializeField] private VoxelLodTransitionMode lodTransitionMode =
+            VoxelLodTransitionMode.FixedScreenHeight;
+        [Tooltip("Tamaño en metros del modelo para el que se ajustaron las transiciones base. Un vehículo grande suele estar cerca de 4 m.")]
+        [InspectorName("Tamaño de referencia")]
+        [SerializeField, Min(0.01f)] private float lodReferenceModelSize = 4f;
+        [Tooltip("Intensidad del ajuste por tamaño. 0 conserva los porcentajes base, 0.5 ofrece una compensación equilibrada y 1 aproxima distancias de transición constantes.")]
+        [InspectorName("Intensidad de adaptación")]
+        [SerializeField, Range(0f, 1f)] private float lodSizeAdaptationStrength = 0.5f;
+        [Tooltip("Límite inferior del factor aplicado a modelos pequeños. 0.35 evita que las transiciones se alejen excesivamente.")]
+        [InspectorName("Factor mínimo")]
+        [SerializeField, Min(0.01f)] private float lodMinimumTransitionScale = 0.35f;
+        [Tooltip("Límite superior del factor aplicado a modelos grandes. 2 permite adelantar las transiciones sin concentrarlas demasiado cerca de la cámara.")]
+        [InspectorName("Factor máximo")]
+        [SerializeField, Min(0.01f)] private float lodMaximumTransitionScale = 2f;
 
         public float BaseVoxelSize => Mathf.Max(0.001f, baseVoxelSize);
         public int ChunkCellSize => Mathf.Clamp(chunkCellSize, 16, 256);
@@ -27,6 +51,8 @@ namespace LocalModels.VoxelBridge
         public bool FillInterior => fillInterior;
         public bool HideInternalCavities => hideInternalCavities;
         public int LodCount => lodMultipliers?.Length ?? 0;
+        public bool UsesAdaptiveLodTransitions =>
+            lodTransitionMode == VoxelLodTransitionMode.AdaptiveByModelSize;
 
         public int GetLodMultiplier(int index)
         {
@@ -40,6 +66,35 @@ namespace LocalModels.VoxelBridge
             if (lodScreenHeights != null && index >= 0 && index < lodScreenHeights.Length)
                 return Mathf.Clamp01(lodScreenHeights[index]);
             return Mathf.Max(0.01f, 0.6f * Mathf.Pow(0.5f, index));
+        }
+
+        public float GetLodScreenHeight(int index, float modelSize)
+        {
+            return GetLodScreenHeightForScale(index, GetLodTransitionScale(modelSize));
+        }
+
+        public float GetMinimumLodScreenHeight(int index)
+        {
+            float scale = UsesAdaptiveLodTransitions ? lodMinimumTransitionScale : 1f;
+            return GetLodScreenHeightForScale(index, scale);
+        }
+
+        private float GetLodScreenHeightForScale(int index, float scale)
+        {
+            float firstHeight = GetLodScreenHeight(0);
+            if (firstHeight > 0f)
+                scale = Mathf.Min(scale, 0.99f / firstHeight);
+            return Mathf.Clamp(GetLodScreenHeight(index) * scale, 0.0001f, 0.99f);
+        }
+
+        public float GetLodTransitionScale(float modelSize)
+        {
+            if (!UsesAdaptiveLodTransitions || !IsFinitePositive(modelSize)) return 1f;
+            float referenceSize = Mathf.Max(0.01f, lodReferenceModelSize);
+            float rawScale = Mathf.Pow(modelSize / referenceSize,
+                Mathf.Clamp01(lodSizeAdaptationStrength));
+            return Mathf.Clamp(rawScale, lodMinimumTransitionScale,
+                lodMaximumTransitionScale);
         }
 
         public bool TryValidate(out string error)
@@ -57,6 +112,18 @@ namespace LocalModels.VoxelBridge
             if (lodMultipliers[0] != 1)
             {
                 error = "LOD0 debe usar multiplicador 1 para representar la unidad voxel base.";
+                return false;
+            }
+            if (UsesAdaptiveLodTransitions &&
+                (!IsFinitePositive(lodReferenceModelSize) ||
+                 !IsFinitePositive(lodMinimumTransitionScale) ||
+                 !IsFinitePositive(lodMaximumTransitionScale) ||
+                 lodMinimumTransitionScale > lodMaximumTransitionScale ||
+                 float.IsNaN(lodSizeAdaptationStrength) ||
+                 float.IsInfinity(lodSizeAdaptationStrength) ||
+                 lodSizeAdaptationStrength < 0f || lodSizeAdaptationStrength > 1f))
+            {
+                error = "La adaptación LOD requiere una intensidad entre 0 y 1, un tamaño de referencia y límites positivos, con el mínimo menor o igual que el máximo.";
                 return false;
             }
 
@@ -83,6 +150,9 @@ namespace LocalModels.VoxelBridge
             error = null;
             return true;
         }
+
+        private static bool IsFinitePositive(float value) =>
+            value > 0f && !float.IsNaN(value) && !float.IsInfinity(value);
     }
 
     internal readonly struct VoxelGridPlan

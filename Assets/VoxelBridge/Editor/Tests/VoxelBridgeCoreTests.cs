@@ -15,6 +15,43 @@ namespace LocalModels.VoxelBridge.Tests
     internal sealed class VoxelBridgeCoreTests
     {
         [Test]
+        public void StyleProfile_AdaptsLodTransitionsAroundReferenceSize()
+        {
+            VoxelStyleProfile profile = ScriptableObject.CreateInstance<VoxelStyleProfile>();
+            try
+            {
+                var serializedProfile = new SerializedObject(profile);
+                serializedProfile.FindProperty("lodTransitionMode").enumValueIndex =
+                    (int)VoxelLodTransitionMode.AdaptiveByModelSize;
+                serializedProfile.FindProperty("lodReferenceModelSize").floatValue = 4f;
+                serializedProfile.FindProperty("lodSizeAdaptationStrength").floatValue = 0.5f;
+                serializedProfile.FindProperty("lodMinimumTransitionScale").floatValue = 0.35f;
+                serializedProfile.FindProperty("lodMaximumTransitionScale").floatValue = 2f;
+                SerializedProperty transitions =
+                    serializedProfile.FindProperty("lodScreenHeights");
+                transitions.arraySize = 3;
+                transitions.GetArrayElementAtIndex(0).floatValue = 0.3f;
+                transitions.GetArrayElementAtIndex(1).floatValue = 0.18f;
+                transitions.GetArrayElementAtIndex(2).floatValue = 0.1f;
+                serializedProfile.ApplyModifiedPropertiesWithoutUndo();
+
+                Assert.That(profile.GetLodScreenHeight(0, 4f),
+                    Is.EqualTo(0.3f).Within(1e-6f));
+                Assert.That(profile.GetLodScreenHeight(1, 0.5f),
+                    Is.EqualTo(0.18f * Mathf.Sqrt(0.5f / 4f)).Within(1e-6f));
+                Assert.That(profile.GetLodScreenHeight(2, 40f),
+                    Is.EqualTo(0.2f).Within(1e-6f));
+                Assert.That(profile.GetMinimumLodScreenHeight(2),
+                    Is.EqualTo(0.035f).Within(1e-6f));
+                Assert.That(profile.TryValidate(out string error), Is.True, error);
+            }
+            finally
+            {
+                Object.DestroyImmediate(profile);
+            }
+        }
+
+        [Test]
         public void ImpostorProfile_DefaultSettingsFitAfterLastVoxelLod()
         {
             VoxelImpostorProfile profile = ScriptableObject.CreateInstance<VoxelImpostorProfile>();
@@ -1111,6 +1148,8 @@ namespace LocalModels.VoxelBridge.Tests
                 serializedProfile.FindProperty("chunkCellSize").intValue = 16;
                 serializedProfile.FindProperty("padding").intValue = 1;
                 serializedProfile.FindProperty("fillInterior").boolValue = true;
+                serializedProfile.FindProperty("lodTransitionMode").enumValueIndex =
+                    (int)VoxelLodTransitionMode.AdaptiveByModelSize;
                 SerializedProperty multipliers = serializedProfile.FindProperty("lodMultipliers");
                 multipliers.arraySize = 2;
                 multipliers.GetArrayElementAtIndex(0).intValue = 1;
@@ -1164,6 +1203,20 @@ namespace LocalModels.VoxelBridge.Tests
                 Assert.That(resolvedLodPath, Is.EqualTo(build.VoxAssetPaths[0]));
                 Assert.That(resolvedLodIndex, Is.EqualTo(0));
                 Assert.That(prefab.GetComponent<LODGroup>().lodCount, Is.EqualTo(2));
+                Assert.That(VoxelLodPipeline.TryReadManifest(
+                    build.ManifestAssetPath, out VoxelLodSetManifest adaptiveManifest), Is.True);
+                Assert.That(adaptiveManifest.formatVersion, Is.EqualTo(4));
+                Assert.That(adaptiveManifest.lodGroupSize, Is.GreaterThan(0f));
+                LOD[] adaptiveLods = prefab.GetComponent<LODGroup>().GetLODs();
+                Assert.That(adaptiveLods[0].screenRelativeTransitionHeight,
+                    Is.EqualTo(profile.GetLodScreenHeight(0, adaptiveManifest.lodGroupSize))
+                        .Within(1e-6f));
+                Assert.That(adaptiveManifest.lods[1].screenRelativeTransitionHeight,
+                    Is.EqualTo(adaptiveLods[1].screenRelativeTransitionHeight).Within(1e-6f));
+                Assert.That(AmplifyImpostorIntegration.TryGetLastVoxelTransition(
+                    adaptiveManifest, out float persistedTransition), Is.True);
+                Assert.That(persistedTransition,
+                    Is.EqualTo(adaptiveLods[1].screenRelativeTransitionHeight).Within(1e-6f));
                 Renderer[] chunkRenderers = prefab.transform.GetChild(0)
                     .GetComponentsInChildren<Renderer>(true);
                 Assert.That(chunkRenderers.Length, Is.GreaterThan(1));
@@ -1234,7 +1287,8 @@ namespace LocalModels.VoxelBridge.Tests
                 Assert.That(prefabLodGroup.fadeMode, Is.EqualTo(LODFadeMode.CrossFade));
                 LOD[] lodsWithImpostor = prefabLodGroup.GetLODs();
                 Assert.That(lodsWithImpostor[1].screenRelativeTransitionHeight,
-                    Is.EqualTo(0.3f).Within(1e-6f));
+                    Is.EqualTo(adaptiveManifest.lods[1].screenRelativeTransitionHeight)
+                        .Within(1e-6f));
                 Assert.That(lodsWithImpostor[2].screenRelativeTransitionHeight,
                     Is.EqualTo(0.01f).Within(1e-6f));
                 Assert.That(lodsWithImpostor[2].renderers, Has.Length.EqualTo(1));
@@ -1340,7 +1394,7 @@ namespace LocalModels.VoxelBridge.Tests
 
                 Assert.That(VoxelLodPipeline.TryReadManifest(
                     build.ManifestAssetPath, out VoxelLodSetManifest manifest), Is.True);
-                Assert.That(manifest.formatVersion, Is.EqualTo(2));
+                Assert.That(manifest.formatVersion, Is.EqualTo(4));
                 Assert.That(manifest.baseVoxelSize, Is.EqualTo(0.25f).Within(1e-6f));
                 Assert.That(manifest.initialVoxelMultiplier, Is.EqualTo(2));
                 Assert.That(manifest.lods.Select(entry => entry.multiplier),
