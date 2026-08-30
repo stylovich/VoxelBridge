@@ -16,6 +16,8 @@ namespace LocalModels.VoxelBridge
             "Assets/VoxelBridgeSettings/VoxelImpostorProfile.asset";
 
         private Object source;
+        [SerializeField] private bool individualPlaceInScene;
+        [SerializeField] private bool individualDisableOriginalObject = true;
         private GameObject batchParent;
         [SerializeField] private bool batchReusePrefabSources = true;
         [SerializeField] private VoxelPrefabOverrideHandling batchModifiedPrefabHandling =
@@ -233,6 +235,28 @@ namespace LocalModels.VoxelBridge
 
             DrawColorSettings();
             VoxelBridgeFolderPicker.Draw("Carpeta de familias", ref exportFolder);
+            GameObject individualSceneSource = source as GameObject;
+            bool canPlaceIndividual = VoxelLodBatchScenePlacement.CanPlace(individualSceneSource);
+            using (new EditorGUI.DisabledScope(!canPlaceIndividual))
+                individualPlaceInScene = EditorGUILayout.Toggle(
+                    new GUIContent("Colocar resultado en escena",
+                        "Instancia el prefab voxel junto al GameObject fuente y conserva su Transform, layer, tag y flags Static."),
+                    individualPlaceInScene);
+            if (individualPlaceInScene && canPlaceIndividual)
+            {
+                EditorGUI.indentLevel++;
+                individualDisableOriginalObject = EditorGUILayout.Toggle(
+                    new GUIContent("Desactivar objeto original",
+                        "Desactiva el GameObject fuente solamente después de crear correctamente la instancia voxel. La operación admite Undo."),
+                    individualDisableOriginalObject);
+                EditorGUI.indentLevel--;
+            }
+            else if (individualPlaceInScene && source != null && !canPlaceIndividual)
+            {
+                EditorGUILayout.HelpBox(
+                    "La colocación requiere un GameObject de una escena cargada. Los assets del Project solo se convierten.",
+                    MessageType.None);
+            }
             bool canGenerate = source != null && VoxelBridgeSourceSelection.IsSupported(source) &&
                                styleProfile != null && styleProfile.TryValidate(out _) &&
                                VoxelLodPipeline.IsAssetFolder(exportFolder);
@@ -928,8 +952,18 @@ namespace LocalModels.VoxelBridge
                 }
                 lastPrefabAsset = AssetDatabase.LoadMainAssetAtPath(result.PrefabAssetPath);
                 lastImpostorAsset = null;
-                SelectAndPing(lastVoxAsset);
+                VoxelLodSinglePlacementResult? placement = null;
+                if (individualPlaceInScene &&
+                    VoxelLodBatchScenePlacement.CanPlace(source as GameObject))
+                    placement = VoxelLodBatchScenePlacement.PlaceSingle(
+                        (GameObject)source, result, individualDisableOriginalObject);
+
+                SelectAndPing(placement.HasValue ? placement.Value.Instance : lastVoxAsset);
                 status = $"Familia creada: {result.VoxAssetPaths.Length} archivo(s) .vox. Prefab: {result.PrefabAssetPath}";
+                if (placement.HasValue)
+                    status += placement.Value.OriginalObjectDisabled
+                        ? " Instancia colocada y objeto original desactivado."
+                        : " Instancia colocada en la escena.";
             }
             catch (OperationCanceledException)
             {

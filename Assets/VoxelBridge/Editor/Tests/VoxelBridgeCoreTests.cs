@@ -611,6 +611,96 @@ namespace LocalModels.VoxelBridge.Tests
         }
 
         [Test]
+        public void SinglePlacement_CopiesSceneStateDisablesOriginalAndSupportsUndo()
+        {
+            const string testRoot = "Assets/VoxelBridgeSinglePlacementTestOutput";
+            GameObject parent = null;
+            GameObject sourceObject = null;
+            GameObject prefabSource = null;
+            GameObject placedInstance = null;
+            UnityEngine.SceneManagement.Scene originalScene =
+                UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+            UnityEngine.SceneManagement.Scene testScene = default;
+            try
+            {
+                testScene = UnityEditor.SceneManagement.EditorSceneManager.NewScene(
+                    UnityEditor.SceneManagement.NewSceneSetup.EmptyScene,
+                    UnityEditor.SceneManagement.NewSceneMode.Additive);
+                VoxelLodPipeline.EnsureAssetFolder(testRoot);
+                prefabSource = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                prefabSource.name = "ConvertedSingle";
+                string prefabPath = testRoot + "/ConvertedSingle.prefab";
+                GameObject prefab = PrefabUtility.SaveAsPrefabAsset(prefabSource, prefabPath);
+                Object.DestroyImmediate(prefabSource);
+                prefabSource = null;
+                Assert.That(prefab, Is.Not.Null);
+
+                parent = new GameObject("SinglePlacementParent");
+                sourceObject = new GameObject("SingleSource");
+                sourceObject.transform.SetParent(parent.transform, false);
+                sourceObject.transform.localPosition = new Vector3(2f, 3f, -4f);
+                sourceObject.transform.localRotation = Quaternion.Euler(10f, 20f, 30f);
+                sourceObject.transform.localScale = new Vector3(1.5f, 0.75f, 2f);
+                sourceObject.layer = 6;
+                GameObjectUtility.SetStaticEditorFlags(
+                    sourceObject, StaticEditorFlags.OccluderStatic);
+
+                var build = new VoxelLodBuildResult(
+                    null, prefabPath, System.Array.Empty<string>());
+                Assert.That(VoxelLodBatchScenePlacement.CanPlace(sourceObject), Is.True);
+                Assert.That(VoxelLodBatchScenePlacement.CanPlace(prefab), Is.False);
+
+                VoxelLodSinglePlacementResult placement =
+                    VoxelLodBatchScenePlacement.PlaceSingle(sourceObject, build, false);
+                placedInstance = placement.Instance;
+                Assert.That(placement.OriginalObjectDisabled, Is.False);
+                Assert.That(sourceObject.activeSelf, Is.True);
+                Assert.That(placedInstance.activeSelf, Is.True);
+                Assert.That(placedInstance.name, Is.EqualTo("SingleSource_Voxel"));
+                Assert.That(placedInstance.transform.parent, Is.EqualTo(parent.transform));
+                Assert.That(placedInstance.transform.GetSiblingIndex(),
+                    Is.EqualTo(sourceObject.transform.GetSiblingIndex() + 1));
+                Assert.That(placedInstance.transform.localPosition,
+                    Is.EqualTo(sourceObject.transform.localPosition));
+                Assert.That(Quaternion.Angle(placedInstance.transform.localRotation,
+                    sourceObject.transform.localRotation), Is.LessThan(1e-4f));
+                Assert.That(placedInstance.transform.localScale,
+                    Is.EqualTo(sourceObject.transform.localScale));
+                Assert.That(placedInstance.layer, Is.EqualTo(sourceObject.layer));
+                Assert.That(GameObjectUtility.GetStaticEditorFlags(placedInstance),
+                    Is.EqualTo(GameObjectUtility.GetStaticEditorFlags(sourceObject)));
+
+                Undo.PerformUndo();
+                Assert.That(placedInstance == null, Is.True);
+                Assert.That(sourceObject.activeSelf, Is.True);
+                placedInstance = null;
+
+                placement = VoxelLodBatchScenePlacement.PlaceSingle(sourceObject, build, true);
+                placedInstance = placement.Instance;
+                Assert.That(placement.OriginalObjectDisabled, Is.True);
+                Assert.That(sourceObject.activeSelf, Is.False);
+                Assert.That(placedInstance.activeSelf, Is.True);
+
+                Undo.PerformUndo();
+                Assert.That(placedInstance == null, Is.True);
+                Assert.That(sourceObject.activeSelf, Is.True);
+                placedInstance = null;
+            }
+            finally
+            {
+                if (placedInstance != null) Object.DestroyImmediate(placedInstance);
+                if (sourceObject != null) Object.DestroyImmediate(sourceObject);
+                if (parent != null) Object.DestroyImmediate(parent);
+                if (prefabSource != null) Object.DestroyImmediate(prefabSource);
+                AssetDatabase.DeleteAsset(testRoot);
+                if (originalScene.IsValid() && originalScene.isLoaded)
+                    UnityEngine.SceneManagement.SceneManager.SetActiveScene(originalScene);
+                if (testScene.IsValid() && testScene.isLoaded)
+                    UnityEditor.SceneManagement.EditorSceneManager.CloseScene(testScene, true);
+            }
+        }
+
+        [Test]
         public void AutomaticBatch_ReusesPrefabSourceContinuesAfterFailureAndPlacesSceneInstances()
         {
             if (!VoxelImporterIntegration.IsInstalled)

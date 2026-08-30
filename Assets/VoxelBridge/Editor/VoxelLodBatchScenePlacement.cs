@@ -21,6 +21,18 @@ namespace LocalModels.VoxelBridge
         }
     }
 
+    internal readonly struct VoxelLodSinglePlacementResult
+    {
+        public readonly GameObject Instance;
+        public readonly bool OriginalObjectDisabled;
+
+        public VoxelLodSinglePlacementResult(GameObject instance, bool originalObjectDisabled)
+        {
+            Instance = instance;
+            OriginalObjectDisabled = originalObjectDisabled;
+        }
+    }
+
     internal static class VoxelLodBatchScenePlacement
     {
         public static bool CanPlace(GameObject sourceParent) =>
@@ -28,6 +40,58 @@ namespace LocalModels.VoxelBridge
             sourceParent.scene.IsValid() && sourceParent.scene.isLoaded &&
             !EditorSceneManager.IsPreviewScene(sourceParent.scene) &&
             PrefabStageUtility.GetPrefabStage(sourceParent) == null;
+
+        public static VoxelLodSinglePlacementResult PlaceSingle(
+            GameObject sourceObject, VoxelLodBuildResult build, bool disableOriginalObject)
+        {
+            if (!CanPlace(sourceObject))
+                throw new InvalidOperationException(
+                    "La colocación individual requiere un GameObject perteneciente a una escena cargada.");
+
+            GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(build.PrefabAssetPath);
+            if (prefab == null)
+                throw new InvalidOperationException(
+                    $"No se encontró el prefab convertido de '{sourceObject.name}'.");
+
+            var instance = PrefabUtility.InstantiatePrefab(prefab, sourceObject.scene) as GameObject;
+            if (instance == null)
+                throw new InvalidOperationException(
+                    $"No se pudo instanciar el prefab convertido de '{sourceObject.name}'.");
+
+            try
+            {
+                Transform sourceTransform = sourceObject.transform;
+                Transform instanceTransform = instance.transform;
+                instanceTransform.SetParent(sourceTransform.parent, false);
+                instanceTransform.SetSiblingIndex(sourceTransform.GetSiblingIndex() + 1);
+                CopyLocalTransform(sourceTransform, instanceTransform);
+                instance.name = GameObjectUtility.GetUniqueNameForSibling(
+                    sourceTransform.parent, sourceObject.name + "_Voxel");
+                instance.tag = sourceObject.tag;
+                SetLayerAndStaticFlagsRecursively(instance, sourceObject.layer,
+                    GameObjectUtility.GetStaticEditorFlags(sourceObject));
+                instance.SetActive(sourceObject.activeSelf);
+            }
+            catch
+            {
+                UnityEngine.Object.DestroyImmediate(instance);
+                throw;
+            }
+
+            Undo.IncrementCurrentGroup();
+            int undoGroup = Undo.GetCurrentGroup();
+            Undo.SetCurrentGroupName("Colocar modelo voxel en escena");
+            Undo.RegisterCreatedObjectUndo(instance, "Colocar modelo voxel");
+            if (disableOriginalObject)
+            {
+                Undo.RecordObject(sourceObject, "Desactivar objeto visual original");
+                sourceObject.SetActive(false);
+            }
+
+            EditorSceneManager.MarkSceneDirty(sourceObject.scene);
+            Undo.CollapseUndoOperations(undoGroup);
+            return new VoxelLodSinglePlacementResult(instance, disableOriginalObject);
+        }
 
         public static VoxelLodBatchPlacementResult Place(
             GameObject sourceParent, VoxelLodBatchBuildResult batch,
