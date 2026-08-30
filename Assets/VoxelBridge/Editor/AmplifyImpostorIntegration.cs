@@ -63,7 +63,8 @@ namespace LocalModels.VoxelBridge
     internal enum VoxelImpostorBatchSkipReason
     {
         BelowMinimumSize,
-        AtlasBudget
+        AtlasBudget,
+        DisabledByUser
     }
 
     internal readonly struct VoxelImpostorBatchSkip
@@ -141,6 +142,8 @@ namespace LocalModels.VoxelBridge
             skip.Reason == VoxelImpostorBatchSkipReason.BelowMinimumSize);
         public int SkippedForBudgetCount => Skips.Count(skip =>
             skip.Reason == VoxelImpostorBatchSkipReason.AtlasBudget);
+        public int SkippedDisabledCount => Skips.Count(skip =>
+            skip.Reason == VoxelImpostorBatchSkipReason.DisabledByUser);
         public int RemainingCount => Mathf.Max(
             0, CandidateCount - GeneratedCount - FailedCount - SkippedCount);
 
@@ -333,10 +336,50 @@ namespace LocalModels.VoxelBridge
                 sourceLodIndex = 0,
                 cullScreenHeight = settings.CullScreenHeight
             };
+            manifest.impostorDisabled = false;
             VoxelLodPipeline.SaveManifest(manifestAssetPath, manifest);
             prefabPath = VoxelLodPipeline.RebuildPrefab(manifestAssetPath);
             return new VoxelImpostorBuildResult(impostorAssetPath, prefabPath);
         }
+
+        internal static string RemoveFromFamily(string manifestAssetPath)
+        {
+            manifestAssetPath = VoxelLodPipeline.NormalizeAssetPath(manifestAssetPath);
+            if (!VoxelLodPipeline.TryReadManifest(
+                    manifestAssetPath, out VoxelLodSetManifest manifest))
+                throw new InvalidDataException("El manifiesto de la familia voxel no es válido.");
+            if (!HasConfiguredImpostor(manifest))
+                throw new InvalidOperationException("La familia no contiene un impostor.");
+
+            VoxelImpostorEntry previousImpostor = manifest.impostor;
+            bool previousDisabled = manifest.impostorDisabled;
+            manifest.impostor = null;
+            manifest.impostorDisabled = true;
+            VoxelLodPipeline.SaveManifest(manifestAssetPath, manifest);
+
+            try
+            {
+                return VoxelLodPipeline.RebuildPrefab(manifestAssetPath);
+            }
+            catch
+            {
+                manifest.impostor = previousImpostor;
+                manifest.impostorDisabled = previousDisabled;
+                VoxelLodPipeline.SaveManifest(manifestAssetPath, manifest);
+                try
+                {
+                    VoxelLodPipeline.RebuildPrefab(manifestAssetPath);
+                }
+                catch (Exception rollbackException)
+                {
+                    Debug.LogException(rollbackException);
+                }
+                throw;
+            }
+        }
+
+        internal static bool HasConfiguredImpostor(VoxelLodSetManifest manifest) =>
+            !string.IsNullOrWhiteSpace(manifest?.impostor?.assetPath);
 
         internal static int ConfigureGeneratedTextureStreaming(
             Material material, string outputFolder)
@@ -423,7 +466,15 @@ namespace LocalModels.VoxelBridge
             {
                 float modelSize = 0f;
                 if (VoxelLodPipeline.TryReadManifest(path, out VoxelLodSetManifest manifest))
+                {
+                    if (manifest.impostorDisabled)
+                    {
+                        skips.Add(new VoxelImpostorBatchSkip(
+                            path, VoxelImpostorBatchSkipReason.DisabledByUser));
+                        continue;
+                    }
                     modelSize = manifest.lodGroupSize;
+                }
                 bool validSize = !float.IsNaN(modelSize) && !float.IsInfinity(modelSize) &&
                                  modelSize > 0f;
                 if (options.SelectQualityBySize && validSize &&
@@ -624,6 +675,7 @@ namespace LocalModels.VoxelBridge
                 .Where(path => path.EndsWith(".voxset.json", StringComparison.OrdinalIgnoreCase))
                 .Where(path => VoxelLodPipeline.TryReadManifest(
                     path, out VoxelLodSetManifest manifest) &&
+                    !manifest.impostorDisabled &&
                     (manifest.impostor == null ||
                      string.IsNullOrWhiteSpace(manifest.impostor.assetPath) ||
                      !File.Exists(VoxelLodPipeline.AssetPathToAbsolute(

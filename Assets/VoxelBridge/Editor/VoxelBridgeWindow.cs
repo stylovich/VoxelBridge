@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -123,6 +124,23 @@ namespace LocalModels.VoxelBridge
         private static bool ValidateOpenImpostorFromSelection() =>
             ValidateOpenFamilyFromSelection();
 
+        [MenuItem("Assets/Voxel Bridge/Quitar impostor final", false, 2103)]
+        private static void RemoveImpostorFromSelection()
+        {
+            if (!VoxelLodPipeline.TryFindManifestForAsset(
+                    AssetDatabase.GetAssetPath(Selection.activeObject),
+                    out string manifestPath, out VoxelLodSetManifest manifest))
+                return;
+            RemoveImpostorWithConfirmation(manifestPath, manifest, Selection.activeObject);
+        }
+
+        [MenuItem("Assets/Voxel Bridge/Quitar impostor final", true)]
+        private static bool ValidateRemoveImpostorFromSelection() =>
+            Selection.activeObject != null && VoxelLodPipeline.TryFindManifestForAsset(
+                AssetDatabase.GetAssetPath(Selection.activeObject), out _,
+                out VoxelLodSetManifest manifest) &&
+            AmplifyImpostorIntegration.HasConfiguredImpostor(manifest);
+
         [MenuItem("GameObject/Voxel Bridge/Editar este LOD en MagicaVoxel", false, 49)]
         private static void EditHierarchyLod()
         {
@@ -167,6 +185,24 @@ namespace LocalModels.VoxelBridge
         [MenuItem("GameObject/Voxel Bridge/Configurar o generar impostor final", true)]
         private static bool ValidateOpenHierarchyImpostor() =>
             ValidateOpenHierarchyFamily();
+
+        [MenuItem("GameObject/Voxel Bridge/Quitar impostor final", false, 52)]
+        private static void RemoveHierarchyImpostor()
+        {
+            if (!TryResolveHierarchyFamily(Selection.activeGameObject,
+                    out string prefabAssetPath, out VoxelLodSetManifest manifest, out _) ||
+                !VoxelLodPipeline.TryFindManifestForAsset(prefabAssetPath,
+                    out string manifestPath, out _))
+                return;
+            RemoveImpostorWithConfirmation(
+                manifestPath, manifest, Selection.activeGameObject);
+        }
+
+        [MenuItem("GameObject/Voxel Bridge/Quitar impostor final", true)]
+        private static bool ValidateRemoveHierarchyImpostor() =>
+            TryResolveHierarchyFamily(Selection.activeGameObject,
+                out _, out VoxelLodSetManifest manifest, out _) &&
+            AmplifyImpostorIntegration.HasConfiguredImpostor(manifest);
 
         private void OnEnable()
         {
@@ -848,15 +884,27 @@ namespace LocalModels.VoxelBridge
                 }
             }
 
-            Object currentImpostor = hasManifest && manifest.impostor != null
+            bool hasConfiguredImpostor = hasManifest &&
+                                         AmplifyImpostorIntegration.HasConfiguredImpostor(manifest);
+            Object currentImpostor = hasConfiguredImpostor
                 ? AssetDatabase.LoadMainAssetAtPath(manifest.impostor.assetPath)
                 : null;
-            if (currentImpostor != null)
+            if (hasManifest && manifest.impostorDisabled)
+                EditorGUILayout.HelpBox(
+                    "La familia está excluida de la generación automática de impostores. Generar uno manualmente vuelve a habilitarla.",
+                    MessageType.Info);
+            if (hasConfiguredImpostor)
             {
                 EditorGUILayout.BeginHorizontal();
                 EditorGUILayout.ObjectField("Asset actual", currentImpostor, typeof(Object), false);
-                if (GUILayout.Button("Seleccionar", GUILayout.Width(80))) SelectAndPing(currentImpostor);
+                using (new EditorGUI.DisabledScope(currentImpostor == null))
+                    if (GUILayout.Button("Seleccionar", GUILayout.Width(80)))
+                        SelectAndPing(currentImpostor);
                 EditorGUILayout.EndHorizontal();
+                if (currentImpostor == null)
+                    EditorGUILayout.HelpBox(
+                        "El manifiesto contiene un impostor, pero su asset no está disponible.",
+                        MessageType.Warning);
             }
 
             bool canGenerate = compatibility.CanBake && hasManifest && validProfile;
@@ -864,6 +912,13 @@ namespace LocalModels.VoxelBridge
             {
                 if (GUILayout.Button("Generar o actualizar impostor final", GUILayout.Height(36)))
                     GenerateImpostor();
+            }
+            using (new EditorGUI.DisabledScope(!hasConfiguredImpostor))
+            {
+                if (GUILayout.Button(new GUIContent(
+                        "Quitar impostor de la familia",
+                        "Elimina el último nivel de impostor del prefab y excluye esta familia de la generación automática. Los atlas se conservan como caché sin referencias.")))
+                    RemoveLoadedImpostor(manifest);
             }
 
             EditorGUILayout.Space(6);
@@ -1163,7 +1218,8 @@ namespace LocalModels.VoxelBridge
                               $"{impostorResult.FailedCount} con errores.";
                     if (impostorResult.SkippedCount > 0)
                         status += $" {impostorResult.SkippedForSizeCount} omitidos por tamaño y " +
-                                  $"{impostorResult.SkippedForBudgetCount} por presupuesto.";
+                                  $"{impostorResult.SkippedForBudgetCount} por presupuesto; " +
+                                  $"{impostorResult.SkippedDisabledCount} excluidos manualmente.";
                     status += $" Atlas planificados: " +
                               $"{VoxelLodBatchAnalyzer.FormatBytes(impostorResult.EstimatedAtlasBytes)}.";
                     if (impostorResult.Cancelled)
@@ -1288,6 +1344,61 @@ namespace LocalModels.VoxelBridge
             finally
             {
                 EditorUtility.ClearProgressBar();
+            }
+        }
+
+        private void RemoveLoadedImpostor(VoxelLodSetManifest manifest)
+        {
+            string manifestPath = AssetDatabase.GetAssetPath(lodSetManifest);
+            string prefabPath = RemoveImpostorWithConfirmation(
+                manifestPath, manifest, lastPrefabAsset);
+            if (string.IsNullOrEmpty(prefabPath)) return;
+
+            lodSetManifest = AssetDatabase.LoadAssetAtPath<TextAsset>(manifestPath);
+            lastImpostorAsset = null;
+            lastPrefabAsset = AssetDatabase.LoadMainAssetAtPath(prefabPath);
+            SelectAndPing(lastPrefabAsset);
+            status = "Impostor quitado del prefab. La familia queda excluida de la " +
+                     "generación automática y conserva el atlas como caché sin referencias.";
+        }
+
+        private static string RemoveImpostorWithConfirmation(
+            string manifestPath, VoxelLodSetManifest manifest, Object context)
+        {
+            if (!AmplifyImpostorIntegration.HasConfiguredImpostor(manifest) ||
+                string.IsNullOrEmpty(manifestPath))
+                return null;
+            string modelName = string.IsNullOrWhiteSpace(manifest.sourceName)
+                ? Path.GetFileNameWithoutExtension(manifestPath)
+                : manifest.sourceName;
+            if (!EditorUtility.DisplayDialog(
+                    "Voxel Bridge · Quitar impostor",
+                    $"Se quitará el impostor de '{modelName}' y se reconstruirá su prefab con " +
+                    "los LOD voxel. El atlas generado se conservará como caché sin referencias. " +
+                    "La familia quedará excluida de la generación automática hasta que se genere " +
+                    "un nuevo impostor manualmente.",
+                    "Quitar impostor", "Cancelar"))
+                return null;
+
+            try
+            {
+                string prefabPath = AmplifyImpostorIntegration.RemoveFromFamily(manifestPath);
+                Object prefab = AssetDatabase.LoadMainAssetAtPath(prefabPath);
+                if (prefab != null)
+                {
+                    Selection.activeObject = prefab;
+                    EditorGUIUtility.PingObject(prefab);
+                }
+                Debug.Log($"Voxel Bridge quitó el impostor de '{modelName}'.", prefab);
+                return prefabPath;
+            }
+            catch (Exception exception)
+            {
+                Debug.LogException(exception, context);
+                EditorUtility.DisplayDialog(
+                    "Voxel Bridge · No se pudo quitar el impostor",
+                    exception.Message, "Cerrar");
+                return null;
             }
         }
 

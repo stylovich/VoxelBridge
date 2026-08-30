@@ -97,6 +97,7 @@ namespace LocalModels.VoxelBridge
         public float lodGroupSize;
         public VoxelLodEntry[] lods;
         public VoxelImpostorEntry impostor;
+        public bool impostorDisabled;
     }
 
     internal sealed class VoxelGrid

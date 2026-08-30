@@ -237,6 +237,8 @@ namespace LocalModels.VoxelBridge.Tests
                 string prop = SaveImpostorPlanManifest(testRoot, "Prop", 2f);
                 string vehicle = SaveImpostorPlanManifest(testRoot, "Vehicle", 8f);
                 string building = SaveImpostorPlanManifest(testRoot, "Building", 30f);
+                string excluded = SaveImpostorPlanManifest(
+                    testRoot, "Excluded", 30f, impostorDisabled: true);
                 var options = new VoxelImpostorBatchOptions
                 {
                     SelectQualityBySize = true,
@@ -244,9 +246,9 @@ namespace LocalModels.VoxelBridge.Tests
                 };
 
                 VoxelImpostorBatchPlan plan = AmplifyImpostorIntegration.CreateBatchPlan(
-                    new[] { tiny, prop, vehicle, building, vehicle }, profile, options);
+                    new[] { tiny, prop, vehicle, building, vehicle, excluded }, profile, options);
 
-                Assert.That(plan.CandidateCount, Is.EqualTo(4));
+                Assert.That(plan.CandidateCount, Is.EqualTo(5));
                 Assert.That(plan.Entries.Length, Is.EqualTo(2));
                 Assert.That(plan.EstimatedAtlasBytes,
                     Is.LessThanOrEqualTo(options.MaximumEstimatedAtlasBytes));
@@ -260,6 +262,10 @@ namespace LocalModels.VoxelBridge.Tests
                     Is.EqualTo(VoxelImpostorBatchSkipReason.BelowMinimumSize));
                 Assert.That(plan.Skips.Single(skip => skip.ManifestAssetPath == prop).Reason,
                     Is.EqualTo(VoxelImpostorBatchSkipReason.AtlasBudget));
+                Assert.That(plan.Skips.Single(skip => skip.ManifestAssetPath == excluded).Reason,
+                    Is.EqualTo(VoxelImpostorBatchSkipReason.DisabledByUser));
+                Assert.That(AmplifyImpostorIntegration.FindPendingManifestAssetPaths(testRoot),
+                    Does.Not.Contain(excluded));
                 Assert.That(AmplifyImpostorIntegration.EstimateAtlasBytes(
                         profile, VoxelImpostorQuality.Low),
                     Is.EqualTo(6_990_506L));
@@ -363,6 +369,10 @@ namespace LocalModels.VoxelBridge.Tests
                         SingleColor = new Color32(120, 160, 200, 255),
                         ExportFolder = testRoot
                     });
+                Assert.That(VoxelLodPipeline.TryReadManifest(
+                    build.ManifestAssetPath, out VoxelLodSetManifest disabledManifest), Is.True);
+                disabledManifest.impostorDisabled = true;
+                VoxelLodPipeline.SaveManifest(build.ManifestAssetPath, disabledManifest);
                 VoxelImpostorBatchBuildResult batch =
                     AmplifyImpostorIntegration.GenerateForManifests(
                         new[] { build.ManifestAssetPath }, impostorProfile,
@@ -390,6 +400,7 @@ namespace LocalModels.VoxelBridge.Tests
                 Assert.That(VoxelLodPipeline.TryReadManifest(
                     build.ManifestAssetPath, out VoxelLodSetManifest manifest), Is.True);
                 Assert.That(manifest.impostor, Is.Not.Null);
+                Assert.That(manifest.impostorDisabled, Is.False);
                 Assert.That(manifest.impostor.quality, Is.EqualTo(VoxelImpostorQuality.Low));
                 GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(
                     batch.Builds[0].PrefabAssetPath);
@@ -1689,6 +1700,20 @@ namespace LocalModels.VoxelBridge.Tests
                 Assert.That(reduced.PrefabAssetPath, Is.EqualTo(organizedPrefabPath));
                 Assert.That(AssetDatabase.LoadAssetAtPath<GameObject>(organizedPrefabPath)
                     .GetComponent<LODGroup>().lodCount, Is.EqualTo(3));
+
+                Assert.That(AmplifyImpostorIntegration.RemoveFromFamily(
+                    build.ManifestAssetPath), Is.EqualTo(organizedPrefabPath));
+                Assert.That(VoxelLodPipeline.TryReadManifest(
+                    build.ManifestAssetPath, out VoxelLodSetManifest removedManifest), Is.True);
+                Assert.That(AmplifyImpostorIntegration.HasConfiguredImpostor(
+                    removedManifest), Is.False);
+                Assert.That(removedManifest.impostorDisabled, Is.True);
+                Assert.That(AssetDatabase.LoadMainAssetAtPath(impostorAssetPath), Is.Not.Null,
+                    "El atlas se conserva como caché para una regeneración posterior.");
+                Assert.That(AmplifyImpostorIntegration.FindPendingManifestAssetPaths(testRoot),
+                    Does.Not.Contain(build.ManifestAssetPath));
+                Assert.That(AssetDatabase.LoadAssetAtPath<GameObject>(organizedPrefabPath)
+                    .GetComponent<LODGroup>().lodCount, Is.EqualTo(2));
             }
             finally
             {
@@ -1919,13 +1944,15 @@ namespace LocalModels.VoxelBridge.Tests
         }
 
         private static string SaveImpostorPlanManifest(
-            string folder, string name, float lodGroupSize)
+            string folder, string name, float lodGroupSize,
+            bool impostorDisabled = false)
         {
             string path = $"{folder}/{name}.voxset.json";
             VoxelLodPipeline.SaveManifest(path, new VoxelLodSetManifest
             {
                 sourceName = name,
-                lodGroupSize = lodGroupSize
+                lodGroupSize = lodGroupSize,
+                impostorDisabled = impostorDisabled
             });
             return path;
         }
