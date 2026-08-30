@@ -4,6 +4,7 @@ using System.Reflection;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 namespace LocalModels.VoxelBridge.Tests
 {
@@ -15,6 +16,23 @@ namespace LocalModels.VoxelBridge.Tests
 
     internal sealed class VoxelBridgeCoreTests
     {
+        [Test]
+        public void StyleProfile_SelectsShadowlessLodsByModelSize()
+        {
+            VoxelStyleProfile profile = ScriptableObject.CreateInstance<VoxelStyleProfile>();
+            try
+            {
+                Assert.That(profile.GetFirstShadowlessVoxelLodIndex(2f, 3), Is.EqualTo(-1));
+                Assert.That(profile.GetFirstShadowlessVoxelLodIndex(0.75f, 3), Is.EqualTo(2));
+                Assert.That(profile.GetFirstShadowlessVoxelLodIndex(0.25f, 3), Is.EqualTo(1));
+                Assert.That(profile.GetFirstShadowlessVoxelLodIndex(0.25f, 1), Is.EqualTo(0));
+            }
+            finally
+            {
+                Object.DestroyImmediate(profile);
+            }
+        }
+
         [Test]
         public void StyleProfile_AdaptsLodTransitionsAroundReferenceSize()
         {
@@ -1335,11 +1353,15 @@ namespace LocalModels.VoxelBridge.Tests
                 serializedProfile.FindProperty("fillInterior").boolValue = true;
                 serializedProfile.FindProperty("lodTransitionMode").enumValueIndex =
                     (int)VoxelLodTransitionMode.AdaptiveByModelSize;
+                serializedProfile.FindProperty("lastLodShadowSizeThreshold").floatValue = 100f;
+                serializedProfile.FindProperty("penultimateLodShadowSizeThreshold").floatValue = 0.01f;
                 SerializedProperty multipliers = serializedProfile.FindProperty("lodMultipliers");
                 multipliers.arraySize = 2;
                 multipliers.GetArrayElementAtIndex(0).intValue = 1;
                 multipliers.GetArrayElementAtIndex(1).intValue = 2;
                 serializedProfile.ApplyModifiedPropertiesWithoutUndo();
+                VoxelLodPipeline.EnsureAssetFolder(testRoot);
+                AssetDatabase.CreateAsset(profile, testRoot + "/VoxelStyleProfile.asset");
 
                 var options = new VoxelLodBuildOptions
                 {
@@ -1392,7 +1414,15 @@ namespace LocalModels.VoxelBridge.Tests
                     build.ManifestAssetPath, out VoxelLodSetManifest adaptiveManifest), Is.True);
                 Assert.That(adaptiveManifest.formatVersion, Is.EqualTo(4));
                 Assert.That(adaptiveManifest.lodGroupSize, Is.GreaterThan(0f));
+                Assert.That(profile.GetFirstShadowlessVoxelLodIndex(
+                    adaptiveManifest.lodGroupSize, 2), Is.EqualTo(1));
                 LOD[] adaptiveLods = prefab.GetComponent<LODGroup>().GetLODs();
+                Assert.That(adaptiveLods[0].renderers.All(renderer =>
+                    renderer.shadowCastingMode == ShadowCastingMode.On), Is.True);
+                Assert.That(adaptiveLods[1].renderers.All(renderer =>
+                    renderer.shadowCastingMode == ShadowCastingMode.Off), Is.True,
+                    string.Join(", ", adaptiveLods[1].renderers.Select(renderer =>
+                        renderer.shadowCastingMode.ToString())));
                 Assert.That(adaptiveLods[0].screenRelativeTransitionHeight,
                     Is.EqualTo(profile.GetLodScreenHeight(0, adaptiveManifest.lodGroupSize))
                         .Within(1e-6f));
@@ -1484,6 +1514,10 @@ namespace LocalModels.VoxelBridge.Tests
                     Mathf.Approximately(lod.fadeTransitionWidth, 0f)), Is.True);
                 Assert.That(lodsWithImpostor[2].renderers, Has.Length.EqualTo(1));
                 Assert.That(lodsWithImpostor[2].renderers[0].gameObject.name, Is.EqualTo("Impostor"));
+                Assert.That(lodsWithImpostor[1].renderers.All(renderer =>
+                    renderer.shadowCastingMode == ShadowCastingMode.Off), Is.True);
+                Assert.That(lodsWithImpostor[2].renderers[0].shadowCastingMode,
+                    Is.EqualTo(ShadowCastingMode.Off));
                 Assert.That(VoxelLodPipeline.TryFindManifestForAsset(impostorAssetPath,
                     out string foundFromImpostor, out _), Is.True);
                 Assert.That(foundFromImpostor, Is.EqualTo(build.ManifestAssetPath));
@@ -1533,7 +1567,8 @@ namespace LocalModels.VoxelBridge.Tests
             {
                 if (prefabInstance != null) Object.DestroyImmediate(prefabInstance);
                 if (root != null) Object.DestroyImmediate(root);
-                if (profile != null) Object.DestroyImmediate(profile);
+                if (profile != null && !AssetDatabase.Contains(profile))
+                    Object.DestroyImmediate(profile);
                 AssetDatabase.DeleteAsset(testRoot);
             }
         }

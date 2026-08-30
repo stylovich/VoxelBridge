@@ -45,6 +45,17 @@ namespace LocalModels.VoxelBridge
         [InspectorName("Factor máximo")]
         [SerializeField, Min(0.01f)] private float lodMaximumTransitionScale = 2f;
 
+        [Header("Optimización de sombras")]
+        [Tooltip("Desactiva la proyección de sombras en los LOD más lejanos de modelos pequeños. El tamaño se evalúa en el espacio local del prefab, antes de aplicar la escala de cada instancia.")]
+        [InspectorName("Reducir sombras por tamaño")]
+        [SerializeField] private bool reduceSmallObjectShadows = true;
+        [Tooltip("Los modelos menores que este tamaño dejan de proyectar sombras en su último LOD voxel y en el impostor. 1 m es un valor equilibrado para props pequeños.")]
+        [InspectorName("Umbral para último LOD")]
+        [SerializeField, Min(0.01f)] private float lastLodShadowSizeThreshold = 1f;
+        [Tooltip("Los modelos menores que este tamaño dejan de proyectar sombras desde el penúltimo LOD voxel. Los niveles posteriores y el impostor también quedan sin sombras. 0,5 m es adecuado para decoración pequeña.")]
+        [InspectorName("Umbral para penúltimo LOD")]
+        [SerializeField, Min(0.01f)] private float penultimateLodShadowSizeThreshold = 0.5f;
+
         public float BaseVoxelSize => Mathf.Max(0.001f, baseVoxelSize);
         public int ChunkCellSize => Mathf.Clamp(chunkCellSize, 16, 256);
         public int Padding => Mathf.Clamp(padding, 0, 8);
@@ -53,6 +64,15 @@ namespace LocalModels.VoxelBridge
         public int LodCount => lodMultipliers?.Length ?? 0;
         public bool UsesAdaptiveLodTransitions =>
             lodTransitionMode == VoxelLodTransitionMode.AdaptiveByModelSize;
+
+        public int GetFirstShadowlessVoxelLodIndex(float modelSize, int voxelLodCount)
+        {
+            if (!reduceSmallObjectShadows || voxelLodCount <= 0 || !IsFinitePositive(modelSize))
+                return -1;
+            if (modelSize < penultimateLodShadowSizeThreshold)
+                return Mathf.Max(0, voxelLodCount - 2);
+            return modelSize < lastLodShadowSizeThreshold ? voxelLodCount - 1 : -1;
+        }
 
         public int GetLodMultiplier(int index)
         {
@@ -124,6 +144,14 @@ namespace LocalModels.VoxelBridge
                  lodSizeAdaptationStrength < 0f || lodSizeAdaptationStrength > 1f))
             {
                 error = "La adaptación LOD requiere una intensidad entre 0 y 1, un tamaño de referencia y límites positivos, con el mínimo menor o igual que el máximo.";
+                return false;
+            }
+            if (reduceSmallObjectShadows &&
+                (!IsFinitePositive(lastLodShadowSizeThreshold) ||
+                 !IsFinitePositive(penultimateLodShadowSizeThreshold) ||
+                 penultimateLodShadowSizeThreshold > lastLodShadowSizeThreshold))
+            {
+                error = "La optimización de sombras requiere umbrales positivos y el umbral del penúltimo LOD no puede superar al del último LOD.";
                 return false;
             }
 

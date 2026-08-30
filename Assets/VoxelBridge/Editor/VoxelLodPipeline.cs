@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Rendering;
 using Object = UnityEngine.Object;
 
 namespace LocalModels.VoxelBridge
@@ -958,11 +959,57 @@ namespace LocalModels.VoxelBridge
 
                 string path = ResolvePrefabAssetPath(manifest, familyFolder, modelName);
                 PrefabUtility.SaveAsPrefabAsset(root, path);
+                if (profile != null)
+                    ApplySavedPrefabShadowPolicy(
+                        path, profile, entries.Length, manifest.lodGroupSize);
                 return path;
             }
             finally
             {
                 Object.DestroyImmediate(root);
+            }
+        }
+
+        private static void ApplySavedPrefabShadowPolicy(
+            string prefabPath, VoxelStyleProfile profile, int voxelLodCount, float modelSize)
+        {
+            if (profile.GetFirstShadowlessVoxelLodIndex(modelSize, voxelLodCount) < 0)
+                return;
+
+            GameObject prefabRoot = PrefabUtility.LoadPrefabContents(prefabPath);
+            try
+            {
+                LODGroup group = prefabRoot.GetComponent<LODGroup>();
+                if (group == null)
+                    throw new InvalidDataException("El prefab guardado no contiene un LODGroup.");
+                ApplyLodShadowPolicy(profile, group, voxelLodCount, modelSize);
+                PrefabUtility.SaveAsPrefabAsset(prefabRoot, prefabPath);
+            }
+            finally
+            {
+                PrefabUtility.UnloadPrefabContents(prefabRoot);
+            }
+        }
+
+        private static void ApplyLodShadowPolicy(
+            VoxelStyleProfile profile, LODGroup group, int voxelLodCount, float modelSize)
+        {
+            int firstShadowlessLod = profile.GetFirstShadowlessVoxelLodIndex(
+                modelSize, voxelLodCount);
+            if (firstShadowlessLod < 0) return;
+
+            LOD[] lods = group.GetLODs();
+            for (int lodIndex = firstShadowlessLod; lodIndex < lods.Length; lodIndex++)
+            {
+                foreach (Renderer renderer in lods[lodIndex].renderers ?? Array.Empty<Renderer>())
+                {
+                    if (renderer != null)
+                    {
+                        renderer.shadowCastingMode = ShadowCastingMode.Off;
+                        if (PrefabUtility.IsPartOfPrefabInstance(renderer))
+                            PrefabUtility.RecordPrefabInstancePropertyModifications(renderer);
+                    }
+                }
             }
         }
 
