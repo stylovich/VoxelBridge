@@ -2,15 +2,17 @@
 
 Herramienta de Editor para convertir mallas de Unity a `.vox`, mantener una escala voxel física coherente entre assets, editarlas en MagicaVoxel y recuperar el resultado como un prefab con chunks y `LODGroup`.
 
+La planificación de combinación de modelos, materiales compartidos, integración DOTS, análisis espacial e impostores definitivos se describe en [ROADMAP.md](ROADMAP.md).
+
 ## Flujo recomendado: perfil físico + LODs
 
 1. Abre `Tools > Voxel Bridge > Modelos físicos y LODs`.
 2. Crea un `VoxelStyleProfile` desde la ventana o mediante `Create > Voxel Bridge > Perfil de estilo voxel`.
 3. Define `Base Voxel Size` en unidades de Unity. Para vóxeles de 10 cm usa `0.1`.
 4. Define multiplicadores LOD estrictamente crecientes y en potencias de dos, por ejemplo `1, 2, 4, 8`.
-5. Selecciona un FBX, OBJ, prefab u objeto de escena, configura el impostor final y pulsa el botón de generación.
+5. Selecciona un FBX, OBJ, prefab u objeto de escena y pulsa el botón de generación. Habilita el impostor final únicamente cuando sea necesario.
 
-En la generación individual, `Generar impostor final` hornea el perfil seleccionado después de crear la familia voxel y añade el resultado como último nivel del `LODGroup`. Cuando también se utiliza `Colocar resultado en escena`, el horneado termina antes de instanciar el prefab.
+La generación de impostores está desactivada de forma predeterminada. En la generación individual, `Generar impostor final` hornea el perfil seleccionado después de crear la familia voxel y añade el resultado como último nivel del `LODGroup`. Cuando también se utiliza `Colocar resultado en escena`, el horneado termina antes de instanciar el prefab.
 
 Para una fuente perteneciente a una escena cargada, `Colocar resultado en escena` instancia el prefab voxel como hermano del GameObject original y conserva su transform, layer, tag y flags Static. `Desactivar objeto original` realiza el reemplazo visual después de completar correctamente la conversión y admite Undo. Si la conversión o el horneado del impostor falla, el objeto original permanece activo. Las fuentes seleccionadas desde Project solo generan assets y no modifican la escena.
 
