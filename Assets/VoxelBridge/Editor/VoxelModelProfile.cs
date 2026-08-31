@@ -41,9 +41,18 @@ namespace LocalModels.VoxelBridge
         [Tooltip("Límite inferior del factor aplicado a modelos pequeños. 0.35 evita que las transiciones se alejen excesivamente.")]
         [InspectorName("Factor mínimo")]
         [SerializeField, Min(0.01f)] private float lodMinimumTransitionScale = 0.35f;
-        [Tooltip("Límite superior del factor aplicado a modelos grandes. 2 permite adelantar las transiciones sin concentrarlas demasiado cerca de la cámara.")]
+        [Tooltip("Límite superior de la curva adaptativa general. 2 adelanta las transiciones de modelos grandes sin concentrarlas demasiado cerca de la cámara; el refuerzo posterior dispone de su propio máximo.")]
         [InspectorName("Factor máximo")]
         [SerializeField, Min(0.01f)] private float lodMaximumTransitionScale = 2f;
+        [Tooltip("Tamaño a partir del cual se refuerza gradualmente la adaptación de los LOD. Los modelos iguales o menores conservan exactamente la curva adaptativa normal. 6 m corresponde a una sección grande de edificio del conjunto de referencia.")]
+        [InspectorName("Umbral de modelo grande")]
+        [SerializeField, Min(0.01f)] private float lodLargeModelSizeThreshold = 6f;
+        [Tooltip("Exponente adicional aplicado solamente por encima del umbral de modelo grande. 0 desactiva el refuerzo; 0.25 adelanta moderadamente los LOD de menor resolución sin producir un salto en el umbral.")]
+        [InspectorName("Intensidad adicional para grandes")]
+        [SerializeField, Range(0f, 1f)] private float lodLargeModelAdditionalStrength = 0.25f;
+        [Tooltip("Límite final del factor después del refuerzo para modelos grandes. Con una curva 0.30 / 0.18 / 0.10, un valor de 2.5 limita las transiciones a 0.75 / 0.45 / 0.25.")]
+        [InspectorName("Factor máximo para grandes")]
+        [SerializeField, Min(0.01f)] private float lodLargeModelMaximumTransitionScale = 2.5f;
 
         [Header("Optimización de sombras")]
         [Tooltip("Desactiva la proyección de sombras en los LOD más lejanos de modelos pequeños. El tamaño se evalúa en el espacio local del prefab, antes de aplicar la escala de cada instancia.")]
@@ -128,8 +137,18 @@ namespace LocalModels.VoxelBridge
             float referenceSize = Mathf.Max(0.01f, lodReferenceModelSize);
             float rawScale = Mathf.Pow(modelSize / referenceSize,
                 Mathf.Clamp01(lodSizeAdaptationStrength));
-            return Mathf.Clamp(rawScale, lodMinimumTransitionScale,
+            float transitionScale = Mathf.Clamp(rawScale, lodMinimumTransitionScale,
                 lodMaximumTransitionScale);
+            float largeModelThreshold = Mathf.Max(0.01f, lodLargeModelSizeThreshold);
+            float additionalStrength = Mathf.Clamp01(lodLargeModelAdditionalStrength);
+            if (modelSize <= largeModelThreshold || additionalStrength <= 0f)
+                return transitionScale;
+
+            float largeModelScale = Mathf.Pow(
+                modelSize / largeModelThreshold, additionalStrength);
+            float largeModelMaximum = Mathf.Max(
+                lodMaximumTransitionScale, lodLargeModelMaximumTransitionScale);
+            return Mathf.Min(transitionScale * largeModelScale, largeModelMaximum);
         }
 
         public bool TryValidate(out string error)
@@ -156,9 +175,16 @@ namespace LocalModels.VoxelBridge
                  lodMinimumTransitionScale > lodMaximumTransitionScale ||
                  float.IsNaN(lodSizeAdaptationStrength) ||
                  float.IsInfinity(lodSizeAdaptationStrength) ||
-                 lodSizeAdaptationStrength < 0f || lodSizeAdaptationStrength > 1f))
+                 lodSizeAdaptationStrength < 0f || lodSizeAdaptationStrength > 1f ||
+                 !IsFinitePositive(lodLargeModelSizeThreshold) ||
+                 !IsFinitePositive(lodLargeModelMaximumTransitionScale) ||
+                 lodLargeModelMaximumTransitionScale < lodMaximumTransitionScale ||
+                 float.IsNaN(lodLargeModelAdditionalStrength) ||
+                 float.IsInfinity(lodLargeModelAdditionalStrength) ||
+                 lodLargeModelAdditionalStrength < 0f ||
+                 lodLargeModelAdditionalStrength > 1f))
             {
-                error = "La adaptación LOD requiere una intensidad entre 0 y 1, un tamaño de referencia y límites positivos, con el mínimo menor o igual que el máximo.";
+                error = "La adaptación LOD requiere intensidades entre 0 y 1, tamaños positivos y factores máximos ordenados. El máximo para modelos grandes no puede ser menor que el máximo general.";
                 return false;
             }
             if (reduceSmallObjectShadows &&

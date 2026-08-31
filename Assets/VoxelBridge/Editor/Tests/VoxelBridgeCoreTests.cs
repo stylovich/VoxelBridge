@@ -124,6 +124,7 @@ namespace LocalModels.VoxelBridge.Tests
                 serializedProfile.FindProperty("lodSizeAdaptationStrength").floatValue = 0.5f;
                 serializedProfile.FindProperty("lodMinimumTransitionScale").floatValue = 0.35f;
                 serializedProfile.FindProperty("lodMaximumTransitionScale").floatValue = 2f;
+                serializedProfile.FindProperty("lodLargeModelAdditionalStrength").floatValue = 0f;
                 SerializedProperty transitions =
                     serializedProfile.FindProperty("lodScreenHeights");
                 transitions.arraySize = 3;
@@ -140,6 +141,52 @@ namespace LocalModels.VoxelBridge.Tests
                     Is.EqualTo(0.2f).Within(1e-6f));
                 Assert.That(profile.GetMinimumLodScreenHeight(2),
                     Is.EqualTo(0.035f).Within(1e-6f));
+                Assert.That(profile.TryValidate(out string error), Is.True, error);
+            }
+            finally
+            {
+                Object.DestroyImmediate(profile);
+            }
+        }
+
+        [Test]
+        public void StyleProfile_AdvancesCoarserLodsOnlyAboveLargeModelThreshold()
+        {
+            VoxelStyleProfile profile = ScriptableObject.CreateInstance<VoxelStyleProfile>();
+            try
+            {
+                var serializedProfile = new SerializedObject(profile);
+                serializedProfile.FindProperty("lodTransitionMode").enumValueIndex =
+                    (int)VoxelLodTransitionMode.AdaptiveByModelSize;
+                serializedProfile.FindProperty("lodReferenceModelSize").floatValue = 4f;
+                serializedProfile.FindProperty("lodSizeAdaptationStrength").floatValue = 0.5f;
+                serializedProfile.FindProperty("lodMinimumTransitionScale").floatValue = 0.35f;
+                serializedProfile.FindProperty("lodMaximumTransitionScale").floatValue = 2f;
+                serializedProfile.FindProperty("lodLargeModelSizeThreshold").floatValue = 6f;
+                serializedProfile.FindProperty("lodLargeModelAdditionalStrength").floatValue = 0.25f;
+                serializedProfile.FindProperty("lodLargeModelMaximumTransitionScale").floatValue = 2.5f;
+                SerializedProperty transitions =
+                    serializedProfile.FindProperty("lodScreenHeights");
+                transitions.arraySize = 3;
+                transitions.GetArrayElementAtIndex(0).floatValue = 0.3f;
+                transitions.GetArrayElementAtIndex(1).floatValue = 0.18f;
+                transitions.GetArrayElementAtIndex(2).floatValue = 0.1f;
+                serializedProfile.ApplyModifiedPropertiesWithoutUndo();
+
+                Assert.That(profile.GetLodTransitionScale(5f),
+                    Is.EqualTo(Mathf.Sqrt(5f / 4f)).Within(1e-6f));
+                float thresholdScale = Mathf.Sqrt(6f / 4f);
+                Assert.That(profile.GetLodTransitionScale(6f),
+                    Is.EqualTo(thresholdScale).Within(1e-6f));
+
+                float expectedLargeScale = Mathf.Sqrt(12f / 4f) * Mathf.Pow(2f, 0.25f);
+                Assert.That(profile.GetLodTransitionScale(12f),
+                    Is.EqualTo(expectedLargeScale).Within(1e-6f));
+                Assert.That(profile.GetLodScreenHeight(0, 12f),
+                    Is.EqualTo(0.3f * expectedLargeScale).Within(1e-6f));
+                Assert.That(profile.GetLodTransitionScale(40f), Is.EqualTo(2.5f));
+                Assert.That(profile.GetLodScreenHeight(2, 40f),
+                    Is.EqualTo(0.25f).Within(1e-6f));
                 Assert.That(profile.TryValidate(out string error), Is.True, error);
             }
             finally

@@ -43,9 +43,11 @@ Cada LOD automático se voxeliza de nuevo desde la malla fuente. Sin adaptación
 - `Fija por pantalla` utiliza los porcentajes sin modificarlos.
 - `Adaptativa por tamaño` escala toda la curva según el tamaño final calculado por el `LODGroup`.
 
-El modo adaptativo utiliza la relación `tamaño del modelo / tamaño de referencia`, elevada a la `Intensidad de adaptación`. Una intensidad de `0` equivale al modo fijo, `0.5` compensa los extremos manteniendo diferencias naturales entre tamaños y `1` aproxima las transiciones a distancias físicas similares. `Factor mínimo` y `Factor máximo` limitan la compensación para evitar cambios demasiado cercanos o lejanos.
+El modo adaptativo utiliza la relación `tamaño del modelo / tamaño de referencia`, elevada a la `Intensidad de adaptación`. Una intensidad de `0` equivale al modo fijo, `0.5` compensa los extremos manteniendo diferencias naturales entre tamaños y `1` aproxima las transiciones a distancias físicas similares. `Factor mínimo` y `Factor máximo` limitan esta curva base.
 
-Para una curva base ajustada con un vehículo grande se recomienda comenzar con un tamaño de referencia de `4 m`, intensidad `0.5` y factores `0.35–2`. Con transiciones base `0.30 / 0.18 / 0.10`, un modelo de `0.5 m` obtiene aproximadamente `0.106 / 0.064 / 0.035`, el modelo de referencia conserva los valores originales y una estructura de `40 m` queda limitada a `0.60 / 0.36 / 0.20`.
+Los modelos que superan `Umbral de modelo grande` reciben una segunda adaptación gradual. `Intensidad adicional para grandes` controla su progresión y `Factor máximo para grandes` limita el resultado total. Los modelos iguales o menores que el umbral no cambian. Un factor de pantalla mayor hace que Unity pase al siguiente LOD más cerca de la cámara y reduce el tramo físico ocupado por los primeros niveles.
+
+Para una curva base ajustada con un vehículo grande se recomienda comenzar con un tamaño de referencia de `4 m`, intensidad `0.5` y factores `0.35–2`. La configuración recomendada para estructuras utiliza un umbral de `6 m`, intensidad adicional `0.25` y factor máximo `2.5`. Con transiciones base `0.30 / 0.18 / 0.10`, un modelo de `0.5 m` obtiene aproximadamente `0.106 / 0.064 / 0.035`, un modelo de `6 m` conserva la adaptación original y una estructura muy grande queda limitada a `0.75 / 0.45 / 0.25`.
 
 El manifiesto guarda el tamaño del grupo y las transiciones voxel calculadas por el perfil. Cuando existe un impostor, la construcción final conserva la transición de LOD0 y amplía los rangos posteriores: cada LOD voxel intermedio ocupa la mitad del rango original del nivel siguiente y el último LOD voxel ocupa un tercio del rango original del impostor. Por ejemplo, una curva `37 / 22 / 12 / 1` produce `37 / 17 / 8,33 / 1`.
 
