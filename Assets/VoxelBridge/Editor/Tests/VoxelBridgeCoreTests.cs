@@ -226,7 +226,7 @@ namespace LocalModels.VoxelBridge.Tests
         }
 
         [Test]
-        public void ImpostorBatchPlan_PrioritizesLargeFamiliesAndHonorsAtlasBudget()
+        public void ImpostorBatchPlan_CoversEligibleFamiliesBeforeQualityUpgrades()
         {
             const string testRoot = "Assets/VoxelBridgeImpostorPlanTestOutput";
             VoxelImpostorProfile profile = ScriptableObject.CreateInstance<VoxelImpostorProfile>();
@@ -242,36 +242,38 @@ namespace LocalModels.VoxelBridge.Tests
                 var options = new VoxelImpostorBatchOptions
                 {
                     SelectQualityBySize = true,
-                    MaximumEstimatedAtlasBytes = 34L * 1024L * 1024L
+                    MaximumEstimatedAtlasBytes = 13L * 1024L * 1024L
                 };
 
                 VoxelImpostorBatchPlan plan = AmplifyImpostorIntegration.CreateBatchPlan(
                     new[] { tiny, prop, vehicle, building, vehicle, excluded }, profile, options);
 
                 Assert.That(plan.CandidateCount, Is.EqualTo(5));
-                Assert.That(plan.Entries.Length, Is.EqualTo(2));
+                Assert.That(plan.Entries.Length, Is.EqualTo(3));
                 Assert.That(plan.EstimatedAtlasBytes,
                     Is.LessThanOrEqualTo(options.MaximumEstimatedAtlasBytes));
                 Assert.That(plan.Entries.Single(entry =>
                         entry.ManifestAssetPath == building).Quality,
-                    Is.EqualTo(VoxelImpostorQuality.Medium));
+                    Is.EqualTo(VoxelImpostorQuality.Low));
                 Assert.That(plan.Entries.Single(entry =>
                         entry.ManifestAssetPath == vehicle).Quality,
                     Is.EqualTo(VoxelImpostorQuality.Low));
+                Assert.That(plan.Entries.Single(entry =>
+                        entry.ManifestAssetPath == prop).Quality,
+                    Is.EqualTo(VoxelImpostorQuality.Low));
+                Assert.That(plan.ReducedQualityCount, Is.EqualTo(2));
                 Assert.That(plan.Skips.Single(skip => skip.ManifestAssetPath == tiny).Reason,
                     Is.EqualTo(VoxelImpostorBatchSkipReason.BelowMinimumSize));
-                Assert.That(plan.Skips.Single(skip => skip.ManifestAssetPath == prop).Reason,
-                    Is.EqualTo(VoxelImpostorBatchSkipReason.AtlasBudget));
                 Assert.That(plan.Skips.Single(skip => skip.ManifestAssetPath == excluded).Reason,
                     Is.EqualTo(VoxelImpostorBatchSkipReason.DisabledByUser));
                 Assert.That(AmplifyImpostorIntegration.FindPendingManifestAssetPaths(testRoot),
                     Does.Not.Contain(excluded));
                 Assert.That(AmplifyImpostorIntegration.EstimateAtlasBytes(
                         profile, VoxelImpostorQuality.Low),
-                    Is.EqualTo(6_990_506L));
+                    Is.EqualTo(3_407_872L));
                 Assert.That(AmplifyImpostorIntegration.EstimateAtlasBytes(
                         profile, VoxelImpostorQuality.Medium),
-                    Is.EqualTo(27_962_026L));
+                    Is.EqualTo(12_845_056L));
             }
             finally
             {
@@ -369,6 +371,25 @@ namespace LocalModels.VoxelBridge.Tests
                         SingleColor = new Color32(120, 160, 200, 255),
                         ExportFolder = testRoot
                     });
+                GameObject sourcePrefab = AssetDatabase.LoadAssetAtPath<GameObject>(
+                    build.PrefabAssetPath);
+                Material[] sourceMaterials = sourcePrefab
+                    .GetComponentsInChildren<Renderer>(true)
+                    .SelectMany(renderer => renderer.sharedMaterials)
+                    .Where(material => material != null)
+                    .Distinct()
+                    .ToArray();
+                string sourceShaderNames = string.Join(", ", sourceMaterials
+                    .Select(material => material.shader.name));
+                Assert.That(sourceMaterials, Is.Not.Empty);
+                Assert.That(sourceMaterials.All(material => material.shader.isSupported), Is.True,
+                    sourceShaderNames);
+                if ((GraphicsSettings.currentRenderPipeline ??
+                     GraphicsSettings.defaultRenderPipeline)?.GetType().Name
+                    .Contains("HDRenderPipeline") == true)
+                    Assert.That(sourceMaterials.All(material =>
+                            material.shader.name == "HDRP/Lit"), Is.True,
+                        sourceShaderNames);
                 Assert.That(VoxelLodPipeline.TryReadManifest(
                     build.ManifestAssetPath, out VoxelLodSetManifest disabledManifest), Is.True);
                 disabledManifest.impostorDisabled = true;
@@ -381,8 +402,20 @@ namespace LocalModels.VoxelBridge.Tests
                 Assert.That(batch.Cancelled, Is.False);
                 Assert.That(batch.GeneratedCount, Is.EqualTo(1));
                 Assert.That(batch.FailedCount, Is.Zero);
-                Assert.That(AssetDatabase.LoadMainAssetAtPath(
-                    batch.Builds[0].ImpostorAssetPath), Is.Not.Null);
+                Object impostorAsset = AssetDatabase.LoadMainAssetAtPath(
+                    batch.Builds[0].ImpostorAssetPath);
+                Assert.That(impostorAsset, Is.Not.Null);
+                const BindingFlags fields = BindingFlags.Instance |
+                                            BindingFlags.Public |
+                                            BindingFlags.NonPublic;
+                Material impostorMaterial = impostorAsset.GetType()
+                    .GetField("Material", fields)?.GetValue(impostorAsset) as Material;
+                Assert.That(impostorMaterial, Is.Not.Null);
+                if ((GraphicsSettings.currentRenderPipeline ??
+                     GraphicsSettings.defaultRenderPipeline)?.GetType().Name
+                    .Contains("HDRenderPipeline") == true)
+                    Assert.That(impostorMaterial.shader.name, Does.EndWith(" HDRP"),
+                        "El material horneado debe usar el shader runtime de HDRP.");
                 string impostorFolder = VoxelLodPipeline.NormalizeAssetPath(
                     Path.GetDirectoryName(batch.Builds[0].ImpostorAssetPath));
                 string[] texturePaths = AssetDatabase.FindAssets(
@@ -397,6 +430,17 @@ namespace LocalModels.VoxelBridge.Tests
                     Assert.That(importer.mipmapEnabled, Is.True, texturePath);
                     Assert.That(importer.streamingMipmaps, Is.True, texturePath);
                 }
+                string albedoPath = texturePaths.Single(path =>
+                    path.EndsWith("_Albedo.tga", System.StringComparison.OrdinalIgnoreCase));
+                var albedoImporter = (TextureImporter)AssetImporter.GetAtPath(albedoPath);
+                albedoImporter.isReadable = true;
+                albedoImporter.SaveAndReimport();
+                Texture2D albedo = AssetDatabase.LoadAssetAtPath<Texture2D>(albedoPath);
+                Color32[] albedoPixels = albedo.GetPixels32();
+                Assert.That(albedoPixels.Any(pixel => pixel.a > 0), Is.True);
+                Assert.That(albedoPixels.Any(pixel => pixel.a > 0 &&
+                    !(pixel.r > 250 && pixel.g < 5 && pixel.b > 250)), Is.True,
+                    "El atlas no debe capturar el color de error magenta.");
                 Assert.That(VoxelLodPipeline.TryReadManifest(
                     build.ManifestAssetPath, out VoxelLodSetManifest manifest), Is.True);
                 Assert.That(manifest.impostor, Is.Not.Null);
@@ -756,6 +800,33 @@ namespace LocalModels.VoxelBridge.Tests
             Assert.That(result, Is.EqualTo(VoxelImporterPatchResult.Conflict));
             Assert.That(output, Is.EqualTo(source));
             Assert.That(detail, Does.Contain("Firma esperada"));
+        }
+
+        [Test]
+        public void AmplifyPipelinePatch_AppliesOnceAndRejectsChangedSource()
+        {
+            string source = CreateUnpatchedAmplifyPipelineFixture();
+
+            AmplifyPipelinePatchResult first =
+                AmplifyImpostorPipelinePatcher.TryPatchSource(
+                    source, out string patched, out string firstDetail);
+            AmplifyPipelinePatchResult second =
+                AmplifyImpostorPipelinePatcher.TryPatchSource(
+                    patched, out string unchanged, out string secondDetail);
+            string changed = source.Replace(
+                "RenderPipelineManager.currentPipeline.ToString()",
+                "ResolvePipelineName()");
+            AmplifyPipelinePatchResult conflict =
+                AmplifyImpostorPipelinePatcher.TryPatchSource(
+                    changed, out string rejected, out string conflictDetail);
+
+            Assert.That(first, Is.EqualTo(AmplifyPipelinePatchResult.Applied), firstDetail);
+            Assert.That(second, Is.EqualTo(AmplifyPipelinePatchResult.AlreadyApplied),
+                secondDetail);
+            Assert.That(unchanged, Is.EqualTo(patched));
+            Assert.That(conflict, Is.EqualTo(AmplifyPipelinePatchResult.Conflict));
+            Assert.That(conflictDetail, Does.Contain("Firma esperada"));
+            Assert.That(rejected, Is.EqualTo(changed));
         }
 
         [Test]
@@ -1916,6 +1987,28 @@ namespace LocalModels.VoxelBridge.Tests
             {
                 if (File.Exists(path)) File.Delete(path);
             }
+        }
+
+        private static string CreateUnpatchedAmplifyPipelineFixture()
+        {
+            return
+                "public void DetectRenderPipeline()\n" +
+                "{\n" +
+                "\t\t\tstring pipelineName = string.Empty;\n" +
+                "\t\t\ttry\n" +
+                "\t\t\t{\n" +
+                "\t\t\t\tpipelineName = UnityEngine.Rendering.RenderPipelineManager.currentPipeline.ToString();\n" +
+                "\t\t\t}\n" +
+                "\t\t\tcatch( Exception )\n" +
+                "\t\t\t{\n" +
+                "\t\t\t\tpipelineName = \"\";\n" +
+                "\t\t\t}\n" +
+                "}\n" +
+                "\t\t\t\t\t\tif( material.HasProperty( outputList[ i ].Name ) )\n" +
+                "\t\t\t\tif( material.HasProperty( outputList[ i ].Name ) )\n" +
+                "\t\t\t\t\tif( material.HasProperty( m_propertyNames[ i ] ) )\n" +
+                "\t\t\t\tif( material.HasProperty( m_propertyNames[ i ] ) )\n" +
+                "\t\t\tif( material.HasProperty( m_propertyNames[ i ] ) )";
         }
 
         private static string CreateUnpatchedVoxelImporterFixture()

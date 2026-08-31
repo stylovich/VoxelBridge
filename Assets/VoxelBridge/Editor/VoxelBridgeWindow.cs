@@ -583,7 +583,7 @@ namespace LocalModels.VoxelBridge
                         $"Política: menos de {impostorProfile.MinimumImpostorSize:0.##} m sin impostor; " +
                         $"hasta {impostorProfile.MediumImpostorSize:0.##} m perfil Bajo; " +
                         $"hasta {impostorProfile.ArchitectureImpostorSize:0.##} m perfil Medio; " +
-                        "a partir de ese tamaño, Arquitectura. El presupuesto conserva primero los objetos mayores y reduce u omite los restantes.",
+                        "a partir de ese tamaño, Arquitectura. El presupuesto prioriza la cobertura de las familias mayores y mejora sus perfiles mientras haya memoria disponible.",
                         MessageType.None);
 
                 EditorGUILayout.BeginHorizontal();
@@ -602,7 +602,7 @@ namespace LocalModels.VoxelBridge
 
             batchImpostorAtlasBudgetMb = Mathf.Max(64, EditorGUILayout.IntField(
                 new GUIContent("Presupuesto total de atlas (MiB)",
-                    "Límite estimado para los cinco mapas y sus mipmaps por cada familia única. En modo automático se reduce la calidad antes de omitir familias. En modo fijo se omiten las que no caben."),
+                    "Límite estimado de memoria importada para los cinco mapas y sus mipmaps por cada familia única. En modo automático se asigna primero el perfil de menor coste a cada familia elegible y después se mejora su calidad. En modo fijo se omiten las familias que no caben."),
                 batchImpostorAtlasBudgetMb));
             if (!QualitySettings.streamingMipmapsActive)
                 EditorGUILayout.HelpBox(
@@ -640,6 +640,7 @@ namespace LocalModels.VoxelBridge
                 _ => MessageType.Error
             };
             EditorGUILayout.HelpBox(compatibility.Message, compatibilityMessage);
+            DrawAmplifyPipelinePatchAction();
 
             if (impostorProfile == null)
             {
@@ -834,6 +835,7 @@ namespace LocalModels.VoxelBridge
                 _ => MessageType.Error
             };
             EditorGUILayout.HelpBox(compatibility.Message, compatibilityMessage);
+            DrawAmplifyPipelinePatchAction();
 
             if (impostorProfile == null)
             {
@@ -933,6 +935,29 @@ namespace LocalModels.VoxelBridge
                 if (GUILayout.Button("Generar impostores pendientes en la carpeta"))
                     GeneratePendingImpostors();
             }
+        }
+
+        private static void DrawAmplifyPipelinePatchAction()
+        {
+            AmplifyPipelinePatchResult patchStatus =
+                AmplifyImpostorPipelinePatcher.GetProjectStatus(out _);
+            if (patchStatus != AmplifyPipelinePatchResult.Required) return;
+
+            if (!GUILayout.Button("Aplicar parche de compatibilidad de Amplify Impostors")) return;
+            if (!AmplifyImpostorPipelinePatcher.TryApplyToProject(
+                    out AmplifyPipelinePatchResult result, out string message))
+            {
+                Debug.LogWarning(message);
+                EditorUtility.DisplayDialog(
+                    "Voxel Bridge - parche no aplicado", message, "Aceptar");
+                return;
+            }
+
+            Debug.Log(message);
+            if (result == AmplifyPipelinePatchResult.Applied)
+                AssetDatabase.ImportAsset(
+                    AmplifyImpostorPipelinePatcher.SourceAssetPath,
+                    ImportAssetOptions.ForceUpdate);
         }
 
         private void DrawImpostorQualitySelector()
@@ -1220,6 +1245,9 @@ namespace LocalModels.VoxelBridge
                         status += $" {impostorResult.SkippedForSizeCount} omitidos por tamaño y " +
                                   $"{impostorResult.SkippedForBudgetCount} por presupuesto; " +
                                   $"{impostorResult.SkippedDisabledCount} excluidos manualmente.";
+                    if (impostorResult.ReducedQualityCount > 0)
+                        status += $" {impostorResult.ReducedQualityCount} con perfil reducido " +
+                                  "para respetar el presupuesto.";
                     status += $" Atlas planificados: " +
                               $"{VoxelLodBatchAnalyzer.FormatBytes(impostorResult.EstimatedAtlasBytes)}.";
                     if (impostorResult.Cancelled)

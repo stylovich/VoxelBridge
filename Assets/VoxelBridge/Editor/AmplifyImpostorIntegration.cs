@@ -6,6 +6,7 @@ using System.Reflection;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.SceneManagement;
 using Object = UnityEngine.Object;
 
@@ -93,15 +94,19 @@ namespace LocalModels.VoxelBridge
     internal readonly struct VoxelImpostorBatchPlanEntry
     {
         public readonly string ManifestAssetPath;
+        public readonly VoxelImpostorQuality RequestedQuality;
         public readonly VoxelImpostorQuality Quality;
         public readonly float ModelSize;
         public readonly long EstimatedAtlasBytes;
+        public bool WasReduced => Quality != RequestedQuality;
 
         public VoxelImpostorBatchPlanEntry(
-            string manifestAssetPath, VoxelImpostorQuality quality,
+            string manifestAssetPath, VoxelImpostorQuality requestedQuality,
+            VoxelImpostorQuality quality,
             float modelSize, long estimatedAtlasBytes)
         {
             ManifestAssetPath = manifestAssetPath;
+            RequestedQuality = requestedQuality;
             Quality = quality;
             ModelSize = modelSize;
             EstimatedAtlasBytes = estimatedAtlasBytes;
@@ -114,6 +119,7 @@ namespace LocalModels.VoxelBridge
         public readonly VoxelImpostorBatchPlanEntry[] Entries;
         public readonly VoxelImpostorBatchSkip[] Skips;
         public readonly long EstimatedAtlasBytes;
+        public int ReducedQualityCount => Entries.Count(entry => entry.WasReduced);
 
         public VoxelImpostorBatchPlan(
             int candidateCount, IEnumerable<VoxelImpostorBatchPlanEntry> entries,
@@ -133,6 +139,7 @@ namespace LocalModels.VoxelBridge
         public readonly VoxelImpostorBatchFailure[] Failures;
         public readonly VoxelImpostorBatchSkip[] Skips;
         public readonly long EstimatedAtlasBytes;
+        public readonly int ReducedQualityCount;
         public readonly bool Cancelled;
 
         public int GeneratedCount => Builds.Length;
@@ -151,13 +158,14 @@ namespace LocalModels.VoxelBridge
             int candidateCount, IEnumerable<VoxelImpostorBuildResult> builds,
             IEnumerable<VoxelImpostorBatchFailure> failures, bool cancelled,
             IEnumerable<VoxelImpostorBatchSkip> skips = null,
-            long estimatedAtlasBytes = 0)
+            long estimatedAtlasBytes = 0, int reducedQualityCount = 0)
         {
             CandidateCount = candidateCount;
             Builds = builds.ToArray();
             Failures = failures.ToArray();
             Skips = skips?.ToArray() ?? Array.Empty<VoxelImpostorBatchSkip>();
             EstimatedAtlasBytes = Math.Max(0, estimatedAtlasBytes);
+            ReducedQualityCount = Math.Max(0, reducedQualityCount);
             Cancelled = cancelled;
         }
     }
@@ -184,7 +192,9 @@ namespace LocalModels.VoxelBridge
         {
             public string ManifestAssetPath;
             public VoxelImpostorQuality DesiredQuality;
+            public VoxelImpostorQuality SelectedQuality;
             public float ModelSize;
+            public long EstimatedAtlasBytes;
         }
 
         private sealed class Api
@@ -198,7 +208,9 @@ namespace LocalModels.VoxelBridge
             public FieldInfo LodReplacementField;
             public FieldInfo FolderPathField;
             public FieldInfo ImpostorNameField;
+            public FieldInfo RenderPipelineField;
             public MethodInfo RenderMethod;
+            public MethodInfo CheckHdrpMaterialMethod;
             public FieldInfo MeshField;
             public FieldInfo MaterialField;
             public FieldInfo ImpostorTypeField;
@@ -213,6 +225,7 @@ namespace LocalModels.VoxelBridge
             public FieldInfo ToleranceField;
             public FieldInfo NormalScaleField;
             public FieldInfo PresetField;
+            public FieldInfo BakeShaderField;
             public string Version;
         }
 
@@ -301,7 +314,12 @@ namespace LocalModels.VoxelBridge
                     Enum.ToObject(api.LodReplacementField.FieldType, 0)); // DoNothing
                 api.FolderPathField.SetValue(component, outputFolder);
                 api.ImpostorNameField.SetValue(component, impostorName);
+                ConfigureRenderPipeline(api, component);
 
+                Object originalPreset = api.PresetField.GetValue(data) as Object;
+                Object temporaryPreset = CreateHdrpBakePreset(api);
+                if (temporaryPreset != null)
+                    api.PresetField.SetValue(data, temporaryPreset);
                 try
                 {
                     api.RenderMethod.Invoke(component, new[] { data });
@@ -312,13 +330,28 @@ namespace LocalModels.VoxelBridge
                         "Amplify Impostors no pudo completar el horneado: " +
                         exception.InnerException.Message, exception.InnerException);
                 }
+                finally
+                {
+                    if (temporaryPreset != null)
+                    {
+                        api.PresetField.SetValue(data, originalPreset);
+                        Object.DestroyImmediate(temporaryPreset);
+                    }
+                }
+                ValidateRenderPipeline(api, component);
 
                 if (!(api.MeshField.GetValue(data) is Mesh) ||
                     !(api.MaterialField.GetValue(data) is Material generatedMaterial))
                     throw new InvalidOperationException(
                         "Amplify terminó sin producir el mesh o el material del impostor.");
 
-                ConfigureGeneratedTextureStreaming(generatedMaterial, outputFolder);
+                ConfigureRenderPipeline(api, component);
+                ConfigureGeneratedMaterialForActivePipeline(
+                    generatedMaterial, settings.ImpostorType);
+                if (GetActiveRenderPipeline() == ActiveRenderPipeline.Hdrp)
+                    api.CheckHdrpMaterialMethod.Invoke(component, null);
+                EditorUtility.SetDirty(data);
+                AssetDatabase.SaveAssets();
             }
             finally
             {
@@ -339,6 +372,7 @@ namespace LocalModels.VoxelBridge
             manifest.impostorDisabled = false;
             VoxelLodPipeline.SaveManifest(manifestAssetPath, manifest);
             prefabPath = VoxelLodPipeline.RebuildPrefab(manifestAssetPath);
+            ConfigureGeneratedTextureStreaming(outputFolder);
             return new VoxelImpostorBuildResult(impostorAssetPath, prefabPath);
         }
 
@@ -381,23 +415,24 @@ namespace LocalModels.VoxelBridge
         internal static bool HasConfiguredImpostor(VoxelLodSetManifest manifest) =>
             !string.IsNullOrWhiteSpace(manifest?.impostor?.assetPath);
 
-        internal static int ConfigureGeneratedTextureStreaming(
-            Material material, string outputFolder)
+        internal static int ConfigureGeneratedTextureStreaming(string outputFolder)
         {
-            if (material == null) throw new ArgumentNullException(nameof(material));
             outputFolder = VoxelLodPipeline.NormalizeAssetPath(outputFolder).TrimEnd('/');
             string folderPrefix = outputFolder + "/";
             int changedCount = 0;
 
-            foreach (string propertyName in material.GetTexturePropertyNames())
+            string[] texturePaths = AssetDatabase.FindAssets(
+                    "t:Texture2D", new[] { outputFolder })
+                .Select(AssetDatabase.GUIDToAssetPath)
+                .Select(VoxelLodPipeline.NormalizeAssetPath)
+                .Where(path => path.StartsWith(
+                    folderPrefix, StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            foreach (string path in texturePaths)
             {
-                Texture texture = material.GetTexture(propertyName);
-                string path = texture == null
-                    ? null
-                    : VoxelLodPipeline.NormalizeAssetPath(AssetDatabase.GetAssetPath(texture));
-                if (string.IsNullOrEmpty(path) ||
-                    !path.StartsWith(folderPrefix, StringComparison.OrdinalIgnoreCase) ||
-                    !(AssetImporter.GetAtPath(path) is TextureImporter importer))
+                if (!(AssetImporter.GetAtPath(path) is TextureImporter importer))
                     continue;
 
                 bool changed = !importer.mipmapEnabled || !importer.streamingMipmaps ||
@@ -412,6 +447,108 @@ namespace LocalModels.VoxelBridge
             }
 
             return changedCount;
+        }
+
+        private enum ActiveRenderPipeline
+        {
+            BuiltIn,
+            Hdrp,
+            Urp,
+            Custom
+        }
+
+        private static ActiveRenderPipeline GetActiveRenderPipeline()
+        {
+            RenderPipelineAsset pipeline = GraphicsSettings.currentRenderPipeline ??
+                                           GraphicsSettings.defaultRenderPipeline;
+            if (pipeline == null) return ActiveRenderPipeline.BuiltIn;
+
+            string typeName = pipeline.GetType().FullName ?? pipeline.GetType().Name;
+            if (typeName.IndexOf("HDRenderPipeline", StringComparison.OrdinalIgnoreCase) >= 0)
+                return ActiveRenderPipeline.Hdrp;
+            if (typeName.IndexOf(
+                    "UniversalRenderPipeline", StringComparison.OrdinalIgnoreCase) >= 0)
+                return ActiveRenderPipeline.Urp;
+            return ActiveRenderPipeline.Custom;
+        }
+
+        private static void ConfigureRenderPipeline(Api api, Component component)
+        {
+            string enumName = GetActiveRenderPipelineEnumName();
+            if (!Enum.TryParse(api.RenderPipelineField.FieldType, enumName, out object value))
+                throw new InvalidDataException(
+                    $"Amplify Impostors no expone el pipeline '{enumName}' esperado.");
+            api.RenderPipelineField.SetValue(component, value);
+        }
+
+        private static void ValidateRenderPipeline(Api api, Component component)
+        {
+            string expected = GetActiveRenderPipelineEnumName();
+            string detected = api.RenderPipelineField.GetValue(component)?.ToString();
+            if (!string.Equals(expected, detected, StringComparison.Ordinal))
+                throw new InvalidOperationException(
+                    $"Amplify Impostors detectó el pipeline '{detected ?? "desconocido"}' " +
+                    $"durante el horneado; se esperaba '{expected}'.");
+        }
+
+        private static string GetActiveRenderPipelineEnumName()
+        {
+            return GetActiveRenderPipeline() switch
+            {
+                ActiveRenderPipeline.Hdrp => "HDRP",
+                ActiveRenderPipeline.Urp => "URP",
+                ActiveRenderPipeline.Custom => "Custom",
+                _ => "None"
+            };
+        }
+
+        private static Object CreateHdrpBakePreset(Api api)
+        {
+            if (GetActiveRenderPipeline() != ActiveRenderPipeline.Hdrp) return null;
+
+            Object sourcePreset = AssetDatabase.LoadMainAssetAtPath(
+                "Assets/AmplifyImpostors/Plugins/EditorResources/Presets/BakePreset.asset");
+            Shader bakeShader = Shader.Find("Hidden/Voxel Bridge/Impostor Bake HDRP");
+            if (sourcePreset == null || bakeShader == null)
+                throw new InvalidDataException(
+                    "No se encontró el preset o el shader de horneado HDRP de Amplify Impostors.");
+            if (!bakeShader.isSupported)
+                throw new InvalidDataException(
+                    $"El shader de horneado HDRP '{bakeShader.name}' no es compatible con " +
+                    "la configuración gráfica activa.");
+
+            Object preset = Object.Instantiate(sourcePreset);
+            preset.name = "Voxel Bridge HDRP Bake Preset";
+            api.BakeShaderField.SetValue(preset, bakeShader);
+            return preset;
+        }
+
+        internal static bool ConfigureGeneratedMaterialForActivePipeline(
+            Material material, VoxelImpostorType impostorType)
+        {
+            if (material == null) throw new ArgumentNullException(nameof(material));
+            ActiveRenderPipeline pipeline = GetActiveRenderPipeline();
+            if (pipeline == ActiveRenderPipeline.Custom) return false;
+
+            string projection = impostorType == VoxelImpostorType.Spherical
+                ? "Spherical"
+                : "Octahedron";
+            string suffix = pipeline switch
+            {
+                ActiveRenderPipeline.Hdrp => " HDRP",
+                ActiveRenderPipeline.Urp => " URP",
+                _ => string.Empty
+            };
+            string shaderName = $"Hidden/Amplify Impostors/{projection} Impostor{suffix}";
+            Shader shader = Shader.Find(shaderName);
+            if (shader == null)
+                throw new InvalidDataException(
+                    $"No se encontró el shader runtime '{shaderName}' de Amplify Impostors.");
+            if (material.shader == shader) return false;
+
+            material.shader = shader;
+            EditorUtility.SetDirty(material);
+            return true;
         }
 
         internal static VoxelImpostorBatchBuildResult GenerateForBatch(
@@ -510,29 +647,58 @@ namespace LocalModels.VoxelBridge
                 ? long.MaxValue
                 : options.MaximumEstimatedAtlasBytes;
             long estimatedBytes = 0;
-            var entries = new List<VoxelImpostorBatchPlanEntry>(candidates.Count);
+            var selectedCandidates = new List<BatchCandidate>(candidates.Count);
             foreach (BatchCandidate candidate in candidates)
             {
-                bool selected = false;
-                foreach (VoxelImpostorQuality quality in EnumerateQualityFallbacks(
-                             candidate.DesiredQuality, options.SelectQualityBySize))
+                VoxelImpostorQuality[] fallbacks = EnumerateQualityFallbacks(
+                        candidate.DesiredQuality, options.SelectQualityBySize)
+                    .Distinct()
+                    .ToArray();
+                VoxelImpostorQuality baselineQuality = fallbacks
+                    .OrderBy(quality => EstimateAtlasBytes(profile, quality))
+                    .First();
+                long baselineBytes = EstimateAtlasBytes(profile, baselineQuality);
+                if (baselineBytes > budget - estimatedBytes)
                 {
-                    long bytes = EstimateAtlasBytes(profile, quality);
-                    if (bytes > budget - estimatedBytes) continue;
-
-                    entries.Add(new VoxelImpostorBatchPlanEntry(
-                        candidate.ManifestAssetPath, quality,
-                        candidate.ModelSize, bytes));
-                    estimatedBytes += bytes;
-                    selected = true;
-                    break;
-                }
-
-                if (!selected)
                     skips.Add(new VoxelImpostorBatchSkip(
                         candidate.ManifestAssetPath,
                         VoxelImpostorBatchSkipReason.AtlasBudget));
+                    continue;
+                }
+
+                candidate.SelectedQuality = baselineQuality;
+                candidate.EstimatedAtlasBytes = baselineBytes;
+                selectedCandidates.Add(candidate);
+                estimatedBytes += baselineBytes;
             }
+
+            if (options.SelectQualityBySize)
+            {
+                foreach (BatchCandidate candidate in selectedCandidates)
+                {
+                    foreach (VoxelImpostorQuality quality in EnumerateQualityFallbacks(
+                                 candidate.DesiredQuality, true).Distinct())
+                    {
+                        long bytes = EstimateAtlasBytes(profile, quality);
+                        long additionalBytes = bytes - candidate.EstimatedAtlasBytes;
+                        if (additionalBytes < 0 ||
+                            additionalBytes > budget - estimatedBytes)
+                            continue;
+
+                        candidate.SelectedQuality = quality;
+                        candidate.EstimatedAtlasBytes = bytes;
+                        estimatedBytes += additionalBytes;
+                        break;
+                    }
+                }
+            }
+
+            VoxelImpostorBatchPlanEntry[] entries = selectedCandidates
+                .Select(candidate => new VoxelImpostorBatchPlanEntry(
+                    candidate.ManifestAssetPath, candidate.DesiredQuality,
+                    candidate.SelectedQuality, candidate.ModelSize,
+                    candidate.EstimatedAtlasBytes))
+                .ToArray();
 
             return new VoxelImpostorBatchPlan(
                 paths.Length, entries, skips, estimatedBytes);
@@ -543,12 +709,12 @@ namespace LocalModels.VoxelBridge
         {
             if (profile == null) throw new ArgumentNullException(nameof(profile));
             int resolution = profile.GetSettings(quality).TextureResolution;
-            const int mapCount = 5;
-            const int bytesPerPixel = 4;
+            const int estimatedBaseBytesPerPixel = 9;
             const int mipNumerator = 4;
             const int mipDenominator = 3;
-            return checked((long)resolution * resolution * mapCount * bytesPerPixel *
-                           mipNumerator / mipDenominator);
+            const int assetOverheadBytes = 256 * 1024;
+            return checked((long)resolution * resolution * estimatedBaseBytesPerPixel *
+                           mipNumerator / mipDenominator + assetOverheadBytes);
         }
 
         private static IEnumerable<VoxelImpostorQuality> EnumerateQualityFallbacks(
@@ -584,7 +750,8 @@ namespace LocalModels.VoxelBridge
                         Path.GetFileName(entry.ManifestAssetPath)))
                     return new VoxelImpostorBatchBuildResult(
                         plan.CandidateCount, builds, failures, true,
-                        plan.Skips, plan.EstimatedAtlasBytes);
+                        plan.Skips, plan.EstimatedAtlasBytes,
+                        plan.ReducedQualityCount);
 
                 try
                 {
@@ -594,7 +761,8 @@ namespace LocalModels.VoxelBridge
                 {
                     return new VoxelImpostorBatchBuildResult(
                         plan.CandidateCount, builds, failures, true,
-                        plan.Skips, plan.EstimatedAtlasBytes);
+                        plan.Skips, plan.EstimatedAtlasBytes,
+                        plan.ReducedQualityCount);
                 }
                 catch (Exception exception)
                 {
@@ -611,7 +779,8 @@ namespace LocalModels.VoxelBridge
                 1f, $"Impostores terminados: {builds.Count} de {plan.Entries.Length}");
             return new VoxelImpostorBatchBuildResult(
                 plan.CandidateCount, builds, failures, false,
-                plan.Skips, plan.EstimatedAtlasBytes);
+                plan.Skips, plan.EstimatedAtlasBytes,
+                plan.ReducedQualityCount);
         }
 
         internal static VoxelImpostorBatchBuildResult GenerateForManifests(
@@ -911,6 +1080,24 @@ namespace LocalModels.VoxelBridge
                 return false;
             }
 
+            AmplifyPipelinePatchResult patchStatus =
+                AmplifyImpostorPipelinePatcher.GetProjectStatus(out string patchDetail);
+            if (patchStatus != AmplifyPipelinePatchResult.AlreadyApplied)
+            {
+                string message = patchStatus switch
+                {
+                    AmplifyPipelinePatchResult.Required =>
+                        "Amplify Impostors requiere el parche de compatibilidad antes de hornear.",
+                    AmplifyPipelinePatchResult.NotInstalled =>
+                        "No se encontró la fuente instalada de Amplify Impostors.",
+                    _ => "La fuente instalada de Amplify Impostors no admite el parche de compatibilidad."
+                };
+                if (!string.IsNullOrWhiteSpace(patchDetail)) message += " " + patchDetail;
+                compatibility = new AmplifyImpostorCompatibility(
+                    AmplifyImpostorCompatibilityStatus.ApiConflict, version, message);
+                return false;
+            }
+
             const BindingFlags instance = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
             api = new Api
             {
@@ -923,8 +1110,11 @@ namespace LocalModels.VoxelBridge
                 LodReplacementField = componentType.GetField("m_lodReplacement", instance),
                 FolderPathField = componentType.GetField("m_folderPath", instance),
                 ImpostorNameField = componentType.GetField("m_impostorName", instance),
+                RenderPipelineField = componentType.GetField("m_renderPipelineInUse", instance),
                 RenderMethod = componentType.GetMethod("RenderAllDeferredGroups", instance,
                     null, new[] { assetType }, null),
+                CheckHdrpMaterialMethod = componentType.GetMethod(
+                    "CheckHDRPMaterial", instance, null, Type.EmptyTypes, null),
                 MeshField = assetType.GetField("Mesh", instance),
                 MaterialField = assetType.GetField("Material", instance),
                 ImpostorTypeField = assetType.GetField("ImpostorType", instance),
@@ -941,6 +1131,7 @@ namespace LocalModels.VoxelBridge
                 PresetField = assetType.GetField("Preset", instance),
                 Version = version
             };
+            api.BakeShaderField = api.PresetField?.FieldType.GetField("BakeShader", instance);
 
             bool valid = typeof(MonoBehaviour).IsAssignableFrom(componentType) &&
                          typeof(ScriptableObject).IsAssignableFrom(assetType) &&
@@ -949,16 +1140,19 @@ namespace LocalModels.VoxelBridge
                          api.LodGroupProperty?.PropertyType == typeof(LODGroup) &&
                          api.RenderersProperty?.PropertyType == typeof(Renderer[]) &&
                          api.LodReplacementField?.FieldType.IsEnum == true &&
-                         api.FolderPathField?.FieldType == typeof(string) &&
-                         api.ImpostorNameField?.FieldType == typeof(string) &&
-                         api.RenderMethod != null && api.MeshField != null &&
+                          api.FolderPathField?.FieldType == typeof(string) &&
+                          api.ImpostorNameField?.FieldType == typeof(string) &&
+                          api.RenderPipelineField?.FieldType.IsEnum == true &&
+                          api.RenderMethod != null && api.CheckHdrpMaterialMethod != null &&
+                          api.MeshField != null &&
                          api.MaterialField != null && api.ImpostorTypeField?.FieldType.IsEnum == true &&
                          api.LockedSizesField != null && api.SelectedSizeField != null &&
                          api.TextureSizeField != null && api.DecoupleFramesField != null &&
                          api.HorizontalFramesField != null && api.VerticalFramesField != null &&
                          api.PixelPaddingField != null && api.MaxVerticesField != null &&
-                         api.ToleranceField != null && api.NormalScaleField != null &&
-                         api.PresetField != null;
+                          api.ToleranceField != null && api.NormalScaleField != null &&
+                          api.PresetField != null &&
+                          api.BakeShaderField?.FieldType == typeof(Shader);
             if (!valid)
             {
                 api = null;
@@ -970,7 +1164,7 @@ namespace LocalModels.VoxelBridge
 
             compatibility = new AmplifyImpostorCompatibility(
                 AmplifyImpostorCompatibilityStatus.Ready, version,
-                $"Amplify Impostors {version} detectado. El horneado usará los renderers de LOD0.");
+                $"Amplify Impostors {version} detectado. El horneado usará el pipeline activo y los renderers de LOD0.");
             return true;
         }
 
