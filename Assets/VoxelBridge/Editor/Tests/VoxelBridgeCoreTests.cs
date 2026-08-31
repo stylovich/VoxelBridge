@@ -52,7 +52,15 @@ namespace LocalModels.VoxelBridge.Tests
                     Is.False);
                 Assert.That(GetWindowField<bool>(window, "batchGenerateImpostors"),
                     Is.False);
-                Assert.That(GetWindowField<int>(window, "windowStateVersion"), Is.EqualTo(1));
+                Assert.That(GetWindowField<int>(window, "windowStateVersion"), Is.EqualTo(2));
+                Assert.That(GetWindowField<int>(window, "individualMemoryBudgetMb"),
+                    Is.EqualTo(1024));
+                Assert.That(GetWindowField<bool>(window, "individualAdaptInitialVoxelSize"),
+                    Is.True);
+                Assert.That(GetWindowField<int>(window, "individualMaximumInitialLodIndex"),
+                    Is.EqualTo(2));
+                Assert.That(GetWindowField<int>(window, "individualMaximumImportedVoxelCount"),
+                    Is.EqualTo(VoxelLodBatchOptions.DefaultMaximumImportedVoxelCount));
             }
             finally
             {
@@ -1463,6 +1471,57 @@ namespace LocalModels.VoxelBridge.Tests
             finally
             {
                 if (parent != null) Object.DestroyImmediate(parent);
+                if (profile != null) Object.DestroyImmediate(profile);
+            }
+        }
+
+        [Test]
+        public void IndividualPreflight_AdaptsWhenFineGridExceedsDenseCellLimit()
+        {
+            GameObject source = null;
+            VoxelStyleProfile profile = null;
+            try
+            {
+                source = new GameObject("LargeIndividualSource");
+                GameObject cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                cube.transform.SetParent(source.transform, false);
+                cube.transform.localScale = Vector3.one * 12f;
+                source.name = "LargeIndividualSource";
+                profile = ScriptableObject.CreateInstance<VoxelStyleProfile>();
+                var serializedProfile = new SerializedObject(profile);
+                serializedProfile.FindProperty("baseVoxelSize").floatValue = 0.024f;
+                SerializedProperty multipliers = serializedProfile.FindProperty("lodMultipliers");
+                multipliers.arraySize = 3;
+                multipliers.GetArrayElementAtIndex(0).intValue = 1;
+                multipliers.GetArrayElementAtIndex(1).intValue = 2;
+                multipliers.GetArrayElementAtIndex(2).intValue = 4;
+                serializedProfile.ApplyModifiedPropertiesWithoutUndo();
+
+                var lodOptions = new VoxelLodBuildOptions
+                {
+                    ColorMode = VoxelColorMode.SingleColor,
+                    ExportFolder = "Assets"
+                };
+                var safetyOptions = new VoxelLodBatchOptions
+                {
+                    AdaptInitialVoxelSize = true,
+                    MaximumInitialLodIndex = 2,
+                    MaximumEstimatedMemoryBytes = long.MaxValue,
+                    IgnoreInactiveObjects = false
+                };
+
+                VoxelLodBatchSourceEstimate estimate = VoxelLodBatchAnalyzer.AnalyzeSingle(
+                    source, profile, lodOptions, safetyOptions);
+
+                Assert.That(estimate.IsValid, Is.True, estimate.Error);
+                Assert.That(estimate.IsOverBudget, Is.False);
+                Assert.That(estimate.InitialLodIndex, Is.EqualTo(1));
+                Assert.That(estimate.InitialVoxelMultiplier, Is.EqualTo(2));
+                Assert.That(estimate.LodPlans[0].VoxelSize, Is.EqualTo(0.048f).Within(1e-6f));
+            }
+            finally
+            {
+                if (source != null) Object.DestroyImmediate(source);
                 if (profile != null) Object.DestroyImmediate(profile);
             }
         }

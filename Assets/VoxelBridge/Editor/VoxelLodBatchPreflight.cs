@@ -133,6 +133,17 @@ namespace LocalModels.VoxelBridge
                 plans.Length, plans.Count(plan => plan.Ignored));
         }
 
+        public static VoxelLodBatchSourceEstimate AnalyzeSingle(
+            Object source, VoxelStyleProfile profile, VoxelLodBuildOptions lodOptions,
+            VoxelLodBatchOptions batchOptions)
+        {
+            if (source == null) throw new ArgumentNullException(nameof(source));
+            if (profile == null) throw new ArgumentNullException(nameof(profile));
+            if (lodOptions == null) throw new ArgumentNullException(nameof(lodOptions));
+            batchOptions ??= new VoxelLodBatchOptions();
+            return Estimate(source, source, source.name, profile, lodOptions, batchOptions);
+        }
+
         public static string CreateSignature(
             VoxelLodBatchSourcePlan[] plans, VoxelStyleProfile profile,
             VoxelLodBuildOptions lodOptions, VoxelLodBatchOptions batchOptions)
@@ -175,20 +186,30 @@ namespace LocalModels.VoxelBridge
             VoxelLodBatchSourcePlan plan, VoxelStyleProfile profile,
             VoxelLodBuildOptions lodOptions, VoxelLodBatchOptions batchOptions)
         {
+            return Estimate(
+                plan.ReuseKey, plan.ConversionSource, plan.Source.name,
+                profile, lodOptions, batchOptions);
+        }
+
+        private static VoxelLodBatchSourceEstimate Estimate(
+            Object reuseKey, Object conversionSource, string sourceName,
+            VoxelStyleProfile profile, VoxelLodBuildOptions lodOptions,
+            VoxelLodBatchOptions batchOptions)
+        {
             Bounds bounds;
             long sourceOverhead;
             try
             {
                 bool includeInactiveObjects = !batchOptions.IgnoreInactiveObjects;
                 bounds = MeshVoxelizer.GetSourceBounds(
-                    plan.ConversionSource, includeInactiveObjects);
+                    conversionSource, includeInactiveObjects);
                 sourceOverhead = EstimateSourceOverhead(
-                    plan.ConversionSource, lodOptions.ColorMode, includeInactiveObjects);
+                    conversionSource, lodOptions.ColorMode, includeInactiveObjects);
             }
             catch (Exception exception)
             {
                 return new VoxelLodBatchSourceEstimate(
-                    plan.ReuseKey, plan.ConversionSource, plan.Source.name,
+                    reuseKey, conversionSource, sourceName,
                     Array.Empty<VoxelGridPlan>(), 0, 0,
                     batchOptions.MaximumEstimatedMemoryBytes, 0, 1, exception.Message);
             }
@@ -208,7 +229,8 @@ namespace LocalModels.VoxelBridge
                 try
                 {
                     VoxelLodBatchSourceEstimate estimate = EstimateAtMultiplier(
-                        plan, profile, lodOptions, batchOptions, bounds, sourceOverhead,
+                        reuseKey, conversionSource, sourceName, profile, lodOptions,
+                        batchOptions, bounds, sourceOverhead,
                         initialLodIndex, initialMultiplier);
                     lastValid = estimate;
                     if (!estimate.IsOverBudget) return estimate;
@@ -225,15 +247,16 @@ namespace LocalModels.VoxelBridge
                   $"(×{lastInitialMultiplier})."
                 : string.Empty;
             return new VoxelLodBatchSourceEstimate(
-                plan.ReuseKey, plan.ConversionSource, plan.Source.name,
+                reuseKey, conversionSource, sourceName,
                 Array.Empty<VoxelGridPlan>(), 0, 0,
                 batchOptions.MaximumEstimatedMemoryBytes, lastInitialLod,
                 lastInitialMultiplier, (lastError ?? "La fuente no se puede analizar.") + suffix);
         }
 
         private static VoxelLodBatchSourceEstimate EstimateAtMultiplier(
-            VoxelLodBatchSourcePlan plan, VoxelStyleProfile profile,
-            VoxelLodBuildOptions lodOptions, VoxelLodBatchOptions batchOptions,
+            Object reuseKey, Object conversionSource, string sourceName,
+            VoxelStyleProfile profile, VoxelLodBuildOptions lodOptions,
+            VoxelLodBatchOptions batchOptions,
             Bounds bounds, long sourceOverhead, int initialLodIndex,
             int initialMultiplier)
         {
@@ -258,7 +281,7 @@ namespace LocalModels.VoxelBridge
             }
 
             return new VoxelLodBatchSourceEstimate(
-                plan.ReuseKey, plan.ConversionSource, plan.Source.name, lodPlans,
+                reuseKey, conversionSource, sourceName, lodPlans,
                 peakBytes, totalCells, batchOptions.MaximumEstimatedMemoryBytes,
                 initialLodIndex, initialMultiplier, null);
         }

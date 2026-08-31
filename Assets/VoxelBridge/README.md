@@ -104,7 +104,7 @@ Cuando una rejilla supera `Chunk Cell Size`, Voxel Bridge escribe un único `.vo
 
 Con Voxel Importer, un `.vox` con varios chunks se importa en modo `Individual`: el prefab conserva un renderer por chunk y el `LODGroup` referencia todos los renderers del nivel. Esta estructura permite culling granular. Los chunks no se combinan en una sola malla.
 
-La fase de voxelización utiliza una rejilla densa global para mantener correctos el relleno interior y las fronteras entre chunks. El límite de seguridad es de 80 millones de celdas. En lotes, la adaptación de unidad intenta resolverlo con el siguiente tamaño permitido por el perfil; si la rejilla continúa fuera del límite en el nivel máximo, la fuente se excluye. En conversiones individuales se debe aumentar `Base Voxel Size` o dividir el asset fuente.
+La fase de voxelización utiliza una rejilla densa global para mantener correctos el relleno interior y las fronteras entre chunks. El límite de seguridad es de 80 millones de celdas. Tanto la conversión individual como el flujo por lotes pueden adaptar la unidad inicial: prueban en orden las medidas definidas por los LOD del perfil y seleccionan la más fina que cumple el límite de rejilla y el presupuesto temporal. La conversión individual expone `Presupuesto temporal`, `Máximo de vóxeles importados` y `Base máxima permitida` bajo `Seguridad para modelos grandes`. Si ninguna base permitida satisface los límites, la operación se cancela antes de reservar la rejilla o crear una familia parcial.
 
 ## Conversión puntual por resolución
 

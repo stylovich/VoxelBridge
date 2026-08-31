@@ -15,13 +15,19 @@ namespace LocalModels.VoxelBridge
         private const string DefaultExportFolder = "Assets/VoxelBridgeExports";
         private const string DefaultImpostorProfilePath =
             "Assets/VoxelBridgeSettings/VoxelImpostorProfile.asset";
-        private const int CurrentWindowStateVersion = 1;
+        private const int CurrentWindowStateVersion = 2;
 
         private Object source;
         [SerializeField, HideInInspector] private int windowStateVersion;
         [SerializeField] private bool individualGenerateImpostor;
         [SerializeField] private bool individualPlaceInScene;
         [SerializeField] private bool individualDisableOriginalObject = true;
+        [SerializeField, Min(256)] private int individualMemoryBudgetMb = 1024;
+        [SerializeField] private bool individualAdaptInitialVoxelSize = true;
+        [SerializeField, Range(0, 7)] private int individualMaximumInitialLodIndex = 2;
+        [SerializeField, Min(100_000)] private int individualMaximumImportedVoxelCount =
+            VoxelLodBatchOptions.DefaultMaximumImportedVoxelCount;
+        private VoxelLodBatchSourceEstimate individualPreflight;
         private GameObject batchParent;
         [SerializeField] private bool batchReusePrefabSources = true;
         [SerializeField] private VoxelPrefabOverrideHandling batchModifiedPrefabHandling =
@@ -208,12 +214,20 @@ namespace LocalModels.VoxelBridge
 
         private void OnEnable()
         {
-            if (windowStateVersion < CurrentWindowStateVersion)
+            if (windowStateVersion < 1)
             {
                 individualGenerateImpostor = false;
                 batchGenerateImpostors = false;
-                windowStateVersion = CurrentWindowStateVersion;
             }
+            if (windowStateVersion < 2)
+            {
+                individualMemoryBudgetMb = 1024;
+                individualAdaptInitialVoxelSize = true;
+                individualMaximumInitialLodIndex = 2;
+                individualMaximumImportedVoxelCount =
+                    VoxelLodBatchOptions.DefaultMaximumImportedVoxelCount;
+            }
+            windowStateVersion = CurrentWindowStateVersion;
             if (source == null && VoxelBridgeSourceSelection.IsSupported(Selection.activeObject))
                 source = Selection.activeObject;
             if (impostorProfile == null)
@@ -229,6 +243,7 @@ namespace LocalModels.VoxelBridge
 
         private void OnHierarchyChange()
         {
+            individualPreflight = null;
             batchPreflight = null;
             Repaint();
         }
@@ -283,6 +298,7 @@ namespace LocalModels.VoxelBridge
 
             DrawColorSettings();
             VoxelBridgeFolderPicker.Draw("Carpeta de familias", ref exportFolder);
+            DrawIndividualSafetyOptions();
             bool individualImpostorReady = DrawIndividualImpostorOptions();
             GameObject individualSceneSource = source as GameObject;
             bool canPlaceIndividual = VoxelLodBatchScenePlacement.CanPlace(individualSceneSource);
@@ -563,6 +579,46 @@ namespace LocalModels.VoxelBridge
                 if (GUILayout.Button(label, GUILayout.Height(38)))
                     GenerateAutomaticBatch();
             }
+        }
+
+        private void DrawIndividualSafetyOptions()
+        {
+            EditorGUILayout.Space(4);
+            EditorGUILayout.LabelField(
+                "Seguridad para modelos grandes", EditorStyles.miniBoldLabel);
+            individualMemoryBudgetMb = Mathf.Clamp(EditorGUILayout.IntField(
+                new GUIContent("Presupuesto temporal (MiB)",
+                    "Límite estimado de memoria temporal para esta conversión. La generación no comienza si ninguna unidad permitida cabe en el presupuesto."),
+                individualMemoryBudgetMb), 256, 8192);
+            individualAdaptInitialVoxelSize = EditorGUILayout.Toggle(
+                new GUIContent("Adaptar unidad automáticamente",
+                    "Prueba las unidades equivalentes a los LOD del perfil y usa la más fina que cumple los límites de rejilla y memoria."),
+                individualAdaptInitialVoxelSize);
+            individualMaximumImportedVoxelCount = Mathf.Clamp(EditorGUILayout.IntField(
+                new GUIContent("Máximo de vóxeles importados",
+                    "Cantidad máxima de vóxeles ocupados que Voxel Importer puede recibir en el LOD0. Si se supera, la generación repite el modelo con la siguiente unidad permitida."),
+                individualMaximumImportedVoxelCount), 100_000, 50_000_000);
+            if (individualAdaptInitialVoxelSize && styleProfile != null &&
+                styleProfile.LodCount > 0)
+            {
+                individualMaximumInitialLodIndex = Mathf.Clamp(
+                    individualMaximumInitialLodIndex, 0, styleProfile.LodCount - 1);
+                string[] initialLodLabels = Enumerable.Range(0, styleProfile.LodCount)
+                    .Select(index =>
+                        $"LOD{index} · ×{styleProfile.GetLodMultiplier(index)} · " +
+                        $"{styleProfile.BaseVoxelSize * styleProfile.GetLodMultiplier(index):0.###} m")
+                    .ToArray();
+                individualMaximumInitialLodIndex = EditorGUILayout.Popup(
+                    new GUIContent("Base máxima permitida",
+                        "Última unidad física que puede seleccionar la adaptación automática."),
+                    individualMaximumInitialLodIndex, initialLodLabels);
+            }
+
+            EditorGUILayout.HelpBox(
+                individualAdaptInitialVoxelSize
+                    ? "Antes de reservar memoria se selecciona la base más fina compatible. Los chunks siguen creándose automáticamente después de voxelizar."
+                    : "La conversión mantiene la unidad LOD0 y se cancela antes de voxelizar si la rejilla o la memoria exceden los límites.",
+                MessageType.None);
         }
 
         private bool DrawBatchImpostorOptions()
@@ -1059,6 +1115,19 @@ namespace LocalModels.VoxelBridge
                    budget;
         }
 
+        private VoxelLodBatchOptions CreateIndividualSafetyOptions() => new()
+        {
+            MaximumEstimatedMemoryBytes = Mathf.Max(256, individualMemoryBudgetMb) *
+                                          VoxelLodBatchAnalyzer.Mebibyte,
+            SkipSourcesOverMemoryBudget = true,
+            AdaptInitialVoxelSize = individualAdaptInitialVoxelSize,
+            MaximumInitialLodIndex = individualMaximumInitialLodIndex,
+            MaximumImportedVoxelCount = individualMaximumImportedVoxelCount,
+            IgnoreInactiveObjects = false,
+            EnableCheckpoint = false,
+            ResumeInterruptedBatch = false
+        };
+
         private VoxelLodBatchOptions CreateBatchOptions() => new()
         {
             ReusePrefabSources = batchReusePrefabSources,
@@ -1110,10 +1179,33 @@ namespace LocalModels.VoxelBridge
         {
             try
             {
+                VoxelLodBuildOptions lodOptions = CreateLodOptions();
+                VoxelLodBatchOptions safetyOptions = CreateIndividualSafetyOptions();
+                individualPreflight = VoxelLodBatchAnalyzer.AnalyzeSingle(
+                    source, styleProfile, lodOptions, safetyOptions);
+                if (!individualPreflight.IsValid)
+                    throw new InvalidOperationException(
+                        $"No se puede planificar la conversión de {source.name}. " +
+                        individualPreflight.Error);
+                if (individualPreflight.IsOverBudget)
+                    throw new InvalidOperationException(
+                        $"La conversión de {source.name} requiere un pico estimado de " +
+                        $"{VoxelLodBatchAnalyzer.FormatBytes(individualPreflight.EstimatedPeakBytes)}, " +
+                        $"por encima del presupuesto de " +
+                        $"{VoxelLodBatchAnalyzer.FormatBytes(individualPreflight.MemoryBudgetBytes)}. " +
+                        "Aumenta el presupuesto o la base máxima permitida.");
+
+                int maximumInitialVoxelMultiplier = individualPreflight.InitialVoxelMultiplier;
+                if (safetyOptions.AdaptInitialVoxelSize)
+                    maximumInitialVoxelMultiplier = styleProfile.GetLodMultiplier(Mathf.Clamp(
+                        safetyOptions.MaximumInitialLodIndex, 0, styleProfile.LodCount - 1));
                 VoxelLodBuildResult result = VoxelLodPipeline.GenerateAutomatic(
-                    source, styleProfile, CreateLodOptions(),
+                    source, styleProfile, lodOptions,
                     (progress, message) => EditorUtility.DisplayCancelableProgressBar(
-                        "Voxel Bridge · LOD automático", message, progress));
+                        "Voxel Bridge · LOD automático", message, progress),
+                    individualPreflight.InitialVoxelMultiplier,
+                    safetyOptions.MaximumImportedVoxelCount,
+                    maximumInitialVoxelMultiplier);
                 lodSetManifest = AssetDatabase.LoadAssetAtPath<TextAsset>(result.ManifestAssetPath);
                 if (result.VoxAssetPaths.Length > 0)
                 {
@@ -1147,7 +1239,14 @@ namespace LocalModels.VoxelBridge
                         individualDisableOriginalObject);
 
                 SelectAndPing(placement.HasValue ? placement.Value.Instance : lastVoxAsset);
-                status = $"Familia creada: {result.VoxAssetPaths.Length} archivo(s) .vox. Prefab: {placementBuild.PrefabAssetPath}";
+                int actualInitialMultiplier = individualPreflight.InitialVoxelMultiplier;
+                if (VoxelLodPipeline.TryReadManifest(
+                        result.ManifestAssetPath, out VoxelLodSetManifest manifest))
+                    actualInitialMultiplier = manifest.initialVoxelMultiplier;
+                status = $"Familia creada: {result.VoxAssetPaths.Length} archivo(s) .vox. " +
+                         $"Base inicial ×{actualInitialMultiplier} " +
+                         $"({styleProfile.BaseVoxelSize * actualInitialMultiplier:0.###} m). " +
+                         $"Prefab: {placementBuild.PrefabAssetPath}";
                 if (individualGenerateImpostor)
                     status += $" Impostor {VoxelImpostorProfile.GetQualityName(impostorQuality)} generado.";
                 if (placement.HasValue)
