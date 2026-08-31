@@ -50,7 +50,7 @@ namespace LocalModels.VoxelBridge
         [Tooltip("Exponente adicional aplicado solamente por encima del umbral de modelo grande. 0 desactiva el refuerzo; 0.25 adelanta moderadamente los LOD de menor resolución sin producir un salto en el umbral.")]
         [InspectorName("Intensidad adicional para grandes")]
         [SerializeField, Range(0f, 1f)] private float lodLargeModelAdditionalStrength = 0.25f;
-        [Tooltip("Límite final del factor después del refuerzo para modelos grandes. Con una curva 0.30 / 0.18 / 0.10, un valor de 2.5 limita las transiciones a 0.75 / 0.45 / 0.25.")]
+        [Tooltip("Límite final del factor después del refuerzo para modelos grandes. Con una curva 0.30 / 0.18 / 0.10, un valor de 2.5 limita las transiciones voxel a 0.75 / 0.45 / 0.25. Al añadir un impostor, la distribución de estructuras grandes converge gradualmente a 0.75 / 0.55 / 0.35 para evitar que los LOD intermedios abarquen distancias excesivas.")]
         [InspectorName("Factor máximo para grandes")]
         [SerializeField, Min(0.01f)] private float lodLargeModelMaximumTransitionScale = 2.5f;
 
@@ -149,6 +149,18 @@ namespace LocalModels.VoxelBridge
             float largeModelMaximum = Mathf.Max(
                 lodMaximumTransitionScale, lodLargeModelMaximumTransitionScale);
             return Mathf.Min(transitionScale * largeModelScale, largeModelMaximum);
+        }
+
+        public float GetLargeModelLodRangeBlend(float modelSize)
+        {
+            if (!UsesAdaptiveLodTransitions || !IsFinitePositive(modelSize)) return 0f;
+
+            float generalMaximum = Mathf.Max(0.01f, lodMaximumTransitionScale);
+            float largeMaximum = Mathf.Max(generalMaximum, lodLargeModelMaximumTransitionScale);
+            if (Mathf.Approximately(generalMaximum, largeMaximum)) return 0f;
+
+            return Mathf.InverseLerp(
+                generalMaximum, largeMaximum, GetLodTransitionScale(modelSize));
         }
 
         public bool TryValidate(out string error)

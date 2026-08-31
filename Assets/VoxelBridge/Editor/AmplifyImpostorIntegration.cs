@@ -900,7 +900,8 @@ namespace LocalModels.VoxelBridge
         }
 
         internal static bool TryAppendExistingImpostor(
-            GameObject root, LODGroup group, VoxelImpostorEntry entry, out string error)
+            GameObject root, LODGroup group, VoxelImpostorEntry entry,
+            float largeModelRangeBlend, out string error)
         {
             error = null;
             if (root == null || group == null || entry == null)
@@ -953,7 +954,8 @@ namespace LocalModels.VoxelBridge
             renderer.sharedMaterial = material;
 
             var lods = new LOD[voxelLods.Length + 1];
-            ExpandVoxelLodRangesTowardImpostor(voxelLods, entry.cullScreenHeight);
+            ExpandVoxelLodRangesTowardImpostor(
+                voxelLods, entry.cullScreenHeight, largeModelRangeBlend);
             Array.Copy(voxelLods, lods, voxelLods.Length);
             lods[lods.Length - 1] = new LOD(entry.cullScreenHeight, new Renderer[] { renderer });
             for (int i = 0; i < lods.Length; i++) lods[i].fadeTransitionWidth = 0f;
@@ -966,7 +968,8 @@ namespace LocalModels.VoxelBridge
         }
 
         internal static void ExpandVoxelLodRangesTowardImpostor(
-            LOD[] voxelLods, float impostorCullHeight)
+            LOD[] voxelLods, float impostorCullHeight,
+            float largeModelRangeBlend = 0f)
         {
             if (voxelLods == null || voxelLods.Length <= 1) return;
 
@@ -980,6 +983,21 @@ namespace LocalModels.VoxelBridge
             voxelLods[lastIndex].screenRelativeTransitionHeight =
                 GetExpandedLastVoxelTransition(
                     originalHeights[lastIndex], impostorCullHeight, voxelLods.Length);
+
+            largeModelRangeBlend = Mathf.Clamp01(largeModelRangeBlend);
+            if (largeModelRangeBlend <= 0f) return;
+
+            float largeModelLastTransition = Mathf.Lerp(
+                originalHeights[lastIndex - 1], originalHeights[lastIndex], 0.5f);
+            for (int index = 1; index <= lastIndex; index++)
+            {
+                float evenlySpacedTransition = Mathf.Lerp(
+                    originalHeights[0], largeModelLastTransition,
+                    index / (float)lastIndex);
+                voxelLods[index].screenRelativeTransitionHeight = Mathf.Lerp(
+                    voxelLods[index].screenRelativeTransitionHeight,
+                    evenlySpacedTransition, largeModelRangeBlend);
+            }
         }
 
         internal static float GetExpandedLastVoxelTransition(

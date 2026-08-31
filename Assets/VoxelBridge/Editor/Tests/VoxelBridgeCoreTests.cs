@@ -178,6 +178,7 @@ namespace LocalModels.VoxelBridge.Tests
                 float thresholdScale = Mathf.Sqrt(6f / 4f);
                 Assert.That(profile.GetLodTransitionScale(6f),
                     Is.EqualTo(thresholdScale).Within(1e-6f));
+                Assert.That(profile.GetLargeModelLodRangeBlend(6f), Is.Zero);
 
                 float expectedLargeScale = Mathf.Sqrt(12f / 4f) * Mathf.Pow(2f, 0.25f);
                 Assert.That(profile.GetLodTransitionScale(12f),
@@ -185,6 +186,7 @@ namespace LocalModels.VoxelBridge.Tests
                 Assert.That(profile.GetLodScreenHeight(0, 12f),
                     Is.EqualTo(0.3f * expectedLargeScale).Within(1e-6f));
                 Assert.That(profile.GetLodTransitionScale(40f), Is.EqualTo(2.5f));
+                Assert.That(profile.GetLargeModelLodRangeBlend(40f), Is.EqualTo(1f));
                 Assert.That(profile.GetLodScreenHeight(2, 40f),
                     Is.EqualTo(0.25f).Within(1e-6f));
                 Assert.That(profile.TryValidate(out string error), Is.True, error);
@@ -256,6 +258,27 @@ namespace LocalModels.VoxelBridge.Tests
                 Is.EqualTo(0.17f).Within(1e-6f));
             Assert.That(voxelLods[2].screenRelativeTransitionHeight,
                 Is.EqualTo(0.12f + (0.01f - 0.12f) / 3f).Within(1e-6f));
+        }
+
+        [Test]
+        public void ImpostorLodRanges_LargeStructuresUseCloserEvenRanges()
+        {
+            var voxelLods = new[]
+            {
+                new LOD(0.75f, System.Array.Empty<Renderer>()),
+                new LOD(0.45f, System.Array.Empty<Renderer>()),
+                new LOD(0.25f, System.Array.Empty<Renderer>())
+            };
+
+            AmplifyImpostorIntegration.ExpandVoxelLodRangesTowardImpostor(
+                voxelLods, 0.0005f, 1f);
+
+            Assert.That(voxelLods[0].screenRelativeTransitionHeight,
+                Is.EqualTo(0.75f).Within(1e-6f));
+            Assert.That(voxelLods[1].screenRelativeTransitionHeight,
+                Is.EqualTo(0.55f).Within(1e-6f));
+            Assert.That(voxelLods[2].screenRelativeTransitionHeight,
+                Is.EqualTo(0.35f).Within(1e-6f));
         }
 
         [Test]

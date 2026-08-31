@@ -954,7 +954,11 @@ namespace LocalModels.VoxelBridge
                 if (manifest.impostor != null &&
                     !string.IsNullOrWhiteSpace(manifest.impostor.assetPath) &&
                     !AmplifyImpostorIntegration.TryAppendExistingImpostor(
-                        root, group, manifest.impostor, out string impostorError))
+                        root, group, manifest.impostor,
+                        profile != null
+                            ? profile.GetLargeModelLodRangeBlend(manifest.lodGroupSize)
+                            : 0f,
+                        out string impostorError))
                     Debug.LogWarning($"Voxel Bridge omitió el impostor de '{modelName}': {impostorError}");
 
                 string path = ResolvePrefabAssetPath(manifest, familyFolder, modelName);
