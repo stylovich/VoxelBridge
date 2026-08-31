@@ -17,6 +17,50 @@ namespace LocalModels.VoxelBridge.Tests
     internal sealed class VoxelBridgeCoreTests
     {
         [Test]
+        public void Window_DisablesImpostorGenerationByDefault()
+        {
+            VoxelBridgeWindow window = ScriptableObject.CreateInstance<VoxelBridgeWindow>();
+            try
+            {
+                Assert.That(GetWindowField<bool>(window, "individualGenerateImpostor"),
+                    Is.False);
+                Assert.That(GetWindowField<bool>(window, "batchGenerateImpostors"),
+                    Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(window);
+            }
+        }
+
+        [Test]
+        public void Window_MigratesPersistedImpostorGenerationToOptIn()
+        {
+            VoxelBridgeWindow window = ScriptableObject.CreateInstance<VoxelBridgeWindow>();
+            try
+            {
+                SetWindowField(window, "individualGenerateImpostor", true);
+                SetWindowField(window, "batchGenerateImpostors", true);
+                SetWindowField(window, "windowStateVersion", 0);
+
+                MethodInfo onEnable = typeof(VoxelBridgeWindow).GetMethod(
+                    "OnEnable", BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.That(onEnable, Is.Not.Null);
+                onEnable.Invoke(window, null);
+
+                Assert.That(GetWindowField<bool>(window, "individualGenerateImpostor"),
+                    Is.False);
+                Assert.That(GetWindowField<bool>(window, "batchGenerateImpostors"),
+                    Is.False);
+                Assert.That(GetWindowField<int>(window, "windowStateVersion"), Is.EqualTo(1));
+            }
+            finally
+            {
+                Object.DestroyImmediate(window);
+            }
+        }
+
+        [Test]
         public void StyleProfile_SelectsShadowlessLodsByModelSize()
         {
             VoxelStyleProfile profile = ScriptableObject.CreateInstance<VoxelStyleProfile>();

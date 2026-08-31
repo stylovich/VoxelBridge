@@ -15,9 +15,11 @@ namespace LocalModels.VoxelBridge
         private const string DefaultExportFolder = "Assets/VoxelBridgeExports";
         private const string DefaultImpostorProfilePath =
             "Assets/VoxelBridgeSettings/VoxelImpostorProfile.asset";
+        private const int CurrentWindowStateVersion = 1;
 
         private Object source;
-        [SerializeField] private bool individualGenerateImpostor = true;
+        [SerializeField, HideInInspector] private int windowStateVersion;
+        [SerializeField] private bool individualGenerateImpostor;
         [SerializeField] private bool individualPlaceInScene;
         [SerializeField] private bool individualDisableOriginalObject = true;
         private GameObject batchParent;
@@ -35,7 +37,7 @@ namespace LocalModels.VoxelBridge
         [SerializeField] private bool batchIgnoreInactiveObjects = true;
         [SerializeField] private bool batchResumeInterrupted = true;
         [SerializeField, Range(1, 25)] private int batchCleanupInterval = 1;
-        [SerializeField] private bool batchGenerateImpostors = true;
+        [SerializeField] private bool batchGenerateImpostors;
         [SerializeField] private bool batchSelectImpostorQualityBySize = true;
         [SerializeField, Min(64)] private int batchImpostorAtlasBudgetMb =
             VoxelImpostorBatchOptions.DefaultAtlasBudgetMb;
@@ -206,6 +208,12 @@ namespace LocalModels.VoxelBridge
 
         private void OnEnable()
         {
+            if (windowStateVersion < CurrentWindowStateVersion)
+            {
+                individualGenerateImpostor = false;
+                batchGenerateImpostors = false;
+                windowStateVersion = CurrentWindowStateVersion;
+            }
             if (source == null && VoxelBridgeSourceSelection.IsSupported(Selection.activeObject))
                 source = Selection.activeObject;
             if (impostorProfile == null)
