@@ -14,8 +14,8 @@ namespace LocalModels.VoxelBridge
     [CreateAssetMenu(fileName = "VoxelStyleProfile", menuName = "Voxel Bridge/Perfil de estilo voxel")]
     public sealed class VoxelStyleProfile : ScriptableObject
     {
-        [Tooltip("Tamaño de un vóxel de LOD0 en unidades de Unity (0.1 equivale a 10 cm).")]
-        [SerializeField, Min(0.001f)] private float baseVoxelSize = 0.1f;
+        [Tooltip("Tamaño de un vóxel de LOD0 en unidades de Unity. El valor predeterminado 0.032 equivale a 3.2 cm.")]
+        [SerializeField, Min(0.001f)] private float baseVoxelSize = 0.032f;
         [Tooltip("Escala de celda de cada LOD. Debe empezar en 1 y usar potencias de dos crecientes.")]
         [SerializeField] private int[] lodMultipliers = { 1, 2, 4 };
         [Tooltip("Máximo de celdas por eje de cada modelo interno del archivo VOX.")]

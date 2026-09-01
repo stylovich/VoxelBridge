@@ -17,6 +17,20 @@ namespace LocalModels.VoxelBridge.Tests
     internal sealed class VoxelBridgeCoreTests
     {
         [Test]
+        public void StyleProfile_DefaultVoxelSizeUsesProjectGrid()
+        {
+            VoxelStyleProfile profile = ScriptableObject.CreateInstance<VoxelStyleProfile>();
+            try
+            {
+                Assert.That(profile.BaseVoxelSize, Is.EqualTo(0.032f).Within(1e-6f));
+            }
+            finally
+            {
+                Object.DestroyImmediate(profile);
+            }
+        }
+
+        [Test]
         public void Window_DisablesImpostorGenerationByDefault()
         {
             VoxelBridgeWindow window = ScriptableObject.CreateInstance<VoxelBridgeWindow>();
