@@ -7,13 +7,15 @@ Voxel Bridge debe producir familias voxel físicamente coherentes y editables, i
 ## Orden de trabajo recomendado
 
 1. Validar la conversión individual y por lotes, los LODs y la ruta opcional de Amplify Impostors.
-2. Implementar la combinación manual de familias voxel para grupos estáticos y espacialmente compactos.
-3. Definir la representación compartida de materiales y paletas que utilizarán los modelos voxel.
-4. Validar la conversión a entidades, las subescenas, los LODs y el culling con el flujo DOTS previsto para producción.
-5. Implementar el análisis de visibilidad y presupuesto por zonas sobre la estructura real del mapa.
-6. Crear y hornear el plan final de impostores cuando la distribución del mapa y los materiales sean estables.
+2. Implementar las paletas globales de color y superficie, sus LUT y la validación de IDs estables.
+3. Incorporar `ColorID` y `SurfaceID` al volumen voxel, al intercambio con MagicaVoxel y al generador de meshes de producción.
+4. Adaptar el shader compartido y el horneado de Amplify Impostors al muestreo de ambas paletas.
+5. Implementar la combinación manual de familias voxel para grupos estáticos y espacialmente compactos.
+6. Validar la conversión a entidades, las subescenas, los LODs y el culling con el flujo DOTS previsto para producción.
+7. Implementar el análisis de visibilidad y presupuesto por zonas sobre la estructura real del mapa.
+8. Crear y hornear el plan final de impostores cuando la distribución del mapa y los materiales sean estables.
 
-La consolidación artística de materiales puede continuar después, pero su representación técnica debe definirse antes de validar DOTS y antes de hornear impostores definitivos. Un cambio de shader, paleta o material compartido puede requerir regenerar los atlas.
+La representación técnica de materiales debe estar disponible antes de combinar familias. De este modo, la combinación opera sobre IDs globales y no requiere reconstruirse al abandonar las paletas locales. La consolidación artística de las entradas puede continuar después, pero debe estabilizarse antes de validar DOTS y hornear impostores definitivos. Un cambio de shader, paleta o material compartido puede requerir regenerar los atlas.
 
 ## Combinación manual de familias voxel
 
@@ -31,9 +33,9 @@ La primera versión debe realizar una unión exacta y exigir que los LOD0 utilic
 
 - Leer los volúmenes LOD0 existentes para conservar los retoques realizados en MagicaVoxel.
 - Transformar las celdas al espacio local de la nueva familia y ajustar el pivote a la rejilla física.
-- Unir las celdas ocupadas con una regla determinista para los solapamientos y mostrar la cantidad de conflictos de color antes de confirmar.
+- Unir las celdas ocupadas con una regla determinista para los solapamientos y mostrar los conflictos de `ColorID`, `SurfaceID` y clase de render antes de confirmar.
 - Mantener los chunks internos necesarios sin convertirlos en familias independientes.
-- Generar los LODs inferiores desde el volumen combinado.
+- Generar los LODs inferiores desde el volumen combinado, reduciendo el par `ColorID + SurfaceID` mediante una regla determinista.
 - Crear un manifiesto, los `.vox` editables y un prefab con un solo `LODGroup`.
 - Conservar las fuentes originales. La colocación y desactivación opcional en escena debe admitir Undo.
 
@@ -50,6 +52,8 @@ No se realizará una combinación automática de escenas completas. La agrupaci�
 - Traslación, rotación y escala de las fuentes.
 - Alineación del pivote y de la rejilla.
 - Solapamientos y prioridad de color.
+- Compatibilidad de las revisiones de las paletas globales y remapeo explícito cuando sea necesario.
+- Preservación de `ColorID`, `SurfaceID` y clase de render en todos los LODs.
 - Fronteras entre chunks.
 - Regeneración y alineación de todos los LODs.
 - Edición y guardado desde MagicaVoxel.
@@ -58,15 +62,98 @@ No se realizará una combinación automática de escenas completas. La agrupaci�
 
 ## Materiales compartidos
 
-La fase de materiales debe definir un grupo reducido de materiales compatibles con HDRP y con la ruta de renderizado DOTS. El diseño debe cubrir:
+El sistema debe separar el color visible de las propiedades físicas de la superficie. La combinación de ambos datos se realiza en el shader y no mediante materiales o submeshes adicionales.
 
-- asignación estable de colores voxel a materiales compartidos;
-- consistencia de paletas entre familias y LODs;
-- comportamiento de los modelos combinados cuando las fuentes utilizan paletas diferentes;
-- compatibilidad con Voxel Importer, sombras, mipmaps y horneado de impostores;
-- separación entre parámetros compartidos y datos específicos del asset.
+### Paletas globales e IDs estables
 
-Los materiales definitivos deben validarse antes de producir atlas finales de impostores.
+- `VoxelColorPalette.asset` define hasta 256 colores globales con IDs explícitos `0..255`.
+- `VoxelSurfacePalette.asset` define hasta 256 superficies globales con IDs explícitos `0..255`.
+- Reordenar las listas no modifica los IDs. Un ID retirado queda reservado y no se reutiliza automáticamente.
+- El ID `0` representa una entrada predeterminada segura en ambas paletas.
+- Cada paleta genera una LUT fija de `256 x 1`. La anchura no depende de la cantidad de entradas utilizadas.
+- La LUT de color utiliza sRGB, filtrado Point, Clamp y no genera mipmaps.
+- La LUT de superficies utiliza datos lineales RGBA32, filtrado Point, Clamp, sin mipmaps y sin compresión con pérdida.
+- La LUT de superficies almacena inicialmente `Metallic`, `Smoothness`, emisión relativa y oclusión ambiental en RGBA.
+
+La fuente de verdad son los ScriptableObjects. Las texturas generadas no se editan manualmente. La herramienta debe detectar IDs duplicados o fuera de rango, referencias inexistentes y LUT desactualizadas.
+
+### Capacidad y materiales de Unity
+
+El espacio global admite `256 colores x 256 superficies = 65.536` combinaciones visuales y físicas. Una combinación no crea un Material de Unity: todas las combinaciones opacas compatibles pueden utilizar un único `M_VoxelWorld`.
+
+Se utilizan materiales adicionales únicamente cuando cambia el comportamiento de render, por ejemplo:
+
+- `M_VoxelWorld` para superficies opacas estándar;
+- `M_VoxelFoliage` para alpha clipping, doble cara y viento;
+- `M_VoxelGlass` para transparencia o refracción;
+- materiales especiales para agua, hologramas u otros efectos que requieran otro shader.
+
+Una primera configuración debería mantenerse en aproximadamente tres a cinco materiales compartidos. El número exacto depende de los comportamientos de render necesarios, no de la cantidad de colores, superficies, modelos o LODs.
+
+### Canales del mesh
+
+- `UV0.x` contiene el `ColorID` crudo.
+- `UV1` queda reservado para lightmaps horneados.
+- `UV2` queda reservado para datos de iluminación en tiempo real u otra necesidad del pipeline.
+- `UV3.x` contiene el `SurfaceID` crudo.
+- Vertex Color queda disponible para suciedad, desgaste, variación de emisión y máscaras estilísticas.
+
+Los IDs se almacenan inicialmente en canales `Vector2` para evitar el coste de un `Vector4` cuando sólo se utiliza una componente. Cada triángulo debe tener un único `ColorID` y un único `SurfaceID`; el mesher separa vértices en las fronteras semánticas.
+
+### Transporte mediante `.vox`
+
+El formato `.vox` sólo contiene un índice de paleta por voxel. `MATL` también está ligado a ese índice y no proporciona un segundo atributo independiente. Para conservar ambos IDs durante la edición en MagicaVoxel, cada slot local representa el par:
+
+```text
+slot local -> GlobalColorID + SurfaceID
+```
+
+El mismo RGB ocupa dos slots locales únicamente cuando necesita dos superficies distintas. La duplicación es una codificación de autoría y no crea materiales ni submeshes adicionales en Unity.
+
+Cada `.vox` admite como máximo 255 pares locales utilizados simultáneamente. Este límite se aplica a un archivo o modelo concreto, no a la biblioteca global de 65.536 combinaciones. La herramienta debe advertir antes de exportar cuando una familia exceda el límite.
+
+La correspondencia se conserva en el sidecar de Voxel Bridge y se replica como notas legibles por slot, por ejemplo `VB:C012:S005`, cuando la versión de MagicaVoxel lo permita. El sidecar incluye versión de formato, revisión de las paletas y una huella de la tabla local. La reimportación se detiene ante slots desconocidos, remapeos ambiguos o pérdida de metadatos; no asigna `Default` silenciosamente.
+
+Debe existir una prueba de round-trip para la versión instalada de MagicaVoxel que verifique `XYZI`, `RGBA`, `NOTE`, `MATL` e `IMAP`. Si MagicaVoxel no conserva de forma estable los slots RGB duplicados y sus notas, la alternativa es un sidecar binario por voxel con reconciliación explícita de voxels añadidos, eliminados o desplazados.
+
+### Autoría de superficies
+
+La conversión desde FBX u OBJ resuelve `SurfaceID` con la siguiente precedencia:
+
+1. asignación explícita del Material de Unity a una superficie global;
+2. alias de Editor como `SURF_Concrete` o `SURF_PaintedMetal`;
+3. superficie predeterminada configurada por el usuario;
+4. error cuando el perfil exige asignación explícita.
+
+Los nombres sólo se utilizan durante la importación y no forman parte del runtime. Un material temporal puede etiquetar caras en Blender o Unity y se elimina como dependencia después de transferir su ID al volumen voxel.
+
+Los LODs automáticos propagan el par `ColorID + SurfaceID`. La reducción selecciona una combinación mediante mayoría ponderada y reglas de prioridad configuradas para superficies importantes, como emisión o alpha clipping. Duplicar un LOD conserva la tabla de slots sin reinterpretarla.
+
+### Mesh de producción
+
+Voxel Bridge debe generar los meshes finales desde el volumen semántico y no depender del atlas local creado por Voxel Importer. El greedy mesher combina caras únicamente cuando coinciden color, superficie, orientación y clase de render.
+
+El resultado utiliza un submesh por comportamiento real de render, no por `SurfaceID`. Voxel Importer permanece disponible para previsualizar y editar `.vox`, pero no es la fuente definitiva del mesh de producción. Esta separación evita parches profundos al asset de terceros y proporciona un contrato estable para combinación, LODs y DOTS.
+
+### Shader, HTrace e impostores
+
+El shader HDRP compartido muestrea ambas LUT y aplica la emisión como `BaseColor x SurfaceEmission x EmissionIntensity`. La escala HDR permanece en el material y puede cambiar sin regenerar meshes.
+
+La validación debe cubrir HDRP, SRP Batcher, HTrace con Recursive Rendering y DOTS Instancing. No se utilizan `MaterialPropertyBlock` para seleccionar colores o superficies por renderer; los IDs pertenecen al vertex stream.
+
+El shader de horneado de Amplify Impostors debe leer las mismas LUT y los mismos canales del mesh. El atlas debe reproducir Base Color, Metallic, Smoothness, AO y emisión. Los materiales definitivos se validan antes de producir atlas finales de impostores.
+
+### Validación mínima
+
+- IDs duplicados, retirados o fuera de rango.
+- Superficies desconocidas y aliases sin correspondencia.
+- Límite de 255 pares locales por `.vox`.
+- Round-trip de slots, notas y sidecar en MagicaVoxel.
+- Igualdad de IDs entre los tres vértices de cada triángulo.
+- Consistencia entre LODs, chunks y familias combinadas.
+- Ajustes de sRGB, filtrado, wrap, mipmaps y compresión de ambas LUT.
+- Compatibilidad visual con HDRP, HTrace e impostores.
+- Compatibilidad del material compartido con SRP Batcher y Entities Graphics.
 
 ## DOTS, subescenas y culling
 
