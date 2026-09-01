@@ -59,6 +59,30 @@ namespace LocalModels.VoxelBridge
         public Vector3 importGridOrigin;
         public Vector3Int importGridSize;
         public VoxelChunkMetadata[] chunks;
+        public VoxelSemanticMetadata semantic;
+    }
+
+    [Serializable]
+    internal sealed class VoxelSemanticSlotMetadata
+    {
+        public int slot;
+        public int colorId;
+        public int surfaceId;
+        public Color32 displayColor;
+    }
+
+    [Serializable]
+    internal sealed class VoxelSemanticMetadata
+    {
+        public int formatVersion = 1;
+        public string colorPaletteGuid;
+        public string colorPaletteAssetPath;
+        public string colorPaletteHash;
+        public string surfacePaletteGuid;
+        public string surfacePaletteAssetPath;
+        public string surfacePaletteHash;
+        public string slotTableHash;
+        public VoxelSemanticSlotMetadata[] slots;
     }
 
     [Serializable]
@@ -107,15 +131,21 @@ namespace LocalModels.VoxelBridge
         public readonly float VoxelSize;
         public readonly bool[] Occupied;
         public readonly Color32[] Colors;
+        public readonly ushort[] SemanticIds;
 
-        public VoxelGrid(Vector3Int size, Vector3 origin, float voxelSize)
+        public bool IsSemantic => SemanticIds != null;
+
+        public VoxelGrid(Vector3Int size, Vector3 origin, float voxelSize, bool semantic = false)
         {
             Size = size;
             Origin = origin;
             VoxelSize = voxelSize;
             int count = checked(size.x * size.y * size.z);
             Occupied = new bool[count];
-            Colors = new Color32[count];
+            if (semantic)
+                SemanticIds = new ushort[count];
+            else
+                Colors = new Color32[count];
         }
 
         public int Index(int x, int y, int z)
@@ -144,11 +174,16 @@ namespace LocalModels.VoxelBridge
     {
         public readonly byte[] Indices;
         public readonly Color32[] Palette;
+        public readonly VoxelSemanticSlotMetadata[] SemanticSlots;
 
-        public QuantizedVoxels(byte[] indices, Color32[] palette)
+        public bool IsSemantic => SemanticSlots != null;
+
+        public QuantizedVoxels(byte[] indices, Color32[] palette,
+            VoxelSemanticSlotMetadata[] semanticSlots = null)
         {
             Indices = indices;
             Palette = palette;
+            SemanticSlots = semanticSlots;
         }
     }
 

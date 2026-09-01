@@ -4,7 +4,7 @@ Herramienta de Editor para convertir mallas de Unity a `.vox`, mantener una esca
 
 La planificación de combinación de modelos, materiales compartidos, integración DOTS, análisis espacial e impostores definitivos se describe en [ROADMAP.md](ROADMAP.md).
 
-La configuración de las paletas globales de color y superficie se describe en [MATERIALS.md](MATERIALS.md). Esta infraestructura define IDs estables y genera las LUT que utilizará el material compartido. La incorporación de esos IDs al volumen voxel, al intercambio con MagicaVoxel y a los meshes se realizará en las siguientes fases de la hoja de ruta.
+La configuración de las paletas globales de color y superficie se describe en [MATERIALS.md](MATERIALS.md). Esta infraestructura define IDs estables, genera las LUT del material compartido y permite vincular los slots utilizados por un `.vox` con pares `ColorID + SurfaceID`. El mesh de producción y el shader compartido se desarrollan en las fases siguientes de la hoja de ruta.
 
 ## Paletas globales
 
@@ -16,6 +16,18 @@ La configuración de las paletas globales de color y superficie se describe en [
 - Eliminar una entrada retira su ID para impedir que un mesh existente cambie de significado de forma silenciosa.
 
 Las LUT son assets generados. La edición debe realizarse en los ScriptableObjects y finalizar con `Regenerar LUT`.
+
+## IDs semánticos en archivos `.vox`
+
+`Tools > Voxel Bridge > Vincular IDs semánticos` abre la tabla de slots utilizados por un `.vox` generado por Voxel Bridge. La misma acción está disponible en el menú contextual del archivo.
+
+Cada fila requiere un `ColorID` y un `SurfaceID`. Los colores que coinciden exactamente con una entrada global se preseleccionan; los demás permanecen sin asignar para evitar conversiones implícitas. Al guardar, la herramienta actualiza el RGBA del slot y escribe metadata semántica versionada en el sidecar `.voxelbridge.json`.
+
+El sidecar conserva las referencias por GUID y ruta a ambas paletas, sus huellas de contenido, la tabla local y una copia RGBA de cada slot. La lectura se detiene ante IDs inexistentes, slots usados sin correspondencia, cambios de RGBA, hashes de tabla inválidos o remapeos `IMAP` no compatibles.
+
+Los `.vox` y sidecars existentes permanecen en modo RGB legacy hasta vincularse explícitamente. Voxel Importer proporciona la previsualización de Unity, pero no se utiliza para reconstruir los IDs semánticos. La reducción manual de un LOD semántico conserva el par mayoritario de cada celda; la duplicación manual conserva el archivo y el sidecar sin reinterpretarlos.
+
+Los chunks `NOTE` y `MATL` existentes se preservan sin convertirlos en fuente de identidad. Cuando dos slots comparten exactamente el mismo RGB pero utilizan superficies distintas, la tabla es válida dentro de Voxel Bridge, aunque su estabilidad después de volver a guardar el archivo en MagicaVoxel todavía requiere una prueba de round-trip específica.
 
 ## Flujo recomendado: perfil físico + LODs
 

@@ -251,6 +251,26 @@ namespace LocalModels.VoxelBridge
             if (metadata.unityGridSize.x <= 0 || metadata.unityGridSize.y <= 0 || metadata.unityGridSize.z <= 0)
                 throw new InvalidDataException("Los metadatos no contienen una rejilla válida.");
 
+            bool isSemantic = metadata.formatVersion >= 4;
+            ushort[] slotToSemantic = null;
+            if (isSemantic)
+            {
+                if (metadata.semantic == null)
+                    throw new InvalidDataException(
+                        "El sidecar v4 no contiene metadata semántica.");
+                VoxelSemanticVoxDocument semanticDocument = VoxelSemanticVoxDocument.Read(path);
+                if (!VoxelSemanticTransport.TryLoadPalettes(metadata.semantic,
+                        out VoxelColorPalette colorPalette,
+                        out VoxelSurfacePalette surfacePalette, out string paletteError))
+                    throw new InvalidDataException(paletteError);
+                if (!VoxelSemanticTransport.TryResolveSlotSemantics(
+                        semanticDocument, metadata.semantic, colorPalette, surfacePalette,
+                        out slotToSemantic, out string warning, out string semanticError))
+                    throw new InvalidDataException(semanticError);
+                if (!string.IsNullOrEmpty(warning))
+                    Debug.LogWarning($"Voxel Bridge: {warning} ({path})");
+            }
+
             var models = new List<Model>();
             var palette = new Color32[256];
             using var stream = File.OpenRead(path);
@@ -293,7 +313,8 @@ namespace LocalModels.VoxelBridge
             }
             if (models.Count == 0) throw new InvalidDataException("El archivo VOX no contiene modelos.");
 
-            var grid = new VoxelGrid(metadata.unityGridSize, metadata.gridOrigin, metadata.voxelSize);
+            var grid = new VoxelGrid(
+                metadata.unityGridSize, metadata.gridOrigin, metadata.voxelSize, isSemantic);
             VoxelChunkMetadata[] chunks = metadata.chunks;
             if (chunks == null || chunks.Length == 0)
             {
@@ -321,7 +342,18 @@ namespace LocalModels.VoxelBridge
                         gx >= grid.Size.x || gy >= grid.Size.y || gz >= grid.Size.z) continue;
                     int index = grid.Index(gx, gy, gz);
                     grid.Occupied[index] = true;
-                    grid.Colors[index] = paletteIndex > 0 ? palette[paletteIndex - 1] : Color.white;
+                    if (isSemantic)
+                    {
+                        if (paletteIndex == 0)
+                            throw new InvalidDataException("XYZI utiliza el slot de paleta reservado 0.");
+                        grid.SemanticIds[index] = slotToSemantic[paletteIndex];
+                    }
+                    else
+                    {
+                        grid.Colors[index] = paletteIndex > 0
+                            ? palette[paletteIndex - 1]
+                            : Color.white;
+                    }
                 }
             }
             return grid;
@@ -350,7 +382,12 @@ namespace LocalModels.VoxelBridge
 
             Bounds bounds = new Bounds((min + max) * 0.5f, max - min);
             VoxelGridPlan plan = VoxelGridPlanner.Create(bounds, targetVoxelSize, padding, chunkCellSize);
-            var result = new VoxelGrid(plan.Size, plan.Origin, targetVoxelSize);
+            var result = new VoxelGrid(plan.Size, plan.Origin, targetVoxelSize, source.IsSemantic);
+            if (source.IsSemantic)
+            {
+                DownsampleSemantics(source, result, targetVoxelSize);
+                return result;
+            }
             var counts = new int[result.Occupied.Length];
             var red = new long[result.Occupied.Length];
             var green = new long[result.Occupied.Length];
@@ -381,6 +418,62 @@ namespace LocalModels.VoxelBridge
                     (byte)(blue[i] / counts[i]), 255);
             }
             return result;
+        }
+
+        private static void DownsampleSemantics(
+            VoxelGrid source, VoxelGrid result, float targetVoxelSize)
+        {
+            var votes = new ulong[source.CountOccupied()];
+            int voteIndex = 0;
+            for (int i = 0; i < source.Occupied.Length; i++)
+            {
+                if (!source.Occupied[i]) continue;
+                int target = MapTargetIndex(source, result, targetVoxelSize, i);
+                votes[voteIndex++] = ((ulong)(uint)target << 16) | source.SemanticIds[i];
+            }
+            Array.Sort(votes);
+
+            int cursor = 0;
+            while (cursor < votes.Length)
+            {
+                int target = (int)(votes[cursor] >> 16);
+                ushort bestSemantic = 0;
+                int bestCount = -1;
+                while (cursor < votes.Length && (int)(votes[cursor] >> 16) == target)
+                {
+                    ushort semantic = (ushort)votes[cursor];
+                    int count = 0;
+                    do
+                    {
+                        count++;
+                        cursor++;
+                    }
+                    while (cursor < votes.Length &&
+                           (int)(votes[cursor] >> 16) == target &&
+                           (ushort)votes[cursor] == semantic);
+
+                    if (count > bestCount || count == bestCount && semantic < bestSemantic)
+                    {
+                        bestSemantic = semantic;
+                        bestCount = count;
+                    }
+                }
+                result.Occupied[target] = true;
+                result.SemanticIds[target] = bestSemantic;
+            }
+        }
+
+        private static int MapTargetIndex(
+            VoxelGrid source, VoxelGrid result, float targetVoxelSize, int sourceIndex)
+        {
+            source.Coordinates(sourceIndex, out int x, out int y, out int z);
+            Vector3 center = source.Origin +
+                             new Vector3(x + 0.5f, y + 0.5f, z + 0.5f) * source.VoxelSize;
+            Vector3 relative = (center - result.Origin) / targetVoxelSize;
+            int tx = Mathf.Clamp(Mathf.FloorToInt(relative.x), 0, result.Size.x - 1);
+            int ty = Mathf.Clamp(Mathf.FloorToInt(relative.y), 0, result.Size.y - 1);
+            int tz = Mathf.Clamp(Mathf.FloorToInt(relative.z), 0, result.Size.z - 1);
+            return result.Index(tx, ty, tz);
         }
     }
 }

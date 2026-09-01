@@ -8,8 +8,8 @@ Voxel Bridge debe producir familias voxel físicamente coherentes y editables, i
 
 1. Validar la conversión individual y por lotes, los LODs y la ruta opcional de Amplify Impostors.
 2. Implementar las paletas globales de color y superficie, sus LUT y la validación de IDs estables.
-3. Incorporar `ColorID` y `SurfaceID` al volumen voxel, al intercambio con MagicaVoxel y al generador de meshes de producción.
-4. Adaptar el shader compartido y el horneado de Amplify Impostors al muestreo de ambas paletas.
+3. Incorporar `ColorID` y `SurfaceID` al volumen voxel y al intercambio con MagicaVoxel mediante metadata versionada.
+4. Incorporar los IDs al generador de meshes de producción y adaptar el shader compartido y el horneado de Amplify Impostors al muestreo de ambas paletas.
 5. Implementar la combinación manual de familias voxel para grupos estáticos y espacialmente compactos.
 6. Validar la conversión a entidades, las subescenas, los LODs y el culling con el flujo DOTS previsto para producción.
 7. Implementar el análisis de visibilidad y presupuesto por zonas sobre la estructura real del mapa.
@@ -112,7 +112,9 @@ El mismo RGB ocupa dos slots locales únicamente cuando necesita dos superficies
 
 Cada `.vox` admite como máximo 255 pares locales utilizados simultáneamente. Este límite se aplica a un archivo o modelo concreto, no a la biblioteca global de 65.536 combinaciones. La herramienta debe advertir antes de exportar cuando una familia exceda el límite.
 
-La correspondencia se conserva en el sidecar de Voxel Bridge y se replica como notas legibles por slot, por ejemplo `VB:C012:S005`, cuando la versión de MagicaVoxel lo permita. El sidecar incluye versión de formato, revisión de las paletas y una huella de la tabla local. La reimportación se detiene ante slots desconocidos, remapeos ambiguos o pérdida de metadatos; no asigna `Default` silenciosamente.
+La correspondencia se conserva en el sidecar de Voxel Bridge. El sidecar incluye versión de formato, GUID y ruta de las paletas, sus huellas de contenido, una copia RGBA por slot y una huella de la tabla local. La reimportación se detiene ante slots desconocidos, remapeos ambiguos o pérdida de metadatos; no asigna `Default` silenciosamente.
+
+Los chunks `NOTE` y `MATL` existentes se preservan, pero no son fuentes de identidad. `NOTE` representa filas de la paleta en la versión de MagicaVoxel utilizada y no proporciona una nota independiente por slot. Un `IMAP` no compatible debe detener la lectura semántica.
 
 Debe existir una prueba de round-trip para la versión instalada de MagicaVoxel que verifique `XYZI`, `RGBA`, `NOTE`, `MATL` e `IMAP`. Si MagicaVoxel no conserva de forma estable los slots RGB duplicados y sus notas, la alternativa es un sidecar binario por voxel con reconciliación explícita de voxels añadidos, eliminados o desplazados.
 
@@ -127,7 +129,7 @@ La conversión desde FBX u OBJ resuelve `SurfaceID` con la siguiente precedencia
 
 Los nombres sólo se utilizan durante la importación y no forman parte del runtime. Un material temporal puede etiquetar caras en Blender o Unity y se elimina como dependencia después de transferir su ID al volumen voxel.
 
-Los LODs automáticos propagan el par `ColorID + SurfaceID`. La reducción selecciona una combinación mediante mayoría ponderada y reglas de prioridad configuradas para superficies importantes, como emisión o alpha clipping. Duplicar un LOD conserva la tabla de slots sin reinterpretarla.
+La reducción manual de un volumen semántico selecciona la combinación mayoritaria con desempate estable. Duplicar un LOD conserva la tabla de slots sin reinterpretarla. La propagación automática desde FBX u OBJ requiere primero la asignación de superficies desde los materiales fuente.
 
 ### Mesh de producción
 
@@ -148,7 +150,7 @@ El shader de horneado de Amplify Impostors debe leer las mismas LUT y los mismos
 - IDs duplicados, retirados o fuera de rango.
 - Superficies desconocidas y aliases sin correspondencia.
 - Límite de 255 pares locales por `.vox`.
-- Round-trip de slots, notas y sidecar en MagicaVoxel.
+- Round-trip de slots, sidecar y chunks preservados en MagicaVoxel.
 - Igualdad de IDs entre los tres vértices de cada triángulo.
 - Consistencia entre LODs, chunks y familias combinadas.
 - Ajustes de sRGB, filtrado, wrap, mipmaps y compresión de ambas LUT.

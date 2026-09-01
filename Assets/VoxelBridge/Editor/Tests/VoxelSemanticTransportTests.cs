@@ -1,0 +1,408 @@
+using System;
+using System.IO;
+using System.Linq;
+using System.Text;
+using NUnit.Framework;
+using UnityEditor;
+using UnityEngine;
+
+namespace LocalModels.VoxelBridge.Tests
+{
+    public sealed class VoxelSemanticTransportTests
+    {
+        [TestCase(0, 0)]
+        [TestCase(255, 255)]
+        [TestCase(12, 197)]
+        public void SemanticEncoding_RoundTripsBothStableIds(int colorId, int surfaceId)
+        {
+            ushort packed = VoxelSemanticEncoding.Pack(colorId, surfaceId);
+
+            Assert.That(VoxelSemanticEncoding.ColorId(packed), Is.EqualTo(colorId));
+            Assert.That(VoxelSemanticEncoding.SurfaceId(packed), Is.EqualTo(surfaceId));
+        }
+
+        [Test]
+        public void Quantizer_KeepsSameColorWithDifferentSurfacesInSeparateSlots()
+        {
+            VoxelColorPalette colors = CreateColors(1);
+            VoxelSurfacePalette surfaces = CreateSurfaces(2);
+            try
+            {
+                var grid = new VoxelGrid(new Vector3Int(2, 1, 1), Vector3.zero, 1f, true);
+                grid.Occupied[0] = grid.Occupied[1] = true;
+                grid.SemanticIds[0] = VoxelSemanticEncoding.Pack(1, 1);
+                grid.SemanticIds[1] = VoxelSemanticEncoding.Pack(1, 2);
+
+                QuantizedVoxels result = VoxelSemanticQuantizer.Quantize(grid, colors, surfaces);
+
+                Assert.That(result.SemanticSlots, Has.Length.EqualTo(2));
+                Assert.That(result.Indices[0], Is.Not.EqualTo(result.Indices[1]));
+                Assert.That(result.Palette[0], Is.EqualTo(result.Palette[1]));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(colors);
+                UnityEngine.Object.DestroyImmediate(surfaces);
+            }
+        }
+
+        [Test]
+        public void Quantizer_IsDeterministicWhenVoxelTraversalChanges()
+        {
+            VoxelColorPalette colors = CreateColors(2);
+            VoxelSurfacePalette surfaces = CreateSurfaces(2);
+            try
+            {
+                var first = new VoxelGrid(new Vector3Int(4, 1, 1), Vector3.zero, 1f, true);
+                var second = new VoxelGrid(new Vector3Int(4, 1, 1), Vector3.zero, 1f, true);
+                ushort a = VoxelSemanticEncoding.Pack(1, 2);
+                ushort b = VoxelSemanticEncoding.Pack(2, 1);
+                ushort[] firstValues = { a, b, a, b };
+                ushort[] secondValues = { b, a, b, a };
+                for (int i = 0; i < 4; i++)
+                {
+                    first.Occupied[i] = second.Occupied[i] = true;
+                    first.SemanticIds[i] = firstValues[i];
+                    second.SemanticIds[i] = secondValues[i];
+                }
+
+                QuantizedVoxels firstResult = VoxelSemanticQuantizer.Quantize(first, colors, surfaces);
+                QuantizedVoxels secondResult = VoxelSemanticQuantizer.Quantize(second, colors, surfaces);
+
+                CollectionAssert.AreEqual(
+                    firstResult.SemanticSlots.Select(SemanticPair).ToArray(),
+                    secondResult.SemanticSlots.Select(SemanticPair).ToArray());
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(colors);
+                UnityEngine.Object.DestroyImmediate(surfaces);
+            }
+        }
+
+        [Test]
+        public void Quantizer_Accepts255PairsAndRejects256()
+        {
+            VoxelColorPalette colors = CreateColors(0);
+            VoxelSurfacePalette surfaces = CreateSurfaces(255);
+            try
+            {
+                VoxelGrid valid = CreateSurfaceIdGrid(255);
+                Assert.That(VoxelSemanticQuantizer.Quantize(valid, colors, surfaces)
+                    .SemanticSlots, Has.Length.EqualTo(255));
+
+                VoxelGrid invalid = CreateSurfaceIdGrid(256);
+                InvalidDataException exception = Assert.Throws<InvalidDataException>(() =>
+                    VoxelSemanticQuantizer.Quantize(invalid, colors, surfaces));
+                StringAssert.Contains("máximo 255", exception.Message);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(colors);
+                UnityEngine.Object.DestroyImmediate(surfaces);
+            }
+        }
+
+        [Test]
+        public void Resolver_RejectsPaletteSnapshotChangesAndNonIdentityImap()
+        {
+            VoxelColorPalette colors = CreateColors(1);
+            VoxelSurfacePalette surfaces = CreateSurfaces(1);
+            string path = Path.Combine(Path.GetTempPath(), "VoxelSemanticValidation.vox");
+            try
+            {
+                VoxelGrid grid = OneSemanticVoxel(VoxelSemanticEncoding.Pack(1, 1));
+                QuantizedVoxels quantized = VoxelSemanticQuantizer.Quantize(grid, colors, surfaces);
+                VoxelChunkedVoxWriter.Write(path, grid, quantized, 16);
+                VoxelSemanticMetadata metadata = CreateMetadata(
+                    quantized.SemanticSlots, colors, surfaces);
+                byte[] original = File.ReadAllBytes(path);
+                VoxelSemanticVoxDocument document = VoxelSemanticVoxDocument.Parse(original);
+
+                metadata.slots[0].displayColor = Color.red;
+                metadata.slotTableHash = VoxelSemanticTransport.ComputeSlotTableHash(metadata.slots);
+                Assert.That(VoxelSemanticTransport.TryResolveSlotSemantics(
+                    document, metadata, colors, surfaces, out _, out _, out string colorError), Is.False);
+                StringAssert.Contains("color del slot", colorError);
+
+                metadata = CreateMetadata(quantized.SemanticSlots, colors, surfaces);
+                byte[] imap = Enumerable.Range(0, 256).Select(index => (byte)index).ToArray();
+                (imap[1], imap[2]) = (imap[2], imap[1]);
+                VoxelSemanticVoxDocument remapped = VoxelSemanticVoxDocument.Parse(
+                    AppendChunk(original, "IMAP", imap));
+                Assert.That(VoxelSemanticTransport.TryResolveSlotSemantics(
+                    remapped, metadata, colors, surfaces, out _, out _, out string imapError), Is.False);
+                StringAssert.Contains("IMAP", imapError);
+            }
+            finally
+            {
+                if (File.Exists(path)) File.Delete(path);
+                UnityEngine.Object.DestroyImmediate(colors);
+                UnityEngine.Object.DestroyImmediate(surfaces);
+            }
+        }
+
+        [Test]
+        public void SemanticRewrite_PreservesExistingNoteChunkExactly()
+        {
+            VoxelColorPalette colors = CreateColors(1);
+            VoxelSurfacePalette surfaces = CreateSurfaces(1);
+            string path = Path.Combine(Path.GetTempPath(), "VoxelSemanticNote.vox");
+            try
+            {
+                VoxelGrid grid = OneSemanticVoxel(VoxelSemanticEncoding.Pack(1, 1));
+                QuantizedVoxels quantized = VoxelSemanticQuantizer.Quantize(grid, colors, surfaces);
+                VoxelChunkedVoxWriter.Write(path, grid, quantized, 16);
+                byte[] noteContent = BuildNotes("palette row 0", "palette row 1");
+                byte[] bytesWithNote = AppendChunk(File.ReadAllBytes(path), "NOTE", noteContent);
+                byte[] noteChunk = BuildChunk("NOTE", noteContent);
+
+                byte[] rewritten = VoxelSemanticVoxDocument.Parse(bytesWithNote)
+                    .BuildSemanticBytes(quantized.SemanticSlots);
+
+                Assert.That(ContainsSequence(rewritten, noteChunk), Is.True);
+            }
+            finally
+            {
+                if (File.Exists(path)) File.Delete(path);
+                UnityEngine.Object.DestroyImmediate(colors);
+                UnityEngine.Object.DestroyImmediate(surfaces);
+            }
+        }
+
+        [Test]
+        public void SemanticChunkedWriterAndReader_RoundTripPairs()
+        {
+            string folderName = "VoxelSemanticRoundTrip_" + Guid.NewGuid().ToString("N");
+            string assetFolder = "Assets/" + folderName;
+            AssetDatabase.CreateFolder("Assets", folderName);
+            VoxelColorPalette colors = CreateColors(2);
+            VoxelSurfacePalette surfaces = CreateSurfaces(2);
+            AssetDatabase.CreateAsset(colors, assetFolder + "/Colors.asset");
+            AssetDatabase.CreateAsset(surfaces, assetFolder + "/Surfaces.asset");
+            AssetDatabase.SaveAssets();
+            string path = Path.Combine(Path.GetTempPath(), "VoxelSemanticChunkRoundTrip.vox");
+            try
+            {
+                var grid = new VoxelGrid(
+                    new Vector3Int(35, 3, 2), new Vector3(-1f, 2f, 3f), 0.1f, true);
+                int[] indices = { grid.Index(0, 0, 0), grid.Index(17, 1, 0), grid.Index(34, 2, 1) };
+                ushort[] semantics =
+                {
+                    VoxelSemanticEncoding.Pack(1, 1),
+                    VoxelSemanticEncoding.Pack(2, 2),
+                    VoxelSemanticEncoding.Pack(1, 2)
+                };
+                for (int i = 0; i < indices.Length; i++)
+                {
+                    grid.Occupied[indices[i]] = true;
+                    grid.SemanticIds[indices[i]] = semantics[i];
+                }
+                QuantizedVoxels quantized = VoxelSemanticQuantizer.Quantize(grid, colors, surfaces);
+                VoxWriteResult write = VoxelChunkedVoxWriter.Write(path, grid, quantized, 16);
+                Assert.That(VoxelSemanticTransport.TryCreateMetadata(
+                    quantized.SemanticSlots, colors, surfaces,
+                    out VoxelSemanticMetadata semanticMetadata, out string semanticError),
+                    Is.True, semanticError);
+                Assert.That(semanticMetadata.colorPaletteGuid, Is.Not.Empty);
+                Assert.That(semanticMetadata.surfacePaletteGuid, Is.Not.Empty);
+                var metadata = new VoxelBridgeMetadata
+                {
+                    formatVersion = 4,
+                    voxelSize = grid.VoxelSize,
+                    gridOrigin = grid.Origin,
+                    unityGridSize = grid.Size,
+                    chunks = write.Chunks,
+                    semantic = semanticMetadata
+                };
+
+                VoxelGrid restored = VoxelVolumeReader.Read(path, metadata);
+
+                Assert.That(restored.IsSemantic, Is.True);
+                for (int i = 0; i < indices.Length; i++)
+                    Assert.That(restored.SemanticIds[indices[i]], Is.EqualTo(semantics[i]));
+            }
+            finally
+            {
+                if (File.Exists(path)) File.Delete(path);
+                AssetDatabase.DeleteAsset(assetFolder);
+            }
+        }
+
+        [Test]
+        public void VolumeReader_UsesFormatVersionToDistinguishLegacyAndSemanticData()
+        {
+            var grid = new VoxelGrid(Vector3Int.one, Vector3.zero, 1f);
+            grid.Occupied[0] = true;
+            grid.Colors[0] = new Color32(12, 34, 56, 255);
+            string path = Path.Combine(Path.GetTempPath(), "VoxelSemanticVersionGate.vox");
+            try
+            {
+                QuantizedVoxels quantized = VoxelColorQuantizer.Quantize(grid);
+                VoxWriteResult write = VoxelChunkedVoxWriter.Write(path, grid, quantized, 16);
+                var legacy = new VoxelBridgeMetadata
+                {
+                    formatVersion = 3,
+                    voxelSize = 1f,
+                    unityGridSize = Vector3Int.one,
+                    chunks = write.Chunks,
+                    semantic = new VoxelSemanticMetadata()
+                };
+
+                VoxelGrid restored = VoxelVolumeReader.Read(path, legacy);
+                Assert.That(restored.IsSemantic, Is.False);
+                Assert.That(restored.Colors[0], Is.EqualTo(grid.Colors[0]));
+
+                legacy.formatVersion = 4;
+                legacy.semantic = null;
+                InvalidDataException exception = Assert.Throws<InvalidDataException>(() =>
+                    VoxelVolumeReader.Read(path, legacy));
+                StringAssert.Contains("v4", exception.Message);
+            }
+            finally
+            {
+                if (File.Exists(path)) File.Delete(path);
+            }
+        }
+
+        [Test]
+        public void SemanticDownsampler_UsesMajorityAndLowerPairForTies()
+        {
+            var majority = new VoxelGrid(new Vector3Int(4, 1, 1), Vector3.zero, 0.1f, true);
+            ushort low = VoxelSemanticEncoding.Pack(1, 1);
+            ushort high = VoxelSemanticEncoding.Pack(2, 2);
+            for (int i = 0; i < 4; i++) majority.Occupied[i] = true;
+            majority.SemanticIds[0] = high;
+            majority.SemanticIds[1] = low;
+            majority.SemanticIds[2] = high;
+            majority.SemanticIds[3] = high;
+
+            VoxelGrid majorityResult = VoxelGridDownsampler.Downsample(majority, 0.4f, 0, 16);
+            Assert.That(majorityResult.SemanticIds.Single(), Is.EqualTo(high));
+
+            majority.SemanticIds[1] = low;
+            majority.SemanticIds[2] = low;
+            VoxelGrid tieResult = VoxelGridDownsampler.Downsample(majority, 0.4f, 0, 16);
+            Assert.That(tieResult.SemanticIds.Single(), Is.EqualTo(low));
+        }
+
+        private static VoxelGrid OneSemanticVoxel(ushort semantic)
+        {
+            var grid = new VoxelGrid(Vector3Int.one, Vector3.zero, 1f, true);
+            grid.Occupied[0] = true;
+            grid.SemanticIds[0] = semantic;
+            return grid;
+        }
+
+        private static VoxelGrid CreateSurfaceIdGrid(int count)
+        {
+            var grid = new VoxelGrid(new Vector3Int(count, 1, 1), Vector3.zero, 1f, true);
+            for (int i = 0; i < count; i++)
+            {
+                grid.Occupied[i] = true;
+                grid.SemanticIds[i] = VoxelSemanticEncoding.Pack(0, i);
+            }
+            return grid;
+        }
+
+        private static VoxelColorPalette CreateColors(int maximumId)
+        {
+            VoxelColorPalette palette = ScriptableObject.CreateInstance<VoxelColorPalette>();
+            palette.MutableEntries.Clear();
+            for (int id = 0; id <= maximumId; id++)
+                palette.MutableEntries.Add(new VoxelColorDefinition(
+                    id, "Color " + id, new Color32((byte)(20 + id), 80, 160, 255)));
+            return palette;
+        }
+
+        private static VoxelSurfacePalette CreateSurfaces(int maximumId)
+        {
+            VoxelSurfacePalette palette = ScriptableObject.CreateInstance<VoxelSurfacePalette>();
+            palette.MutableEntries.Clear();
+            for (int id = 0; id <= maximumId; id++)
+                palette.MutableEntries.Add(new VoxelSurfaceDefinition(
+                    id, "Surface " + id, VoxelSurfaceRenderClass.Opaque,
+                    0f, 0.25f, 0f, 1f));
+            return palette;
+        }
+
+        private static VoxelSemanticMetadata CreateMetadata(
+            VoxelSemanticSlotMetadata[] slots,
+            VoxelColorPalette colors, VoxelSurfacePalette surfaces)
+        {
+            Assert.That(VoxelPaletteLutBuilder.TryBuildColorPixels(
+                colors, out _, out string colorHash, out string colorError), Is.True, colorError);
+            Assert.That(VoxelPaletteLutBuilder.TryBuildSurfacePixels(
+                surfaces, out _, out string surfaceHash, out string surfaceError), Is.True, surfaceError);
+            return new VoxelSemanticMetadata
+            {
+                formatVersion = 1,
+                colorPaletteAssetPath = AssetDatabase.GetAssetPath(colors),
+                colorPaletteGuid = AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(colors)),
+                colorPaletteHash = colorHash,
+                surfacePaletteAssetPath = AssetDatabase.GetAssetPath(surfaces),
+                surfacePaletteGuid = AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(surfaces)),
+                surfacePaletteHash = surfaceHash,
+                slotTableHash = VoxelSemanticTransport.ComputeSlotTableHash(slots),
+                slots = slots.Select(entry => new VoxelSemanticSlotMetadata
+                {
+                    slot = entry.slot,
+                    colorId = entry.colorId,
+                    surfaceId = entry.surfaceId,
+                    displayColor = entry.displayColor
+                }).ToArray()
+            };
+        }
+
+        private static int SemanticPair(VoxelSemanticSlotMetadata entry) =>
+            VoxelSemanticEncoding.Pack(entry.colorId, entry.surfaceId);
+
+        private static byte[] BuildNotes(params string[] notes)
+        {
+            using var stream = new MemoryStream();
+            using var writer = new BinaryWriter(stream, Encoding.UTF8, true);
+            writer.Write(notes.Length);
+            foreach (string note in notes)
+            {
+                byte[] bytes = Encoding.UTF8.GetBytes(note);
+                writer.Write(bytes.Length);
+                writer.Write(bytes);
+            }
+            return stream.ToArray();
+        }
+
+        private static byte[] AppendChunk(byte[] vox, string id, byte[] content)
+        {
+            byte[] chunk = BuildChunk(id, content);
+            byte[] output = new byte[vox.Length + chunk.Length];
+            Buffer.BlockCopy(vox, 0, output, 0, vox.Length);
+            Buffer.BlockCopy(chunk, 0, output, vox.Length, chunk.Length);
+            int childrenBytes = BitConverter.ToInt32(output, 16);
+            Buffer.BlockCopy(BitConverter.GetBytes(checked(childrenBytes + chunk.Length)),
+                0, output, 16, 4);
+            return output;
+        }
+
+        private static byte[] BuildChunk(string id, byte[] content)
+        {
+            using var stream = new MemoryStream();
+            using var writer = new BinaryWriter(stream, Encoding.UTF8, true);
+            writer.Write(Encoding.ASCII.GetBytes(id));
+            writer.Write(content.Length);
+            writer.Write(0);
+            writer.Write(content);
+            return stream.ToArray();
+        }
+
+        private static bool ContainsSequence(byte[] source, byte[] sequence)
+        {
+            for (int i = 0; i <= source.Length - sequence.Length; i++)
+            {
+                int j = 0;
+                while (j < sequence.Length && source[i + j] == sequence[j]) j++;
+                if (j == sequence.Length) return true;
+            }
+            return false;
+        }
+    }
+}

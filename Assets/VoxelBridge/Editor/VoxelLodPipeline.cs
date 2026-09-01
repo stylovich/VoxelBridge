@@ -698,7 +698,7 @@ namespace LocalModels.VoxelBridge
                 Bounds sourceBounds = BoundsFromMetadataOrGrid(parent, parentGrid);
                 WriteGrid(targetPath, reduced, sourceBounds, parent.sourceName, parent.sourceAssetPath,
                     manifest.familyId, manifestPath, targetLodIndex, targetMultiplier, mode,
-                    parentVoxAssetPath, profile);
+                    parentVoxAssetPath, profile, parent);
             }
 
             var entries = new List<VoxelLodEntry>(manifest.lods ?? Array.Empty<VoxelLodEntry>());
@@ -838,15 +838,36 @@ namespace LocalModels.VoxelBridge
         private static void WriteGrid(string voxAssetPath, VoxelGrid grid, Bounds sourceBounds,
             string sourceName, string sourceAssetPath, string familyId, string manifestAssetPath,
             int lodIndex, int lodMultiplier, VoxelLodGenerationMode mode, string parentVoxAssetPath,
-            VoxelStyleProfile profile)
+            VoxelStyleProfile profile, VoxelBridgeMetadata semanticSource = null)
         {
-            QuantizedVoxels quantized = VoxelColorQuantizer.Quantize(grid);
+            VoxelSemanticMetadata semantic = null;
+            QuantizedVoxels quantized;
+            if (grid.IsSemantic)
+            {
+                if (semanticSource?.semantic == null)
+                    throw new InvalidDataException(
+                        "El LOD semántico no referencia metadata semántica de origen.");
+                if (!VoxelSemanticTransport.TryLoadPalettes(semanticSource.semantic,
+                        out VoxelColorPalette colorPalette,
+                        out VoxelSurfacePalette surfacePalette, out string paletteError))
+                    throw new InvalidDataException(paletteError);
+                quantized = VoxelSemanticQuantizer.Quantize(grid, colorPalette, surfacePalette);
+                if (!VoxelSemanticTransport.TryCreateMetadata(
+                        quantized.SemanticSlots, colorPalette, surfacePalette,
+                        out semantic, out string semanticError))
+                    throw new InvalidDataException(semanticError);
+            }
+            else
+            {
+                quantized = VoxelColorQuantizer.Quantize(grid);
+            }
             VoxWriteResult writeResult = VoxelChunkedVoxWriter.Write(
                 AssetPathToAbsolute(voxAssetPath), grid, quantized, profile.ChunkCellSize);
             CalculateOccupiedBounds(grid, out Vector3Int occupiedMin, out Vector3Int occupiedSize);
             bool normalizedBySceneGraph = writeResult.UsesSceneGraph;
             var metadata = new VoxelBridgeMetadata
             {
+                formatVersion = semantic != null ? 4 : 3,
                 sourceName = sourceName,
                 sourceAssetPath = sourceAssetPath,
                 resolution = Mathf.Max(grid.Size.x, Mathf.Max(grid.Size.y, grid.Size.z)),
@@ -873,7 +894,8 @@ namespace LocalModels.VoxelBridge
                     ? grid.Origin + (Vector3)occupiedMin * grid.VoxelSize
                     : grid.Origin,
                 importGridSize = normalizedBySceneGraph ? occupiedSize : grid.Size,
-                chunks = writeResult.Chunks
+                chunks = writeResult.Chunks,
+                semantic = semantic
             };
             WriteJsonAsset(VoxelImporterIntegration.GetMetadataAssetPath(voxAssetPath), metadata);
         }

@@ -84,11 +84,19 @@ namespace LocalModels.VoxelBridge
                 return false;
             }
 
-            if (metadata == null || metadata.formatVersion < 1 || metadata.formatVersion > 3 ||
+            if (metadata == null || metadata.formatVersion < 1 || metadata.formatVersion > 4 ||
                 metadata.voxelSize <= 0f || float.IsNaN(metadata.voxelSize) || float.IsInfinity(metadata.voxelSize) ||
                 metadata.unityGridSize.x <= 0 || metadata.unityGridSize.y <= 0 || metadata.unityGridSize.z <= 0)
             {
                 error = "El sidecar de Voxel Bridge no es válido o usa una versión no compatible.";
+                metadata = null;
+                return false;
+            }
+            if (metadata.formatVersion >= 4 &&
+                (metadata.semantic == null || metadata.semantic.formatVersion != 1 ||
+                 metadata.semantic.slots == null || metadata.semantic.slots.Length == 0))
+            {
+                error = "El sidecar semántico no contiene una tabla ColorID + SurfaceID compatible.";
                 metadata = null;
                 return false;
             }

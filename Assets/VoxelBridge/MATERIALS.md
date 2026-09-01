@@ -2,9 +2,9 @@
 
 ## Alcance
 
-El sistema de materiales voxel separa el color visible de las propiedades físicas de la superficie. Un modelo podrá reutilizar el mismo color con perfiles PBR diferentes sin crear un Material de Unity por combinación.
+El sistema de materiales voxel separa el color visible de las propiedades físicas de la superficie. Un modelo puede reutilizar el mismo color con perfiles PBR diferentes sin crear un Material de Unity por combinación.
 
-La primera fase proporciona las paletas globales, IDs estables, validación y generación de LUT. La escritura de `ColorID` y `SurfaceID` en volúmenes, archivos `.vox` y meshes pertenece a las fases posteriores descritas en [ROADMAP.md](ROADMAP.md).
+El sistema proporciona paletas globales, IDs estables, generación de LUT y transporte de `ColorID + SurfaceID` en volúmenes y archivos `.vox`. El mesh de producción y el shader compartido permanecen descritos en [ROADMAP.md](ROADMAP.md).
 
 ## Assets canónicos
 
@@ -70,7 +70,42 @@ Los perfiles iniciales son valores de partida estilísticos. Deben calibrarse vi
 
 El número de ID es de sólo lectura en el Inspector para evitar cambios accidentales. Las migraciones intencionales de IDs requerirán una herramienta dedicada que también remapee los assets dependientes.
 
-## Contrato previsto para meshes y `.vox`
+## Vinculación semántica de `.vox`
+
+Abrir `Tools > Voxel Bridge > Vincular IDs semánticos` o utilizar `Assets > Voxel Bridge > Vincular IDs semánticos` sobre un archivo `.vox`.
+
+La ventana muestra únicamente los slots utilizados por `XYZI`. Cada slot debe tener:
+
+- un `ColorID` global;
+- un `SurfaceID` global;
+- el RGBA que representa ese `ColorID` en la paleta local del `.vox`.
+
+Una coincidencia RGBA exacta permite preseleccionar el `ColorID`. Las entradas sin coincidencia permanecen sin asignar. La vinculación modifica la paleta RGBA del `.vox` y su sidecar, por lo que ambos archivos deben versionarse juntos.
+
+El sidecar semántico utiliza `VoxelBridgeMetadata` versión 4 y un bloque semántico versión 1. Contiene:
+
+- GUID y ruta de las paletas globales;
+- huellas de contenido de ambas paletas;
+- tabla `slot -> ColorID + SurfaceID + RGBA`;
+- huella canónica de la tabla local.
+
+El GUID es la referencia principal y permite mover la paleta dentro del proyecto. Un cambio de huella global produce una advertencia porque ajustar un perfil PBR sin cambiar su ID es válido. Un cambio de la tabla local o del RGBA utilizado produce un error.
+
+Los sidecars de versiones 1 a 3 continúan utilizando colores RGB legacy. No se convierten automáticamente a `ColorID 0` ni reciben una superficie predeterminada.
+
+## Conservación durante LODs y MagicaVoxel
+
+Un volumen semántico almacena el par en 16 bits: ocho para `ColorID` y ocho para `SurfaceID`. Esta representación sustituye al array RGB de la rejilla y evita mantener ambas copias en memoria.
+
+La reducción manual selecciona el par mayoritario dentro de cada nueva celda. Los empates se resuelven por el valor estable menor. La duplicación manual copia el `.vox` y su sidecar sin reinterpretación. Las familias generadas automáticamente desde una malla continúan en modo legacy hasta disponer de la asignación de superficies desde materiales fuente.
+
+Voxel Bridge lee los índices directamente del binario `.vox`. El mesh y el atlas generados por Voxel Importer se utilizan como previsualización, no como fuente semántica, porque el importador puede compactar su paleta interna.
+
+Los chunks `NOTE` y `MATL` se conservan, pero no determinan los IDs. Cualquier `IMAP` se rechaza hasta disponer de un fixture que verifique su dirección y comportamiento en la versión de MagicaVoxel utilizada.
+
+El mismo RGB puede ocupar dos slots locales cuando necesita superficies diferentes. Voxel Bridge conserva esos slots mientras controla la escritura. MagicaVoxel puede reordenar slots visualmente idénticos al volver a guardar; este caso no se considera certificado hasta completar una prueba controlada de round-trip.
+
+## Contrato previsto para meshes
 
 La integración de producción utilizará el siguiente contrato:
 
@@ -80,9 +115,7 @@ La integración de producción utilizará el siguiente contrato:
 - `UV3.x`: `SurfaceID` crudo.
 - Vertex Color: máscaras estilísticas futuras.
 
-El formato `.vox` sólo ofrece un índice de paleta por voxel. Voxel Bridge transportará cada combinación local como una correspondencia `slot -> ColorID + SurfaceID` acompañada por metadata versionada. La importación deberá detenerse cuando esa correspondencia sea desconocida o ambigua; no asignará una superficie predeterminada silenciosamente.
-
-Hasta que esta integración esté implementada, las paletas globales no alteran la conversión, los materiales ni los prefabs existentes.
+El mesher de producción consumirá el volumen semántico directamente. El material actual de Voxel Importer no cambia durante esta fase.
 
 ## Validaciones
 
@@ -94,6 +127,13 @@ La herramienta comprueba:
 - nombres vacíos o duplicados;
 - componentes de color y propiedades PBR fuera de `0..1`;
 - contenido y configuración de las LUT;
-- desactualización entre el ScriptableObject y su textura generada.
+- desactualización entre el ScriptableObject y su textura generada;
+- límite de 255 pares locales por `.vox`;
+- slots duplicados, desconocidos o fuera de `1..255`;
+- pares semánticos duplicados;
+- referencias a IDs globales inexistentes;
+- huella de tabla o snapshot RGBA incoherentes;
+- sidecar semántico incompleto o con versión desconocida;
+- `IMAP` no compatible.
 
-Las fases posteriores deben añadir validación del transporte por `.vox`, consistencia entre LODs y chunks, vertex streams, HDRP, HTrace, SRP Batcher, Entities Graphics y Amplify Impostors.
+Las fases posteriores deben añadir validación de vertex streams, HDRP, HTrace, SRP Batcher, Entities Graphics y Amplify Impostors.
