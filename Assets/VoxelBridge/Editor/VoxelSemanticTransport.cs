@@ -37,17 +37,19 @@ namespace LocalModels.VoxelBridge
         public int VoxVersion { get; }
         public Color32[] Palette { get; }
         public byte[] UsedSlots { get; }
+        public int[] SlotUsageCounts { get; }
         public bool HasUnsupportedIndexMap { get; }
 
         private VoxelSemanticVoxDocument(int voxVersion, byte[] mainContent,
             List<RawChunk> children, Color32[] palette, byte[] usedSlots,
-            bool hasIndexMap)
+            int[] slotUsageCounts, bool hasIndexMap)
         {
             VoxVersion = voxVersion;
             this.mainContent = mainContent;
             this.children = children;
             Palette = palette;
             UsedSlots = usedSlots;
+            SlotUsageCounts = slotUsageCounts;
             HasUnsupportedIndexMap = hasIndexMap;
         }
 
@@ -74,6 +76,7 @@ namespace LocalModels.VoxelBridge
 
             var chunks = new List<RawChunk>();
             var usedSlots = new HashSet<byte>();
+            var slotUsageCounts = new int[256];
             var palette = new Color32[256];
             bool hasPalette = false;
             bool hasNotes = false;
@@ -118,6 +121,7 @@ namespace LocalModels.VoxelBridge
                         if (slot == 0)
                             throw new InvalidDataException("XYZI contiene el slot de paleta reservado 0.");
                         usedSlots.Add(slot);
+                        slotUsageCounts[slot] = checked(slotUsageCounts[slot] + 1);
                     }
                 }
                 else if (id == "NOTE")
@@ -150,7 +154,7 @@ namespace LocalModels.VoxelBridge
 
             byte[] orderedSlots = usedSlots.OrderBy(value => value).ToArray();
             return new VoxelSemanticVoxDocument(
-                version, mainContent, chunks, palette, orderedSlots,
+                version, mainContent, chunks, palette, orderedSlots, slotUsageCounts,
                 hasIndexMap);
         }
 
@@ -272,8 +276,26 @@ namespace LocalModels.VoxelBridge
             VoxelColorPalette colorPalette, VoxelSurfacePalette surfacePalette,
             out VoxelSemanticMetadata metadata, out string error)
         {
+            return TryCreateMetadata(slots, colorPalette, surfacePalette, null,
+                out metadata, out error);
+        }
+
+        public static bool TryCreateMetadata(IReadOnlyList<VoxelSemanticSlotMetadata> slots,
+            VoxelColorPalette colorPalette, VoxelSurfacePalette surfacePalette,
+            VoxelColorMappingProfile mappingProfile,
+            out VoxelSemanticMetadata metadata, out string error)
+        {
             metadata = null;
             if (!TryValidateBindings(slots, colorPalette, surfacePalette, out error)) return false;
+            if (mappingProfile != null)
+            {
+                if (!mappingProfile.TryValidate(out error)) return false;
+                if (mappingProfile.ColorPalette != colorPalette)
+                {
+                    error = "El perfil de mapeo utiliza una paleta de colores diferente.";
+                    return false;
+                }
+            }
             string colorPath = AssetDatabase.GetAssetPath(colorPalette);
             string surfacePath = AssetDatabase.GetAssetPath(surfacePalette);
             if (string.IsNullOrEmpty(colorPath) || string.IsNullOrEmpty(surfacePath))
@@ -298,12 +320,19 @@ namespace LocalModels.VoxelBridge
                 .OrderBy(entry => entry.slot)
                 .Select(CloneSlot)
                 .ToArray();
+            string profilePath = mappingProfile == null
+                ? null
+                : AssetDatabase.GetAssetPath(mappingProfile);
             metadata = new VoxelSemanticMetadata
             {
                 formatVersion = 1,
                 colorPaletteGuid = colorGuid,
                 colorPaletteAssetPath = colorPath,
                 colorPaletteHash = colorHash,
+                colorMappingProfileGuid = string.IsNullOrEmpty(profilePath)
+                    ? null
+                    : AssetDatabase.AssetPathToGUID(profilePath),
+                colorMappingProfileAssetPath = profilePath,
                 surfacePaletteGuid = surfaceGuid,
                 surfacePaletteAssetPath = surfacePath,
                 surfacePaletteHash = surfaceHash,
@@ -586,6 +615,15 @@ namespace LocalModels.VoxelBridge
             VoxelColorPalette colorPalette, VoxelSurfacePalette surfacePalette,
             out string message)
         {
+            return TryBind(voxAssetPath, bindings, colorPalette, surfacePalette,
+                null, out message);
+        }
+
+        public static bool TryBind(string voxAssetPath,
+            IReadOnlyList<VoxelSemanticSlotMetadata> bindings,
+            VoxelColorPalette colorPalette, VoxelSurfacePalette surfacePalette,
+            VoxelColorMappingProfile mappingProfile, out string message)
+        {
             message = null;
             if (!VoxelImporterIntegration.TryLoadMetadata(
                     voxAssetPath, out VoxelBridgeMetadata metadata, out message))
@@ -604,7 +642,7 @@ namespace LocalModels.VoxelBridge
                 VoxelSemanticVoxDocument document = VoxelSemanticVoxDocument.Parse(originalVox);
                 if (!CoversUsedSlots(document.UsedSlots, bindings, out message)) return false;
                 if (!VoxelSemanticTransport.TryCreateMetadata(
-                        bindings, colorPalette, surfacePalette,
+                        bindings, colorPalette, surfacePalette, mappingProfile,
                         out VoxelSemanticMetadata semantic, out message))
                     return false;
 

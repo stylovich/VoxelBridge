@@ -78,6 +78,8 @@ namespace LocalModels.VoxelBridge
         public string colorPaletteGuid;
         public string colorPaletteAssetPath;
         public string colorPaletteHash;
+        public string colorMappingProfileGuid;
+        public string colorMappingProfileAssetPath;
         public string surfacePaletteGuid;
         public string surfacePaletteAssetPath;
         public string surfacePaletteHash;

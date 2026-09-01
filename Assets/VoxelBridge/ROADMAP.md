@@ -7,7 +7,7 @@ Voxel Bridge debe producir familias voxel físicamente coherentes y editables, i
 ## Orden de trabajo recomendado
 
 1. Validar la conversión individual y por lotes, los LODs y la ruta opcional de Amplify Impostors.
-2. Implementar las paletas globales de color y superficie, sus LUT y la validación de IDs estables.
+2. Implementar las paletas globales de color y superficie, sus perfiles de selección, sus LUT y la validación de IDs estables.
 3. Incorporar `ColorID` y `SurfaceID` al volumen voxel y al intercambio con MagicaVoxel mediante metadata versionada.
 4. Incorporar los IDs al generador de meshes de producción y adaptar el shader compartido y el horneado de Amplify Impostors al muestreo de ambas paletas.
 5. Implementar la combinación manual de familias voxel para grupos estáticos y espacialmente compactos.

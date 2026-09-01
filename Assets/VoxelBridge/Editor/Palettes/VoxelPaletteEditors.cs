@@ -268,4 +268,28 @@ namespace LocalModels.VoxelBridge
                 MessageType.None);
         }
     }
+
+    [CustomEditor(typeof(VoxelColorMappingProfile))]
+    internal sealed class VoxelColorMappingProfileEditor : UnityEditor.Editor
+    {
+        public override void OnInspectorGUI()
+        {
+            EditorGUILayout.HelpBox(
+                "El perfil limita los ColorIDs candidatos durante la vinculación de un .vox. " +
+                "Los rangos son inclusivos y los IDs adicionales permiten combinar una base con acentos.",
+                MessageType.Info);
+            DrawDefaultInspector();
+
+            var profile = (VoxelColorMappingProfile)target;
+            if (!profile.TryGetAllowedColors(out VoxelColorDefinition[] colors, out string error))
+            {
+                EditorGUILayout.HelpBox(error, MessageType.Error);
+                return;
+            }
+
+            EditorGUILayout.HelpBox(
+                $"El perfil permite {colors.Length} ColorID activo(s). La distancia se calcula en OKLab; " +
+                "los valores sobre el máximo no se asignan automáticamente.", MessageType.Info);
+        }
+    }
 }

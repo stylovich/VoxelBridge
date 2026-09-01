@@ -21,7 +21,13 @@ Las LUT son assets generados. La edición debe realizarse en los ScriptableObjec
 
 `Tools > Voxel Bridge > Vincular IDs semánticos` abre la tabla de slots utilizados por un `.vox` generado por Voxel Bridge. La misma acción está disponible en el menú contextual del archivo.
 
-Cada fila requiere un `ColorID` y un `SurfaceID`. Los colores que coinciden exactamente con una entrada global se preseleccionan; los demás permanecen sin asignar para evitar conversiones implícitas. Al guardar, la herramienta actualiza el RGBA del slot y escribe metadata semántica versionada en el sidecar `.voxelbridge.json`.
+Cada fila requiere un `ColorID` y un `SurfaceID`. La ventana muestra el color original, el color global asignado, la distancia perceptual y la cantidad de voxels que utiliza el slot. Los colores que coinciden exactamente con una entrada global se preseleccionan; los demás permanecen sin asignar cuando no existe un perfil de mapeo.
+
+Un `VoxelColorMappingProfile` limita los candidatos mediante rangos inclusivos de ColorID e IDs adicionales. La asignación automática elige el candidato más cercano en OKLab y deja sin asignar las coincidencias que superan la distancia máxima del perfil. Los valores por encima del umbral de advertencia permanecen visibles para su revisión. El perfil no añade ni modifica entradas de la paleta global.
+
+Los perfiles se crean desde `Create > Voxel Bridge > Perfil de mapeo de color` o desde la propia ventana de vinculación. Un perfil puede representar una selección completa, una gama temática o una gama base con colores de acento. Las asignaciones existentes se conservan al aplicar otro perfil; cualquier excepción puede elegirse manualmente desde la lista global.
+
+Al guardar, la herramienta actualiza el RGBA del slot y escribe metadata semántica versionada en el sidecar `.voxelbridge.json`. El GUID y la ruta del perfil quedan registrados como receta de autoría. Los LODs semánticos reducidos desde ese volumen heredan la misma referencia.
 
 El sidecar conserva las referencias por GUID y ruta a ambas paletas, sus huellas de contenido, la tabla local y una copia RGBA de cada slot. La lectura se detiene ante IDs inexistentes, slots usados sin correspondencia, cambios de RGBA, hashes de tabla inválidos o remapeos `IMAP` no compatibles.
 

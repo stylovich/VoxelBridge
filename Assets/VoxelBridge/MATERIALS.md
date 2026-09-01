@@ -80,7 +80,21 @@ La ventana muestra únicamente los slots utilizados por `XYZI`. Cada slot debe t
 - un `SurfaceID` global;
 - el RGBA que representa ese `ColorID` en la paleta local del `.vox`.
 
-Una coincidencia RGBA exacta permite preseleccionar el `ColorID`. Las entradas sin coincidencia permanecen sin asignar. La vinculación modifica la paleta RGBA del `.vox` y su sidecar, por lo que ambos archivos deben versionarse juntos.
+Una coincidencia RGBA exacta permite preseleccionar el `ColorID`. Las entradas sin coincidencia permanecen sin asignar cuando no se utiliza un perfil de mapeo. La vinculación modifica la paleta RGBA del `.vox` y su sidecar, por lo que ambos archivos deben versionarse juntos.
+
+### Perfiles de mapeo de color
+
+`VoxelColorMappingProfile` define un subconjunto de la paleta global mediante rangos inclusivos de ColorID e IDs adicionales. Los rangos pueden cubrir bandas organizadas de la paleta, mientras que los IDs adicionales permiten incorporar acentos sin duplicar colores ni crear otra LUT.
+
+La herramienta convierte los colores sRGB a OKLab y selecciona el ColorID permitido con menor distancia perceptual. Los empates se resuelven por el ID estable menor. Cada perfil define:
+
+- el umbral a partir del cual una coincidencia requiere revisión;
+- la distancia máxima permitida para una asignación automática;
+- los ColorIDs disponibles para el modelo.
+
+Una coincidencia que supera la distancia máxima permanece sin asignar y requiere una elección manual o una ampliación explícita de la paleta. Aplicar un perfil sólo completa slots sin ColorID; no sobrescribe vinculaciones existentes. La paleta global nunca incorpora colores como efecto lateral de una importación.
+
+Los perfiles son recursos de autoría y no generan materiales o LUT adicionales en runtime. Todos los perfiles resuelven IDs pertenecientes a `VoxelColorPalette.asset`. El sidecar conserva el GUID y la ruta del perfil utilizado para que la edición posterior recupere la misma receta, mientras la tabla `slot -> ColorID + SurfaceID` continúa siendo la autoridad del volumen.
 
 El sidecar semántico utiliza `VoxelBridgeMetadata` versión 4 y un bloque semántico versión 1. Contiene:
 
@@ -88,6 +102,7 @@ El sidecar semántico utiliza `VoxelBridgeMetadata` versión 4 y un bloque semá
 - huellas de contenido de ambas paletas;
 - tabla `slot -> ColorID + SurfaceID + RGBA`;
 - huella canónica de la tabla local.
+- referencia opcional al perfil de mapeo de color utilizado durante la autoría.
 
 El GUID es la referencia principal y permite mover la paleta dentro del proyecto. Un cambio de huella global produce una advertencia porque ajustar un perfil PBR sin cambiar su ID es válido. Un cambio de la tabla local o del RGBA utilizado produce un error.
 

@@ -856,6 +856,10 @@ namespace LocalModels.VoxelBridge
                         quantized.SemanticSlots, colorPalette, surfacePalette,
                         out semantic, out string semanticError))
                     throw new InvalidDataException(semanticError);
+                semantic.colorMappingProfileGuid =
+                    semanticSource.semantic.colorMappingProfileGuid;
+                semantic.colorMappingProfileAssetPath =
+                    semanticSource.semantic.colorMappingProfileAssetPath;
             }
             else
             {
