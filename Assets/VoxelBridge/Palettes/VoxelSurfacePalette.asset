@@ -1,0 +1,131 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1a4ae63f5bb6de94cbbeae83a35c181f, type: 3}
+  m_Name: VoxelSurfacePalette
+  m_EditorClassIdentifier: VoxelBridge.Editor::LocalModels.VoxelBridge.VoxelSurfacePalette
+  dataVersion: 1
+  entries:
+  - id: 0
+    displayName: Default
+    renderClass: 0
+    metallic: 0
+    smoothness: 0.35
+    emission: 0
+    occlusionMultiplier: 1
+  - id: 1
+    displayName: Concrete
+    renderClass: 0
+    metallic: 0
+    smoothness: 0.15
+    emission: 0
+    occlusionMultiplier: 0.9
+  - id: 2
+    displayName: Fabric
+    renderClass: 0
+    metallic: 0
+    smoothness: 0.1
+    emission: 0
+    occlusionMultiplier: 0.95
+  - id: 3
+    displayName: Plastic Matte
+    renderClass: 0
+    metallic: 0
+    smoothness: 0.28
+    emission: 0
+    occlusionMultiplier: 1
+  - id: 4
+    displayName: Plastic Glossy
+    renderClass: 0
+    metallic: 0
+    smoothness: 0.78
+    emission: 0
+    occlusionMultiplier: 1
+  - id: 5
+    displayName: Painted Metal
+    renderClass: 0
+    metallic: 0
+    smoothness: 0.58
+    emission: 0
+    occlusionMultiplier: 1
+  - id: 6
+    displayName: Steel
+    renderClass: 0
+    metallic: 1
+    smoothness: 0.66
+    emission: 0
+    occlusionMultiplier: 1
+  - id: 7
+    displayName: Aluminum
+    renderClass: 0
+    metallic: 1
+    smoothness: 0.46
+    emission: 0
+    occlusionMultiplier: 1
+  - id: 8
+    displayName: Rubber
+    renderClass: 0
+    metallic: 0
+    smoothness: 0.05
+    emission: 0
+    occlusionMultiplier: 0.98
+  - id: 9
+    displayName: Wood
+    renderClass: 0
+    metallic: 0
+    smoothness: 0.24
+    emission: 0
+    occlusionMultiplier: 0.95
+  - id: 10
+    displayName: Ceramic
+    renderClass: 0
+    metallic: 0
+    smoothness: 0.82
+    emission: 0
+    occlusionMultiplier: 1
+  - id: 11
+    displayName: Screen
+    renderClass: 0
+    metallic: 0
+    smoothness: 0.62
+    emission: 0.2
+    occlusionMultiplier: 1
+  - id: 12
+    displayName: LED
+    renderClass: 0
+    metallic: 0
+    smoothness: 0.68
+    emission: 0.6
+    occlusionMultiplier: 1
+  - id: 13
+    displayName: Neon
+    renderClass: 0
+    metallic: 0
+    smoothness: 0.45
+    emission: 1
+    occlusionMultiplier: 1
+  - id: 14
+    displayName: Rough Metal
+    renderClass: 0
+    metallic: 1
+    smoothness: 0.24
+    emission: 0
+    occlusionMultiplier: 0.95
+  - id: 15
+    displayName: Polished Metal
+    renderClass: 0
+    metallic: 1
+    smoothness: 0.92
+    emission: 0
+    occlusionMultiplier: 1
+  retiredIds: 
+  generatedLut: {fileID: 2800000, guid: af14a4934a593ec4bb81002b0900af49, type: 2}
+  generatedContentHash: c2c08b77d84dae13f01dd0a1faca1d2e

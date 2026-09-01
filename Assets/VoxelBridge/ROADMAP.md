@@ -73,7 +73,7 @@ El sistema debe separar el color visible de las propiedades físicas de la super
 - Cada paleta genera una LUT fija de `256 x 1`. La anchura no depende de la cantidad de entradas utilizadas.
 - La LUT de color utiliza sRGB, filtrado Point, Clamp y no genera mipmaps.
 - La LUT de superficies utiliza datos lineales RGBA32, filtrado Point, Clamp, sin mipmaps y sin compresión con pérdida.
-- La LUT de superficies almacena inicialmente `Metallic`, `Smoothness`, emisión relativa y oclusión ambiental en RGBA.
+- La LUT de superficies almacena inicialmente `Metallic`, `Smoothness`, emisión relativa y multiplicador de oclusión en RGBA.
 
 La fuente de verdad son los ScriptableObjects. Las texturas generadas no se editan manualmente. La herramienta debe detectar IDs duplicados o fuera de rango, referencias inexistentes y LUT desactualizadas.
 
@@ -141,7 +141,7 @@ El shader HDRP compartido muestrea ambas LUT y aplica la emisión como `BaseColo
 
 La validación debe cubrir HDRP, SRP Batcher, HTrace con Recursive Rendering y DOTS Instancing. No se utilizan `MaterialPropertyBlock` para seleccionar colores o superficies por renderer; los IDs pertenecen al vertex stream.
 
-El shader de horneado de Amplify Impostors debe leer las mismas LUT y los mismos canales del mesh. El atlas debe reproducir Base Color, Metallic, Smoothness, AO y emisión. Los materiales definitivos se validan antes de producir atlas finales de impostores.
+El shader de horneado de Amplify Impostors debe leer las mismas LUT y los mismos canales del mesh. El atlas debe reproducir Base Color, Metallic, Smoothness, oclusión y emisión. Los materiales definitivos se validan antes de producir atlas finales de impostores.
 
 ### Validación mínima
 

@@ -4,6 +4,19 @@ Herramienta de Editor para convertir mallas de Unity a `.vox`, mantener una esca
 
 La planificación de combinación de modelos, materiales compartidos, integración DOTS, análisis espacial e impostores definitivos se describe en [ROADMAP.md](ROADMAP.md).
 
+La configuración de las paletas globales de color y superficie se describe en [MATERIALS.md](MATERIALS.md). Esta infraestructura define IDs estables y genera las LUT que utilizará el material compartido. La incorporación de esos IDs al volumen voxel, al intercambio con MagicaVoxel y a los meshes se realizará en las siguientes fases de la hoja de ruta.
+
+## Paletas globales
+
+`Tools > Voxel Bridge > Paletas globales` crea o abre las paletas canónicas y permite regenerar sus LUT. Los assets se almacenan en `Assets/VoxelBridge/Palettes`.
+
+- `ColorID` selecciona exclusivamente el color base.
+- `SurfaceID` selecciona un perfil PBR compartido, por ejemplo aluminio, hormigón o plástico.
+- Los IDs pertenecen al asset y no a la posición visible de una entrada. Reordenar o renombrar una entrada conserva su identidad.
+- Eliminar una entrada retira su ID para impedir que un mesh existente cambie de significado de forma silenciosa.
+
+Las LUT son assets generados. La edición debe realizarse en los ScriptableObjects y finalizar con `Regenerar LUT`.
+
 ## Flujo recomendado: perfil físico + LODs
 
 1. Abre `Tools > Voxel Bridge > Modelos físicos y LODs`.
