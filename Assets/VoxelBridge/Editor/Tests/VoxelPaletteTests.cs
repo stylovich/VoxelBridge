@@ -1,3 +1,4 @@
+using System.Linq;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
@@ -14,6 +15,8 @@ namespace LocalModels.VoxelBridge.Tests
             try
             {
                 Assert.That(colors.TryValidate(out string colorError), Is.True, colorError);
+                Assert.That(colors.Entries, Has.Count.EqualTo(
+                    VoxelRecommendedColorLibrary.ActiveEntryCount));
                 Assert.That(surfaces.TryValidate(out string surfaceError), Is.True, surfaceError);
                 Assert.That(surfaces.TryGetSurface(7, out VoxelSurfaceDefinition aluminum), Is.True);
                 Assert.That(aluminum.DisplayName, Is.EqualTo("Aluminum"));
@@ -24,6 +27,41 @@ namespace LocalModels.VoxelBridge.Tests
             {
                 Object.DestroyImmediate(colors);
                 Object.DestroyImmediate(surfaces);
+            }
+        }
+
+        [Test]
+        public void RecommendedMasterPaletteUsesStableBandsAndReservesTail()
+        {
+            VoxelColorPalette palette = ScriptableObject.CreateInstance<VoxelColorPalette>();
+            try
+            {
+                CollectionAssert.AreEqual(
+                    Enumerable.Range(0, VoxelRecommendedColorLibrary.ActiveEntryCount),
+                    palette.Entries.Select(entry => entry.Id));
+                Assert.That(palette.Entries.Select(entry => (Color32)entry.Color).Distinct().Count(),
+                    Is.EqualTo(VoxelRecommendedColorLibrary.ActiveEntryCount),
+                    "La biblioteca recomendada no debe contener colores RGBA duplicados.");
+                Assert.That(palette.Entries.Single(entry => entry.Id == 1).DisplayName,
+                    Does.StartWith("Neutral"));
+                Assert.That(palette.Entries.Single(entry => entry.Id == 32).DisplayName,
+                    Does.StartWith("Red"));
+                Assert.That(palette.Entries.Single(entry => entry.Id == 64).DisplayName,
+                    Does.StartWith("Lime"));
+                Assert.That(palette.Entries.Single(entry => entry.Id == 96).DisplayName,
+                    Does.StartWith("Azure"));
+                Assert.That(palette.Entries.Single(entry => entry.Id == 128).DisplayName,
+                    Does.StartWith("Clay"));
+                Assert.That(palette.Entries.Single(entry => entry.Id == 160).DisplayName,
+                    Does.StartWith("Pastel Red"));
+                Assert.That(palette.Entries.Single(entry => entry.Id == 192).DisplayName,
+                    Does.StartWith("Bright Red"));
+                Assert.That(palette.TryGetColor(
+                    VoxelRecommendedColorLibrary.FirstReservedId, out _), Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(palette);
             }
         }
 
@@ -88,7 +126,7 @@ namespace LocalModels.VoxelBridge.Tests
             VoxelSurfacePalette surfaces = ScriptableObject.CreateInstance<VoxelSurfacePalette>();
             try
             {
-                Assert.That(colors.TryGetColor(99, out _), Is.False);
+                Assert.That(colors.TryGetColor(250, out _), Is.False);
                 Assert.That(surfaces.TryGetSurface(99, out _), Is.False);
             }
             finally
@@ -172,6 +210,8 @@ namespace LocalModels.VoxelBridge.Tests
             VoxelColorPalette palette = ScriptableObject.CreateInstance<VoxelColorPalette>();
             try
             {
+                palette.MutableEntries.Clear();
+                palette.MutableEntries.Add(new VoxelColorDefinition(0, "Default", Color.white));
                 Assert.That(palette.TryAddEntry(out int firstId, out string addError), Is.True, addError);
                 Assert.That(firstId, Is.EqualTo(1));
                 Assert.That(palette.TryRemoveEntryAt(1, out string removeError), Is.True, removeError);

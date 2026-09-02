@@ -10,6 +10,30 @@ namespace LocalModels.VoxelBridge.Tests
     public sealed class VoxelColorMappingTests
     {
         [Test]
+        public void RecommendedProfileAssetsReferenceTheCanonicalMasterPalette()
+        {
+            VoxelColorPalette palette = AssetDatabase.LoadAssetAtPath<VoxelColorPalette>(
+                VoxelPaletteAssetUtility.ColorPalettePath);
+            Assert.That(palette, Is.Not.Null);
+            Assert.That(VoxelRecommendedColorProfiles.AssetPaths.Count, Is.EqualTo(6));
+
+            int index = 0;
+            foreach (string path in VoxelRecommendedColorProfiles.AssetPaths)
+            {
+                VoxelColorMappingProfile profile =
+                    AssetDatabase.LoadAssetAtPath<VoxelColorMappingProfile>(path);
+                Assert.That(profile, Is.Not.Null, path);
+                Assert.That(profile.ColorPalette, Is.SameAs(palette), path);
+                Assert.That(profile.TryGetAllowedColors(
+                    out VoxelColorDefinition[] colors, out string error), Is.True, error);
+                Assert.That(colors, Is.Not.Empty, path);
+                if (index++ == 0)
+                    Assert.That(colors, Has.Length.EqualTo(
+                        VoxelRecommendedColorLibrary.ActiveEntryCount));
+            }
+        }
+
+        [Test]
         public void ProfileResolvesActiveIdsFromRangesAndExplicitAccents()
         {
             VoxelColorPalette palette = CreatePalette(

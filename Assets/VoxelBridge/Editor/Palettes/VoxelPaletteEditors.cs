@@ -41,13 +41,15 @@ namespace LocalModels.VoxelBridge
             DrawValidationAndLut(palette);
 
             EditorGUILayout.Space(6f);
-            if (GUILayout.Button("Restaurar paleta de color predeterminada") &&
+            if (GUILayout.Button("Restaurar biblioteca maestra recomendada") &&
                 EditorUtility.DisplayDialog(
-                    "Restaurar paleta", "Se reemplazarán todas las entradas y los IDs retirados.",
+                    "Restaurar biblioteca maestra",
+                    "Se reemplazarán todas las entradas de color y los IDs retirados. " +
+                    "Los perfiles se restauran desde la ventana de paletas globales.",
                     "Restaurar", "Cancelar"))
             {
-                Undo.RecordObject(palette, "Restaurar paleta de colores voxel");
-                palette.ResetToDefault();
+                Undo.RecordObject(palette, "Restaurar biblioteca de colores voxel");
+                palette.ResetToRecommended();
                 EditorUtility.SetDirty(palette);
                 serializedObject.Update();
             }

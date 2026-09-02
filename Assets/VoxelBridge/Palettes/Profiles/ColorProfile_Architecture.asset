@@ -1,0 +1,23 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c8ff6a148cf72254d9345e2fad36c664, type: 3}
+  m_Name: ColorProfile_Architecture
+  m_EditorClassIdentifier: VoxelBridge.Editor::LocalModels.VoxelBridge.VoxelColorMappingProfile
+  colorPalette: {fileID: 11400000, guid: 73df9e12f63f7c047aa4fa5b13dce18b, type: 2}
+  description: "Biblioteca no emisiva amplia con una selecci\xF3n reducida de acentos
+    intensos. Recomendado para edificios, interiores y estructuras de fondo."
+  allowedRanges:
+  - firstId: 0
+    lastId: 191
+  additionalColorIds: c3000000c7000000cb000000cf000000d3000000d7000000db000000df000000
+  warningDistance: 8
+  maximumAutomaticDistance: 20

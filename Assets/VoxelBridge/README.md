@@ -17,6 +17,18 @@ La configuración de las paletas globales de color y superficie se describe en [
 
 Las LUT son assets generados. La edición debe realizarse en los ScriptableObjects y finalizar con `Regenerar LUT`.
 
+`Instalar biblioteca y perfiles de color recomendados` crea una base de 224 colores globales y reserva los IDs `224–255`. La biblioteca se distribuye en bandas estables:
+
+- `0–31`: valor predeterminado, neutros y grises cálidos o fríos;
+- `32–63`: rojos, naranjas y amarillos;
+- `64–95`: verdes, turquesas y cianes;
+- `96–127`: azules, índigos y violetas;
+- `128–159`: arcilla, marrones, ocres y oliva;
+- `160–191`: colores pastel y desaturados;
+- `192–223`: acentos intensos para señalización, pantallas y neón.
+
+La instalación conserva el GUID de la paleta y de la LUT canónicas. También crea los perfiles `All`, `UrbanIndustrial`, `Architecture`, `Vehicles`, `Nature` y `MutedNeon` en `Assets/VoxelBridge/Palettes/Profiles`. Restaurar la biblioteca o los perfiles requiere una acción explícita y reemplaza sus valores editables.
+
 ## IDs semánticos en archivos `.vox`
 
 `Tools > Voxel Bridge > Vincular IDs semánticos` abre la tabla de slots utilizados por un `.vox` generado por Voxel Bridge. La misma acción está disponible en el menú contextual del archivo.

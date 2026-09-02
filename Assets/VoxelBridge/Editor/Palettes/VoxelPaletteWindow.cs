@@ -1,3 +1,4 @@
+using System.Linq;
 using UnityEditor;
 using UnityEngine;
 
@@ -41,6 +42,8 @@ namespace LocalModels.VoxelBridge
                 if (GUILayout.Button("Regenerar ambas LUT"))
                     RebuildBoth();
             }
+            if (GUILayout.Button("Instalar biblioteca y perfiles de color recomendados"))
+                InstallRecommendedColorLibrary();
 
             EditorGUILayout.Space(10f);
             DrawColorSection();
@@ -62,6 +65,9 @@ namespace LocalModels.VoxelBridge
 
             DrawStatus(colorPalette.TryValidate(out string error), error,
                 VoxelPaletteLutGenerator.IsCurrent(colorPalette));
+            EditorGUILayout.HelpBox(
+                "La biblioteca recomendada utiliza ColorID 0–223 y reserva 224–255. " +
+                "Los perfiles seleccionan subconjuntos de esta misma paleta.", MessageType.None);
             using (new EditorGUILayout.HorizontalScope())
             {
                 if (GUILayout.Button("Seleccionar paleta")) Select(colorPalette);
@@ -118,6 +124,26 @@ namespace LocalModels.VoxelBridge
             Repaint();
         }
 
+        private void InstallRecommendedColorLibrary()
+        {
+            if (!EditorUtility.DisplayDialog(
+                    "Instalar biblioteca recomendada",
+                    "Se reemplazará la paleta global de colores y se crearán o restaurarán los " +
+                    "perfiles recomendados. Los GUID de assets existentes se conservarán.",
+                    "Instalar", "Cancelar"))
+                return;
+
+            if (!VoxelPaletteAssetUtility.TryInstallRecommendedColorLibrary(
+                    out colorPalette, out VoxelColorMappingProfile[] profiles, out string error))
+            {
+                EditorUtility.DisplayDialog("Voxel Bridge", error, "Cerrar");
+                return;
+            }
+            Selection.objects = new UnityEngine.Object[] { colorPalette }
+                .Concat(profiles).ToArray();
+            Repaint();
+        }
+
         private void RebuildBoth()
         {
             if (colorPalette == null || surfacePalette == null)
@@ -169,7 +195,7 @@ namespace LocalModels.VoxelBridge
         }
     }
 
-    internal static class VoxelPaletteAssetUtility
+    public static class VoxelPaletteAssetUtility
     {
         internal const string PaletteFolder = "Assets/VoxelBridge/Palettes";
         internal const string ColorPalettePath = PaletteFolder + "/VoxelColorPalette.asset";
@@ -213,6 +239,35 @@ namespace LocalModels.VoxelBridge
             AssetDatabase.SaveAssets();
             error = null;
             return true;
+        }
+
+        internal static bool TryInstallRecommendedColorLibrary(
+            out VoxelColorPalette colorPalette,
+            out VoxelColorMappingProfile[] profiles, out string error)
+        {
+            profiles = null;
+            if (!TryEnsureCanonicalAssets(
+                    out colorPalette, out _, out error))
+                return false;
+
+            Undo.RecordObject(colorPalette, "Instalar biblioteca de colores recomendada");
+            colorPalette.ResetToRecommended();
+            EditorUtility.SetDirty(colorPalette);
+            if (!VoxelRecommendedColorProfiles.TryCreateOrResetAssets(
+                    colorPalette, replaceExisting: true, out profiles, out error))
+                return false;
+            if (!VoxelPaletteLutGenerator.TryRebuild(colorPalette, out _, out error))
+                return false;
+            AssetDatabase.SaveAssets();
+            return true;
+        }
+
+        public static void ApplyRecommendedColorLibrary()
+        {
+            if (!TryInstallRecommendedColorLibrary(
+                    out _, out VoxelColorMappingProfile[] profiles, out string error))
+                throw new System.InvalidOperationException(error);
+            Debug.Log($"Voxel Bridge instaló la biblioteca maestra y {profiles.Length} perfiles de color.");
         }
     }
 }

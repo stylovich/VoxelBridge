@@ -168,6 +168,21 @@ namespace LocalModels.VoxelBridge
             warningDistance = warning;
             maximumAutomaticDistance = maximum;
         }
+
+        internal void ConfigureRecommended(VoxelColorPalette palette, string profileDescription,
+            IEnumerable<VoxelColorIdRange> ranges, IEnumerable<int> additionalIds,
+            float warning = 8f, float maximum = 20f)
+        {
+            colorPalette = palette;
+            description = profileDescription;
+            allowedRanges = ranges?.Select(range =>
+                    new VoxelColorIdRange(range.FirstId, range.LastId)).ToList() ??
+                new List<VoxelColorIdRange>();
+            additionalColorIds = additionalIds?.Distinct().OrderBy(id => id).ToList() ??
+                new List<int>();
+            warningDistance = warning;
+            maximumAutomaticDistance = maximum;
+        }
     }
 
     internal readonly struct VoxelColorMatch

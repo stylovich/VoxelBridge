@@ -96,6 +96,32 @@ Una coincidencia que supera la distancia máxima permanece sin asignar y requier
 
 Los perfiles son recursos de autoría y no generan materiales o LUT adicionales en runtime. Todos los perfiles resuelven IDs pertenecientes a `VoxelColorPalette.asset`. El sidecar conserva el GUID y la ruta del perfil utilizado para que la edición posterior recupere la misma receta, mientras la tabla `slot -> ColorID + SurfaceID` continúa siendo la autoridad del volumen.
 
+### Biblioteca maestra recomendada
+
+La biblioteca inicial utiliza 224 entradas y reserva los últimos 32 IDs para ampliaciones controladas. Sus bandas son:
+
+| ColorID | Contenido |
+|---|---|
+| `0–31` | Predeterminado, neutros y grises cálidos o fríos |
+| `32–63` | Rojos, naranjas y amarillos |
+| `64–95` | Verdes, turquesas y cianes |
+| `96–127` | Azules, índigos y violetas |
+| `128–159` | Arcilla, marrones, ocres y oliva |
+| `160–191` | Pasteles y tonos desaturados |
+| `192–223` | Acentos intensos para señalización, pantallas y neón |
+| `224–255` | Reserva sin entradas activas |
+
+Los perfiles recomendados seleccionan estos rangos sin duplicar los colores:
+
+- `All`: todos los IDs activos;
+- `UrbanIndustrial`: neutros, tierras, pasteles controlados y acentos de seguridad;
+- `Architecture`: biblioteca no emisiva amplia y acentos intensos limitados;
+- `Vehicles`: colores de pintura y señalización sin la banda pastel;
+- `Nature`: neutros, verdes, cianes, azules, tierras y pasteles naturales;
+- `MutedNeon`: base neutra u orgánica con la banda completa de acentos intensos.
+
+La banda intensa sólo define el color. La emisión continúa dependiendo del `SurfaceID`, por lo que un mismo acento puede utilizarse como pintura opaca, plástico o neón sin cambiar su `ColorID`.
+
 El sidecar semántico utiliza `VoxelBridgeMetadata` versión 4 y un bloque semántico versión 1. Contiene:
 
 - GUID y ruta de las paletas globales;

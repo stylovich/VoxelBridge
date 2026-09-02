@@ -1,0 +1,26 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c8ff6a148cf72254d9345e2fad36c664, type: 3}
+  m_Name: ColorProfile_Vehicles
+  m_EditorClassIdentifier: VoxelBridge.Editor::LocalModels.VoxelBridge.VoxelColorMappingProfile
+  colorPalette: {fileID: 11400000, guid: 73df9e12f63f7c047aa4fa5b13dce18b, type: 2}
+  description: "Colores de pintura, se\xF1alizaci\xF3n, metales neutros y acentos
+    intensos. Excluye la banda pastel para conservar siluetas y piezas mec\xE1nicas
+    bien diferenciadas."
+  allowedRanges:
+  - firstId: 0
+    lastId: 159
+  - firstId: 192
+    lastId: 223
+  additionalColorIds:
+  warningDistance: 8
+  maximumAutomaticDistance: 20

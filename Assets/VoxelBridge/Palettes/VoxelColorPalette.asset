@@ -17,6 +17,675 @@ MonoBehaviour:
   - id: 0
     displayName: Default
     color: {r: 1, g: 1, b: 1, a: 1}
+  - id: 1
+    displayName: Neutral 01
+    color: {r: 0.05882353, g: 0.05882353, b: 0.05882353, a: 1}
+  - id: 2
+    displayName: Neutral 02
+    color: {r: 0.14901961, g: 0.14901961, b: 0.14901961, a: 1}
+  - id: 3
+    displayName: Neutral 03
+    color: {r: 0.23529412, g: 0.23529412, b: 0.23529412, a: 1}
+  - id: 4
+    displayName: Neutral 04
+    color: {r: 0.3254902, g: 0.3254902, b: 0.3254902, a: 1}
+  - id: 5
+    displayName: Neutral 05
+    color: {r: 0.4117647, g: 0.4117647, b: 0.4117647, a: 1}
+  - id: 6
+    displayName: Neutral 06
+    color: {r: 0.5019608, g: 0.5019608, b: 0.5019608, a: 1}
+  - id: 7
+    displayName: Neutral 07
+    color: {r: 0.5882353, g: 0.5882353, b: 0.5882353, a: 1}
+  - id: 8
+    displayName: Neutral 08
+    color: {r: 0.6745098, g: 0.6745098, b: 0.6745098, a: 1}
+  - id: 9
+    displayName: Neutral 09
+    color: {r: 0.7647059, g: 0.7647059, b: 0.7647059, a: 1}
+  - id: 10
+    displayName: Neutral 10
+    color: {r: 0.8509804, g: 0.8509804, b: 0.8509804, a: 1}
+  - id: 11
+    displayName: Neutral 11
+    color: {r: 0.9411765, g: 0.9411765, b: 0.9411765, a: 1}
+  - id: 12
+    displayName: Warm Gray 01
+    color: {r: 0.12156863, g: 0.11372549, b: 0.105882354, a: 1}
+  - id: 13
+    displayName: Warm Gray 02
+    color: {r: 0.20392157, g: 0.19215687, b: 0.18039216, a: 1}
+  - id: 14
+    displayName: Warm Gray 03
+    color: {r: 0.2901961, g: 0.27058825, b: 0.25490198, a: 1}
+  - id: 15
+    displayName: Warm Gray 04
+    color: {r: 0.37254903, g: 0.34901962, b: 0.32941177, a: 1}
+  - id: 16
+    displayName: Warm Gray 05
+    color: {r: 0.45882353, g: 0.42745098, b: 0.40392157, a: 1}
+  - id: 17
+    displayName: Warm Gray 06
+    color: {r: 0.5411765, g: 0.50980395, b: 0.47843137, a: 1}
+  - id: 18
+    displayName: Warm Gray 07
+    color: {r: 0.627451, g: 0.5882353, b: 0.5529412, a: 1}
+  - id: 19
+    displayName: Warm Gray 08
+    color: {r: 0.70980394, g: 0.6666667, b: 0.627451, a: 1}
+  - id: 20
+    displayName: Warm Gray 09
+    color: {r: 0.79607844, g: 0.74509805, b: 0.7019608, a: 1}
+  - id: 21
+    displayName: Warm Gray 10
+    color: {r: 0.8784314, g: 0.8235294, b: 0.77254903, a: 1}
+  - id: 22
+    displayName: Cool Gray 01
+    color: {r: 0.105882354, g: 0.11372549, b: 0.12156863, a: 1}
+  - id: 23
+    displayName: Cool Gray 02
+    color: {r: 0.18039216, g: 0.19215687, b: 0.20392157, a: 1}
+  - id: 24
+    displayName: Cool Gray 03
+    color: {r: 0.25490198, g: 0.27058825, b: 0.2901961, a: 1}
+  - id: 25
+    displayName: Cool Gray 04
+    color: {r: 0.32941177, g: 0.3529412, b: 0.37254903, a: 1}
+  - id: 26
+    displayName: Cool Gray 05
+    color: {r: 0.40392157, g: 0.43137255, b: 0.45882353, a: 1}
+  - id: 27
+    displayName: Cool Gray 06
+    color: {r: 0.47843137, g: 0.50980395, b: 0.5411765, a: 1}
+  - id: 28
+    displayName: Cool Gray 07
+    color: {r: 0.5529412, g: 0.5921569, b: 0.627451, a: 1}
+  - id: 29
+    displayName: Cool Gray 08
+    color: {r: 0.627451, g: 0.67058825, b: 0.70980394, a: 1}
+  - id: 30
+    displayName: Cool Gray 09
+    color: {r: 0.7019608, g: 0.7490196, b: 0.79607844, a: 1}
+  - id: 31
+    displayName: Cool Gray 10
+    color: {r: 0.77254903, g: 0.827451, b: 0.8784314, a: 1}
+  - id: 32
+    displayName: Red 01
+    color: {r: 0.21960784, g: 0.03529412, b: 0.03529412, a: 1}
+  - id: 33
+    displayName: Red 02
+    color: {r: 0.3254902, g: 0.05882353, b: 0.05882353, a: 1}
+  - id: 34
+    displayName: Red 03
+    color: {r: 0.43137255, g: 0.09019608, b: 0.09019608, a: 1}
+  - id: 35
+    displayName: Red 04
+    color: {r: 0.5372549, g: 0.1254902, b: 0.1254902, a: 1}
+  - id: 36
+    displayName: Red 05
+    color: {r: 0.6431373, g: 0.16862746, b: 0.16862746, a: 1}
+  - id: 37
+    displayName: Red 06
+    color: {r: 0.7490196, g: 0.21568628, b: 0.21568628, a: 1}
+  - id: 38
+    displayName: Red 07
+    color: {r: 0.85490197, g: 0.26666668, b: 0.26666668, a: 1}
+  - id: 39
+    displayName: Red 08
+    color: {r: 0.9607843, g: 0.3254902, b: 0.3254902, a: 1}
+  - id: 40
+    displayName: Vermilion 01
+    color: {r: 0.21960784, g: 0.07450981, b: 0.03137255, a: 1}
+  - id: 41
+    displayName: Vermilion 02
+    color: {r: 0.3254902, g: 0.11764706, b: 0.05490196, a: 1}
+  - id: 42
+    displayName: Vermilion 03
+    color: {r: 0.43137255, g: 0.16470589, b: 0.08235294, a: 1}
+  - id: 43
+    displayName: Vermilion 04
+    color: {r: 0.5372549, g: 0.21568628, b: 0.11764706, a: 1}
+  - id: 44
+    displayName: Vermilion 05
+    color: {r: 0.6431373, g: 0.27450982, b: 0.15686275, a: 1}
+  - id: 45
+    displayName: Vermilion 06
+    color: {r: 0.7490196, g: 0.33333334, b: 0.2, a: 1}
+  - id: 46
+    displayName: Vermilion 07
+    color: {r: 0.85490197, g: 0.39607844, b: 0.2509804, a: 1}
+  - id: 47
+    displayName: Vermilion 08
+    color: {r: 0.9607843, g: 0.4627451, b: 0.30588236, a: 1}
+  - id: 48
+    displayName: Orange 01
+    color: {r: 0.21960784, g: 0.13333334, b: 0.03529412, a: 1}
+  - id: 49
+    displayName: Orange 02
+    color: {r: 0.3254902, g: 0.20392157, b: 0.0627451, a: 1}
+  - id: 50
+    displayName: Orange 03
+    color: {r: 0.43137255, g: 0.2784314, b: 0.09803922, a: 1}
+  - id: 51
+    displayName: Orange 04
+    color: {r: 0.5372549, g: 0.3529412, b: 0.13725491, a: 1}
+  - id: 52
+    displayName: Orange 05
+    color: {r: 0.6431373, g: 0.43137255, b: 0.18431373, a: 1}
+  - id: 53
+    displayName: Orange 06
+    color: {r: 0.7490196, g: 0.5137255, b: 0.23921569, a: 1}
+  - id: 54
+    displayName: Orange 07
+    color: {r: 0.85490197, g: 0.6, b: 0.29803923, a: 1}
+  - id: 55
+    displayName: Orange 08
+    color: {r: 0.9607843, g: 0.6862745, b: 0.3647059, a: 1}
+  - id: 56
+    displayName: Yellow 01
+    color: {r: 0.23921569, g: 0.21960784, b: 0.050980393, a: 1}
+  - id: 57
+    displayName: Yellow 02
+    color: {r: 0.34509805, g: 0.32156864, b: 0.08627451, a: 1}
+  - id: 58
+    displayName: Yellow 03
+    color: {r: 0.4509804, g: 0.41960785, b: 0.12941177, a: 1}
+  - id: 59
+    displayName: Yellow 04
+    color: {r: 0.5568628, g: 0.5176471, b: 0.18039216, a: 1}
+  - id: 60
+    displayName: Yellow 05
+    color: {r: 0.6627451, g: 0.61960787, b: 0.23529412, a: 1}
+  - id: 61
+    displayName: Yellow 06
+    color: {r: 0.76862746, g: 0.72156864, b: 0.3019608, a: 1}
+  - id: 62
+    displayName: Yellow 07
+    color: {r: 0.8745098, g: 0.8235294, b: 0.37254903, a: 1}
+  - id: 63
+    displayName: Yellow 08
+    color: {r: 0.98039216, g: 0.9254902, b: 0.4509804, a: 1}
+  - id: 64
+    displayName: Lime 01
+    color: {r: 0.13725491, g: 0.2, b: 0.05490196, a: 1}
+  - id: 65
+    displayName: Lime 02
+    color: {r: 0.21176471, g: 0.3019608, b: 0.09411765, a: 1}
+  - id: 66
+    displayName: Lime 03
+    color: {r: 0.28627452, g: 0.40392157, b: 0.13333334, a: 1}
+  - id: 67
+    displayName: Lime 04
+    color: {r: 0.3647059, g: 0.50980395, b: 0.18039216, a: 1}
+  - id: 68
+    displayName: Lime 05
+    color: {r: 0.44705883, g: 0.6117647, b: 0.23529412, a: 1}
+  - id: 69
+    displayName: Lime 06
+    color: {r: 0.5294118, g: 0.7137255, b: 0.2901961, a: 1}
+  - id: 70
+    displayName: Lime 07
+    color: {r: 0.6156863, g: 0.8156863, b: 0.3529412, a: 1}
+  - id: 71
+    displayName: Lime 08
+    color: {r: 0.7019608, g: 0.92156863, b: 0.42352942, a: 1}
+  - id: 72
+    displayName: Green 01
+    color: {r: 0.043137256, g: 0.18039216, b: 0.047058824, a: 1}
+  - id: 73
+    displayName: Green 02
+    color: {r: 0.07450981, g: 0.28235295, b: 0.08235294, a: 1}
+  - id: 74
+    displayName: Green 03
+    color: {r: 0.11372549, g: 0.38431373, b: 0.1254902, a: 1}
+  - id: 75
+    displayName: Green 04
+    color: {r: 0.16078432, g: 0.49019608, b: 0.17254902, a: 1}
+  - id: 76
+    displayName: Green 05
+    color: {r: 0.20784314, g: 0.5921569, b: 0.22352941, a: 1}
+  - id: 77
+    displayName: Green 06
+    color: {r: 0.26666668, g: 0.69411767, b: 0.28235295, a: 1}
+  - id: 78
+    displayName: Green 07
+    color: {r: 0.32941177, g: 0.79607844, b: 0.34509805, a: 1}
+  - id: 79
+    displayName: Green 08
+    color: {r: 0.39607844, g: 0.9019608, b: 0.41568628, a: 1}
+  - id: 80
+    displayName: Teal 01
+    color: {r: 0.05490196, g: 0.18039216, b: 0.14117648, a: 1}
+  - id: 81
+    displayName: Teal 02
+    color: {r: 0.09411765, g: 0.28235295, b: 0.22745098, a: 1}
+  - id: 82
+    displayName: Teal 03
+    color: {r: 0.13725491, g: 0.38431373, b: 0.30980393, a: 1}
+  - id: 83
+    displayName: Teal 04
+    color: {r: 0.1882353, g: 0.49019608, b: 0.4, a: 1}
+  - id: 84
+    displayName: Teal 05
+    color: {r: 0.24313726, g: 0.5921569, b: 0.4862745, a: 1}
+  - id: 85
+    displayName: Teal 06
+    color: {r: 0.30588236, g: 0.69411767, b: 0.5764706, a: 1}
+  - id: 86
+    displayName: Teal 07
+    color: {r: 0.3764706, g: 0.79607844, b: 0.67058825, a: 1}
+  - id: 87
+    displayName: Teal 08
+    color: {r: 0.4509804, g: 0.9019608, b: 0.7647059, a: 1}
+  - id: 88
+    displayName: Cyan 01
+    color: {r: 0.05490196, g: 0.18431373, b: 0.2, a: 1}
+  - id: 89
+    displayName: Cyan 02
+    color: {r: 0.09803922, g: 0.28235295, b: 0.30588236, a: 1}
+  - id: 90
+    displayName: Cyan 03
+    color: {r: 0.14509805, g: 0.38039216, b: 0.4117647, a: 1}
+  - id: 91
+    displayName: Cyan 04
+    color: {r: 0.19607843, g: 0.47843137, b: 0.5176471, a: 1}
+  - id: 92
+    displayName: Cyan 05
+    color: {r: 0.25882354, g: 0.5803922, b: 0.62352943, a: 1}
+  - id: 93
+    displayName: Cyan 06
+    color: {r: 0.32941177, g: 0.68235296, b: 0.7294118, a: 1}
+  - id: 94
+    displayName: Cyan 07
+    color: {r: 0.40392157, g: 0.78431374, b: 0.8352941, a: 1}
+  - id: 95
+    displayName: Cyan 08
+    color: {r: 0.49019608, g: 0.8862745, b: 0.9411765, a: 1}
+  - id: 96
+    displayName: Azure 01
+    color: {r: 0.039215688, g: 0.12156863, b: 0.18039216, a: 1}
+  - id: 97
+    displayName: Azure 02
+    color: {r: 0.07450981, g: 0.2, b: 0.2901961, a: 1}
+  - id: 98
+    displayName: Azure 03
+    color: {r: 0.11372549, g: 0.2784314, b: 0.39607844, a: 1}
+  - id: 99
+    displayName: Azure 04
+    color: {r: 0.16470589, g: 0.36078432, b: 0.5058824, a: 1}
+  - id: 100
+    displayName: Azure 05
+    color: {r: 0.21960784, g: 0.44705883, b: 0.6156863, a: 1}
+  - id: 101
+    displayName: Azure 06
+    color: {r: 0.28235295, g: 0.5372549, b: 0.72156864, a: 1}
+  - id: 102
+    displayName: Azure 07
+    color: {r: 0.3529412, g: 0.6313726, b: 0.83137256, a: 1}
+  - id: 103
+    displayName: Azure 08
+    color: {r: 0.43137255, g: 0.7254902, b: 0.9411765, a: 1}
+  - id: 104
+    displayName: Blue 01
+    color: {r: 0.02745098, g: 0.05882353, b: 0.16078432, a: 1}
+  - id: 105
+    displayName: Blue 02
+    color: {r: 0.05882353, g: 0.105882354, b: 0.26666668, a: 1}
+  - id: 106
+    displayName: Blue 03
+    color: {r: 0.09411765, g: 0.15686275, b: 0.3764706, a: 1}
+  - id: 107
+    displayName: Blue 04
+    color: {r: 0.13725491, g: 0.21568628, b: 0.4862745, a: 1}
+  - id: 108
+    displayName: Blue 05
+    color: {r: 0.1882353, g: 0.2784314, b: 0.59607846, a: 1}
+  - id: 109
+    displayName: Blue 06
+    color: {r: 0.24705882, g: 0.34901962, b: 0.7019608, a: 1}
+  - id: 110
+    displayName: Blue 07
+    color: {r: 0.3137255, g: 0.42352942, b: 0.8117647, a: 1}
+  - id: 111
+    displayName: Blue 08
+    color: {r: 0.3882353, g: 0.5019608, b: 0.92156863, a: 1}
+  - id: 112
+    displayName: Indigo 01
+    color: {r: 0.05882353, g: 0.03529412, b: 0.16078432, a: 1}
+  - id: 113
+    displayName: Indigo 02
+    color: {r: 0.105882354, g: 0.06666667, b: 0.26666668, a: 1}
+  - id: 114
+    displayName: Indigo 03
+    color: {r: 0.16078432, g: 0.105882354, b: 0.37254903, a: 1}
+  - id: 115
+    displayName: Indigo 04
+    color: {r: 0.21960784, g: 0.15294118, b: 0.47843137, a: 1}
+  - id: 116
+    displayName: Indigo 05
+    color: {r: 0.28235295, g: 0.20784314, b: 0.58431375, a: 1}
+  - id: 117
+    displayName: Indigo 06
+    color: {r: 0.3529412, g: 0.27058825, b: 0.6901961, a: 1}
+  - id: 118
+    displayName: Indigo 07
+    color: {r: 0.42745098, g: 0.3372549, b: 0.79607844, a: 1}
+  - id: 119
+    displayName: Indigo 08
+    color: {r: 0.50980395, g: 0.41568628, b: 0.9019608, a: 1}
+  - id: 120
+    displayName: Violet 01
+    color: {r: 0.14509805, g: 0.043137256, b: 0.18039216, a: 1}
+  - id: 121
+    displayName: Violet 02
+    color: {r: 0.23137255, g: 0.078431375, b: 0.28627452, a: 1}
+  - id: 122
+    displayName: Violet 03
+    color: {r: 0.32156864, g: 0.12156863, b: 0.39215687, a: 1}
+  - id: 123
+    displayName: Violet 04
+    color: {r: 0.4117647, g: 0.16862746, b: 0.49803922, a: 1}
+  - id: 124
+    displayName: Violet 05
+    color: {r: 0.5058824, g: 0.22745098, b: 0.6039216, a: 1}
+  - id: 125
+    displayName: Violet 06
+    color: {r: 0.6, g: 0.2901961, b: 0.70980394, a: 1}
+  - id: 126
+    displayName: Violet 07
+    color: {r: 0.69803923, g: 0.3647059, b: 0.8156863, a: 1}
+  - id: 127
+    displayName: Violet 08
+    color: {r: 0.79607844, g: 0.44313726, b: 0.92156863, a: 1}
+  - id: 128
+    displayName: Clay 01
+    color: {r: 0.16078432, g: 0.09019608, b: 0.07058824, a: 1}
+  - id: 129
+    displayName: Clay 02
+    color: {r: 0.25882354, g: 0.15294118, b: 0.12156863, a: 1}
+  - id: 130
+    displayName: Clay 03
+    color: {r: 0.3529412, g: 0.21960784, b: 0.1764706, a: 1}
+  - id: 131
+    displayName: Clay 04
+    color: {r: 0.4509804, g: 0.2901961, b: 0.24313726, a: 1}
+  - id: 132
+    displayName: Clay 05
+    color: {r: 0.54901963, g: 0.36862746, b: 0.30980393, a: 1}
+  - id: 133
+    displayName: Clay 06
+    color: {r: 0.64705884, g: 0.44705883, b: 0.38431373, a: 1}
+  - id: 134
+    displayName: Clay 07
+    color: {r: 0.7411765, g: 0.53333336, b: 0.46666667, a: 1}
+  - id: 135
+    displayName: Clay 08
+    color: {r: 0.8392157, g: 0.62352943, b: 0.5529412, a: 1}
+  - id: 136
+    displayName: Brown 01
+    color: {r: 0.12156863, g: 0.078431375, b: 0.043137256, a: 1}
+  - id: 137
+    displayName: Brown 02
+    color: {r: 0.21568628, g: 0.14509805, b: 0.08235294, a: 1}
+  - id: 138
+    displayName: Brown 03
+    color: {r: 0.30980393, g: 0.21568628, b: 0.12941177, a: 1}
+  - id: 139
+    displayName: Brown 04
+    color: {r: 0.40392157, g: 0.2901961, b: 0.18431373, a: 1}
+  - id: 140
+    displayName: Brown 05
+    color: {r: 0.49803922, g: 0.3647059, b: 0.24313726, a: 1}
+  - id: 141
+    displayName: Brown 06
+    color: {r: 0.5921569, g: 0.44313726, b: 0.30588236, a: 1}
+  - id: 142
+    displayName: Brown 07
+    color: {r: 0.6862745, g: 0.5254902, b: 0.3764706, a: 1}
+  - id: 143
+    displayName: Brown 08
+    color: {r: 0.78039217, g: 0.60784316, b: 0.4509804, a: 1}
+  - id: 144
+    displayName: Ochre 01
+    color: {r: 0.16078432, g: 0.13333334, b: 0.07058824, a: 1}
+  - id: 145
+    displayName: Ochre 02
+    color: {r: 0.25882354, g: 0.21960784, b: 0.12156863, a: 1}
+  - id: 146
+    displayName: Ochre 03
+    color: {r: 0.36078432, g: 0.30980393, b: 0.18039216, a: 1}
+  - id: 147
+    displayName: Ochre 04
+    color: {r: 0.45882353, g: 0.4, b: 0.24705882, a: 1}
+  - id: 148
+    displayName: Ochre 05
+    color: {r: 0.56078434, g: 0.49019608, b: 0.31764707, a: 1}
+  - id: 149
+    displayName: Ochre 06
+    color: {r: 0.65882355, g: 0.58431375, b: 0.39215687, a: 1}
+  - id: 150
+    displayName: Ochre 07
+    color: {r: 0.7607843, g: 0.68235296, b: 0.47843137, a: 1}
+  - id: 151
+    displayName: Ochre 08
+    color: {r: 0.85882354, g: 0.7764706, b: 0.5686275, a: 1}
+  - id: 152
+    displayName: Olive 01
+    color: {r: 0.12941177, g: 0.14117648, b: 0.08235294, a: 1}
+  - id: 153
+    displayName: Olive 02
+    color: {r: 0.21176471, g: 0.23137255, b: 0.13725491, a: 1}
+  - id: 154
+    displayName: Olive 03
+    color: {r: 0.29803923, g: 0.32156864, b: 0.2, a: 1}
+  - id: 155
+    displayName: Olive 04
+    color: {r: 0.38431373, g: 0.41568628, b: 0.26666668, a: 1}
+  - id: 156
+    displayName: Olive 05
+    color: {r: 0.47058824, g: 0.5058824, b: 0.33333334, a: 1}
+  - id: 157
+    displayName: Olive 06
+    color: {r: 0.56078434, g: 0.59607846, b: 0.40784314, a: 1}
+  - id: 158
+    displayName: Olive 07
+    color: {r: 0.64705884, g: 0.6901961, b: 0.48235294, a: 1}
+  - id: 159
+    displayName: Olive 08
+    color: {r: 0.7372549, g: 0.78039217, b: 0.56078434, a: 1}
+  - id: 160
+    displayName: Pastel Red 01
+    color: {r: 0.56078434, g: 0.39215687, b: 0.39215687, a: 1}
+  - id: 161
+    displayName: Pastel Red 02
+    color: {r: 0.69411767, g: 0.45490196, b: 0.45490196, a: 1}
+  - id: 162
+    displayName: Pastel Red 03
+    color: {r: 0.827451, g: 0.5019608, b: 0.5019608, a: 1}
+  - id: 163
+    displayName: Pastel Red 04
+    color: {r: 0.9607843, g: 0.5372549, b: 0.5372549, a: 1}
+  - id: 164
+    displayName: Pastel Orange 01
+    color: {r: 0.56078434, g: 0.4745098, b: 0.39215687, a: 1}
+  - id: 165
+    displayName: Pastel Orange 02
+    color: {r: 0.69411767, g: 0.5686275, b: 0.45490196, a: 1}
+  - id: 166
+    displayName: Pastel Orange 03
+    color: {r: 0.827451, g: 0.65882355, b: 0.5019608, a: 1}
+  - id: 167
+    displayName: Pastel Orange 04
+    color: {r: 0.9607843, g: 0.7411765, b: 0.5372549, a: 1}
+  - id: 168
+    displayName: Pastel Yellow 01
+    color: {r: 0.56078434, g: 0.5529412, b: 0.39215687, a: 1}
+  - id: 169
+    displayName: Pastel Yellow 02
+    color: {r: 0.69411767, g: 0.68235296, b: 0.45490196, a: 1}
+  - id: 170
+    displayName: Pastel Yellow 03
+    color: {r: 0.827451, g: 0.8117647, b: 0.5019608, a: 1}
+  - id: 171
+    displayName: Pastel Yellow 04
+    color: {r: 0.9607843, g: 0.9411765, b: 0.5372549, a: 1}
+  - id: 172
+    displayName: Pastel Green 01
+    color: {r: 0.39215687, g: 0.56078434, b: 0.4, a: 1}
+  - id: 173
+    displayName: Pastel Green 02
+    color: {r: 0.45490196, g: 0.69411767, b: 0.4627451, a: 1}
+  - id: 174
+    displayName: Pastel Green 03
+    color: {r: 0.5019608, g: 0.827451, b: 0.5137255, a: 1}
+  - id: 175
+    displayName: Pastel Green 04
+    color: {r: 0.5372549, g: 0.9607843, b: 0.5529412, a: 1}
+  - id: 176
+    displayName: Pastel Cyan 01
+    color: {r: 0.39215687, g: 0.56078434, b: 0.5411765, a: 1}
+  - id: 177
+    displayName: Pastel Cyan 02
+    color: {r: 0.45490196, g: 0.69411767, b: 0.6627451, a: 1}
+  - id: 178
+    displayName: Pastel Cyan 03
+    color: {r: 0.5019608, g: 0.827451, b: 0.7882353, a: 1}
+  - id: 179
+    displayName: Pastel Cyan 04
+    color: {r: 0.5372549, g: 0.9607843, b: 0.9098039, a: 1}
+  - id: 180
+    displayName: Pastel Blue 01
+    color: {r: 0.39215687, g: 0.47843137, b: 0.56078434, a: 1}
+  - id: 181
+    displayName: Pastel Blue 02
+    color: {r: 0.45490196, g: 0.5764706, b: 0.69411767, a: 1}
+  - id: 182
+    displayName: Pastel Blue 03
+    color: {r: 0.5019608, g: 0.67058825, b: 0.827451, a: 1}
+  - id: 183
+    displayName: Pastel Blue 04
+    color: {r: 0.5372549, g: 0.75686276, b: 0.9607843, a: 1}
+  - id: 184
+    displayName: Pastel Violet 01
+    color: {r: 0.44705883, g: 0.39215687, b: 0.56078434, a: 1}
+  - id: 185
+    displayName: Pastel Violet 02
+    color: {r: 0.5294118, g: 0.45490196, b: 0.69411767, a: 1}
+  - id: 186
+    displayName: Pastel Violet 03
+    color: {r: 0.6039216, g: 0.5019608, b: 0.827451, a: 1}
+  - id: 187
+    displayName: Pastel Violet 04
+    color: {r: 0.6745098, g: 0.5372549, b: 0.9607843, a: 1}
+  - id: 188
+    displayName: Pastel Magenta 01
+    color: {r: 0.56078434, g: 0.39215687, b: 0.5137255, a: 1}
+  - id: 189
+    displayName: Pastel Magenta 02
+    color: {r: 0.69411767, g: 0.45490196, b: 0.627451, a: 1}
+  - id: 190
+    displayName: Pastel Magenta 03
+    color: {r: 0.827451, g: 0.5019608, b: 0.7372549, a: 1}
+  - id: 191
+    displayName: Pastel Magenta 04
+    color: {r: 0.9607843, g: 0.5372549, b: 0.84313726, a: 1}
+  - id: 192
+    displayName: Bright Red 01
+    color: {r: 0.5803922, g: 0.023529412, b: 0.023529412, a: 1}
+  - id: 193
+    displayName: Bright Red 02
+    color: {r: 0.72156864, g: 0.0627451, b: 0.0627451, a: 1}
+  - id: 194
+    displayName: Bright Red 03
+    color: {r: 0.85882354, g: 0.11372549, b: 0.11372549, a: 1}
+  - id: 195
+    displayName: Bright Red 04
+    color: {r: 1, g: 0.18039216, b: 0.18039216, a: 1}
+  - id: 196
+    displayName: Bright Orange 01
+    color: {r: 0.5803922, g: 0.19215687, b: 0.023529412, a: 1}
+  - id: 197
+    displayName: Bright Orange 02
+    color: {r: 0.72156864, g: 0.25882354, b: 0.0627451, a: 1}
+  - id: 198
+    displayName: Bright Orange 03
+    color: {r: 0.85882354, g: 0.3372549, b: 0.11372549, a: 1}
+  - id: 199
+    displayName: Bright Orange 04
+    color: {r: 1, g: 0.42745098, b: 0.18039216, a: 1}
+  - id: 200
+    displayName: Bright Yellow 01
+    color: {r: 0.5803922, g: 0.5254902, b: 0.023529412, a: 1}
+  - id: 201
+    displayName: Bright Yellow 02
+    color: {r: 0.72156864, g: 0.654902, b: 0.0627451, a: 1}
+  - id: 202
+    displayName: Bright Yellow 03
+    color: {r: 0.85882354, g: 0.78431374, b: 0.11372549, a: 1}
+  - id: 203
+    displayName: Bright Yellow 04
+    color: {r: 1, g: 0.91764706, b: 0.18039216, a: 1}
+  - id: 204
+    displayName: Bright Lime 01
+    color: {r: 0.2, g: 0.5803922, b: 0.023529412, a: 1}
+  - id: 205
+    displayName: Bright Lime 02
+    color: {r: 0.27450982, g: 0.72156864, b: 0.0627451, a: 1}
+  - id: 206
+    displayName: Bright Lime 03
+    color: {r: 0.3529412, g: 0.85882354, b: 0.11372549, a: 1}
+  - id: 207
+    displayName: Bright Lime 04
+    color: {r: 0.44313726, g: 1, b: 0.18039216, a: 1}
+  - id: 208
+    displayName: Bright Green 01
+    color: {r: 0.023529412, g: 0.5803922, b: 0.34509805, a: 1}
+  - id: 209
+    displayName: Bright Green 02
+    color: {r: 0.0627451, g: 0.72156864, b: 0.44313726, a: 1}
+  - id: 210
+    displayName: Bright Green 03
+    color: {r: 0.11372549, g: 0.85882354, b: 0.54509807, a: 1}
+  - id: 211
+    displayName: Bright Green 04
+    color: {r: 0.18039216, g: 1, b: 0.654902, a: 1}
+  - id: 212
+    displayName: Bright Cyan 01
+    color: {r: 0.023529412, g: 0.5137255, b: 0.5803922, a: 1}
+  - id: 213
+    displayName: Bright Cyan 02
+    color: {r: 0.0627451, g: 0.6392157, b: 0.72156864, a: 1}
+  - id: 214
+    displayName: Bright Cyan 03
+    color: {r: 0.11372549, g: 0.76862746, b: 0.85882354, a: 1}
+  - id: 215
+    displayName: Bright Cyan 04
+    color: {r: 0.18039216, g: 0.9019608, b: 1, a: 1}
+  - id: 216
+    displayName: Bright Blue 01
+    color: {r: 0.023529412, g: 0.18039216, b: 0.5803922, a: 1}
+  - id: 217
+    displayName: Bright Blue 02
+    color: {r: 0.0627451, g: 0.24705882, b: 0.72156864, a: 1}
+  - id: 218
+    displayName: Bright Blue 03
+    color: {r: 0.11372549, g: 0.32156864, b: 0.85882354, a: 1}
+  - id: 219
+    displayName: Bright Blue 04
+    color: {r: 0.18039216, g: 0.40784314, b: 1, a: 1}
+  - id: 220
+    displayName: Bright Magenta 01
+    color: {r: 0.5372549, g: 0.023529412, b: 0.5803922, a: 1}
+  - id: 221
+    displayName: Bright Magenta 02
+    color: {r: 0.6666667, g: 0.0627451, b: 0.72156864, a: 1}
+  - id: 222
+    displayName: Bright Magenta 03
+    color: {r: 0.8, g: 0.11372549, b: 0.85882354, a: 1}
+  - id: 223
+    displayName: Bright Magenta 04
+    color: {r: 0.93333334, g: 0.18039216, b: 1, a: 1}
   retiredIds: 
   generatedLut: {fileID: 2800000, guid: a4ea5bf972a739140b62dba08a257317, type: 2}
-  generatedContentHash: 5b95f90fa0f7cb1d24ee3b3976f43f73
+  generatedContentHash: 7b55b40440ac5a4136e5642d19e919a0
