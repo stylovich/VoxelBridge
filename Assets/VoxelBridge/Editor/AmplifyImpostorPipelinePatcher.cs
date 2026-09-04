@@ -62,7 +62,7 @@ namespace LocalModels.VoxelBridge
             "/* Voxel Bridge texture-property guard patch. */ " +
             "Array.IndexOf( material.GetTexturePropertyNames(), m_propertyNames[ i ] ) >= 0";
 
-        [MenuItem("Tools/Voxel Bridge/Compatibilidad/Aplicar parche de Amplify Impostors")]
+        [MenuItem("Tools/Voxel Bridge/Compatibility/Apply Amplify Impostors Patch")]
         private static void ApplyPatchMenu()
         {
             if (!TryApplyToProject(out AmplifyPipelinePatchResult result, out string message))
@@ -70,15 +70,16 @@ namespace LocalModels.VoxelBridge
                 Debug.LogWarning(message);
                 if (!Application.isBatchMode)
                     EditorUtility.DisplayDialog(
-                        "Voxel Bridge - parche no aplicado", message, "Aceptar");
+                        "Voxel Bridge - Patch Not Applied", message, "OK");
                 return;
             }
 
-            Debug.Log(message);
             if (result == AmplifyPipelinePatchResult.Applied)
                 AssetDatabase.ImportAsset(SourceAssetPath, ImportAssetOptions.ForceUpdate);
             if (!Application.isBatchMode)
-                EditorUtility.DisplayDialog("Voxel Bridge", message, "Aceptar");
+                EditorUtility.DisplayDialog("Voxel Bridge", message, "OK");
+            else
+                Debug.Log(message);
         }
 
         internal static AmplifyPipelinePatchResult GetProjectStatus(out string detail)
@@ -118,25 +119,25 @@ namespace LocalModels.VoxelBridge
                 result = TryPatchSource(source, out string patchedSource, out string detail);
                 if (result == AmplifyPipelinePatchResult.Conflict)
                 {
-                    message = "La fuente instalada de Amplify Impostors no coincide con la " +
-                              "firma validada. El parche no se aplicó y el archivo quedó intacto. " +
+                    message = "The installed Amplify Impostors source does not match the " +
+                              "firma validada. The patch was not applied; the file is unchanged. " +
                               detail;
                     return false;
                 }
                 if (result == AmplifyPipelinePatchResult.AlreadyApplied)
                 {
-                    message = "El parche de compatibilidad de Amplify Impostors ya está aplicado.";
+                    message = "The Amplify Impostors compatibility patch is already applied.";
                     return true;
                 }
 
                 File.WriteAllText(absolutePath, patchedSource, new UTF8Encoding(hasUtf8Bom));
-                message = "Parche de compatibilidad aplicado a Amplify Impostors. Unity recompilará " +
-                          "el asset antes del siguiente horneado.";
+                message = "Applied the Amplify Impostors compatibility patch. Unity will recompile " +
+                          "the asset before the next bake.";
                 return true;
             }
             catch (Exception exception)
             {
-                message = "No se pudo aplicar el parche de compatibilidad de Amplify Impostors: " +
+                message = "Could not apply the Amplify Impostors compatibility patch: " +
                           exception.Message;
                 result = AmplifyPipelinePatchResult.Conflict;
                 return false;
@@ -150,7 +151,7 @@ namespace LocalModels.VoxelBridge
             detail = null;
             if (source == null)
             {
-                detail = "El código fuente está vacío.";
+                detail = "The source code is empty.";
                 return AmplifyPipelinePatchResult.Conflict;
             }
 
@@ -162,7 +163,8 @@ namespace LocalModels.VoxelBridge
             int originalDetections = CountOccurrences(normalized, OriginalDetection);
             bool pipelinePatched = pipelineBeginMarkers == 1 &&
                                    pipelineEndMarkers == 1 &&
-                                   originalDetections == 0;
+                                   originalDetections == 0 &&
+                                   CountOccurrences(normalized, PatchedDetection) == 1;
             bool pipelineOriginal = pipelineBeginMarkers == 0 &&
                                     pipelineEndMarkers == 0 &&
                                     originalDetections == 1;
@@ -190,12 +192,12 @@ namespace LocalModels.VoxelBridge
             if ((!pipelinePatched && !pipelineOriginal) ||
                 (!texturesPatched && !texturesOriginal))
             {
-                detail = "Firma esperada no encontrada. " +
-                         $"Pipeline: detecciones={originalDetections}, " +
-                         $"marcadores={pipelineBeginMarkers}/{pipelineEndMarkers}. " +
-                         $"Texturas: originales={originalOutputGuards}/{originalStandardGuards}, " +
-                         $"parcheadas={patchedOutputGuards}/{patchedStandardGuards}, " +
-                         $"marcadores={textureMarkers}.";
+                detail = "Expected signature not found. " +
+                         $"Pipeline: detections={originalDetections}, " +
+                         $"markers={pipelineBeginMarkers}/{pipelineEndMarkers}. " +
+                         $"Textures: original={originalOutputGuards}/{originalStandardGuards}, " +
+                         $"patched={patchedOutputGuards}/{patchedStandardGuards}, " +
+                         $"markers={textureMarkers}.";
                 return AmplifyPipelinePatchResult.Conflict;
             }
             if (pipelinePatched && texturesPatched)
@@ -220,7 +222,7 @@ namespace LocalModels.VoxelBridge
             string absolutePath = GetAbsoluteSourcePath();
             if (!File.Exists(absolutePath))
             {
-                error = $"No se encontró '{SourceAssetPath}'.";
+                error = $"Could not find '{SourceAssetPath}'.";
                 return false;
             }
 
@@ -237,7 +239,7 @@ namespace LocalModels.VoxelBridge
             }
             catch (Exception exception)
             {
-                error = "No se pudo leer la fuente de Amplify Impostors: " + exception.Message;
+                error = "Could not read the Amplify Impostors source: " + exception.Message;
                 return false;
             }
         }

@@ -5,13 +5,13 @@ namespace LocalModels.VoxelBridge
 {
     internal enum VoxelLodTransitionMode
     {
-        [InspectorName("Fija por pantalla")]
+        [InspectorName("Fixed Screen Height")]
         FixedScreenHeight,
-        [InspectorName("Adaptativa por tamaño")]
+        [InspectorName("Adaptive by Model Size")]
         AdaptiveByModelSize
     }
 
-    [CreateAssetMenu(fileName = "VoxelStyleProfile", menuName = "Voxel Bridge/Perfil de estilo voxel")]
+    [CreateAssetMenu(fileName = "VoxelStyleProfile", menuName = "Voxel Bridge/Voxel Style Profile")]
     public sealed class VoxelStyleProfile : ScriptableObject
     {
         [Tooltip("Tamaño de un vóxel de LOD0 en unidades de Unity. El valor predeterminado 0.032 equivale a 3.2 cm.")]
@@ -28,46 +28,46 @@ namespace LocalModels.VoxelBridge
         [SerializeField] private bool hideInternalCavities = true;
         [Tooltip("Altura relativa de pantalla de transición para cada nivel del LODGroup.")]
         [SerializeField] private float[] lodScreenHeights = { 0.6f, 0.3f, 0.1f };
-        [Tooltip("Fijo usa los porcentajes de pantalla sin modificarlos. Adaptativo ajusta toda la curva según el tamaño final del modelo.")]
-        [InspectorName("Modo de transición")]
+        [Tooltip("Fixed Screen Height utiliza los porcentajes de pantalla configurados. Adaptive by Model Size ajusta toda la curva según el tamaño final del modelo.")]
+        [InspectorName("Transition Mode")]
         [SerializeField] private VoxelLodTransitionMode lodTransitionMode =
             VoxelLodTransitionMode.FixedScreenHeight;
         [Tooltip("Tamaño en metros del modelo para el que se ajustaron las transiciones base. Un vehículo grande suele estar cerca de 4 m.")]
-        [InspectorName("Tamaño de referencia")]
+        [InspectorName("Reference Model Size")]
         [SerializeField, Min(0.01f)] private float lodReferenceModelSize = 4f;
         [Tooltip("Intensidad del ajuste por tamaño. 0 conserva los porcentajes base, 0.5 ofrece una compensación equilibrada y 1 aproxima distancias de transición constantes.")]
-        [InspectorName("Intensidad de adaptación")]
+        [InspectorName("Size Adaptation Strength")]
         [SerializeField, Range(0f, 1f)] private float lodSizeAdaptationStrength = 0.5f;
         [Tooltip("Límite inferior del factor aplicado a modelos pequeños. 0.35 evita que las transiciones se alejen excesivamente.")]
-        [InspectorName("Factor mínimo")]
+        [InspectorName("Minimum Transition Scale")]
         [SerializeField, Min(0.01f)] private float lodMinimumTransitionScale = 0.35f;
         [Tooltip("Límite superior de la curva adaptativa general. 2 adelanta las transiciones de modelos grandes sin concentrarlas demasiado cerca de la cámara; el refuerzo posterior dispone de su propio máximo.")]
-        [InspectorName("Factor máximo")]
+        [InspectorName("Maximum Transition Scale")]
         [SerializeField, Min(0.01f)] private float lodMaximumTransitionScale = 2f;
-        [Tooltip("Tamaño a partir del cual se refuerza gradualmente la adaptación de los LOD. Los modelos iguales o menores conservan exactamente la curva adaptativa normal. 6 m corresponde a una sección grande de edificio del conjunto de referencia.")]
-        [InspectorName("Umbral de modelo grande")]
+        [Tooltip("Tamaño a partir del cual se refuerza gradualmente la adaptación de los LOD. Los modelos iguales o menores conservan la curva adaptativa normal. 6 m es un punto de partida para secciones grandes de edificios.")]
+        [InspectorName("Large Model Threshold")]
         [SerializeField, Min(0.01f)] private float lodLargeModelSizeThreshold = 6f;
         [Tooltip("Exponente adicional aplicado solamente por encima del umbral de modelo grande. 0 desactiva el refuerzo; 0.25 adelanta moderadamente los LOD de menor resolución sin producir un salto en el umbral.")]
-        [InspectorName("Intensidad adicional para grandes")]
+        [InspectorName("Large Model Additional Strength")]
         [SerializeField, Range(0f, 1f)] private float lodLargeModelAdditionalStrength = 0.25f;
         [Tooltip("Límite final del factor después del refuerzo para modelos grandes. Con una curva 0.30 / 0.18 / 0.10, un valor de 2.5 limita las transiciones voxel a 0.75 / 0.45 / 0.25. Al añadir un impostor, la distribución de estructuras grandes converge gradualmente a 0.75 / 0.55 / 0.35 para evitar que los LOD intermedios abarquen distancias excesivas.")]
-        [InspectorName("Factor máximo para grandes")]
+        [InspectorName("Large Model Maximum Scale")]
         [SerializeField, Min(0.01f)] private float lodLargeModelMaximumTransitionScale = 2.5f;
 
-        [Header("Optimización de sombras")]
+        [Header("Shadow Optimization")]
         [Tooltip("Desactiva la proyección de sombras en los LOD más lejanos de modelos pequeños. El tamaño se evalúa en el espacio local del prefab, antes de aplicar la escala de cada instancia.")]
-        [InspectorName("Reducir sombras por tamaño")]
+        [InspectorName("Reduce Shadows by Size")]
         [SerializeField] private bool reduceSmallObjectShadows = true;
         [Tooltip("Los modelos menores que este tamaño dejan de proyectar sombras en su último LOD voxel y en el impostor. 1 m es un valor equilibrado para props pequeños.")]
-        [InspectorName("Umbral para último LOD")]
+        [InspectorName("Last LOD Shadow Threshold")]
         [SerializeField, Min(0.01f)] private float lastLodShadowSizeThreshold = 1f;
         [Tooltip("Los modelos menores que este tamaño dejan de proyectar sombras desde el penúltimo LOD voxel. Los niveles posteriores y el impostor también quedan sin sombras. 0,5 m es adecuado para decoración pequeña.")]
-        [InspectorName("Umbral para penúltimo LOD")]
+        [InspectorName("Penultimate LOD Shadow Threshold")]
         [SerializeField, Min(0.01f)] private float penultimateLodShadowSizeThreshold = 0.5f;
 
-        [Header("Alineación al grid")]
+        [Header("Grid Alignment")]
         [Tooltip("Al colocar automáticamente el resultado en una escena, ajusta la posición mundial de su pivote al múltiplo más cercano de la unidad voxel base. El desplazamiento máximo es media celda por eje y la geometría conserva su alineación local.")]
-        [InspectorName("Alinear pivotes al colocar")]
+        [InspectorName("Snap Pivots on Placement")]
         [SerializeField] private bool snapPlacedPivotsToVoxelGrid = true;
 
         public float BaseVoxelSize => Mathf.Max(0.001f, baseVoxelSize);
@@ -107,9 +107,10 @@ namespace LocalModels.VoxelBridge
 
         public float GetLodScreenHeight(int index)
         {
-            if (lodScreenHeights != null && index >= 0 && index < lodScreenHeights.Length)
-                return Mathf.Clamp01(lodScreenHeights[index]);
-            return Mathf.Max(0.01f, 0.6f * Mathf.Pow(0.5f, index));
+            if (lodScreenHeights == null || index < 0 || index >= LodCount ||
+                index >= lodScreenHeights.Length)
+                throw new ArgumentOutOfRangeException(nameof(index));
+            return lodScreenHeights[index];
         }
 
         public float GetLodScreenHeight(int index, float modelSize)
@@ -167,17 +168,27 @@ namespace LocalModels.VoxelBridge
         {
             if (baseVoxelSize <= 0f || float.IsNaN(baseVoxelSize) || float.IsInfinity(baseVoxelSize))
             {
-                error = "La unidad base debe ser mayor que cero.";
+                error = "The base voxel size must be finite and greater than zero.";
                 return false;
             }
             if (lodMultipliers == null || lodMultipliers.Length == 0 || lodMultipliers.Length > 8)
             {
-                error = "El perfil debe contener entre 1 y 8 niveles LOD.";
+                error = "The profile must contain between 1 and 8 LOD levels.";
                 return false;
             }
             if (lodMultipliers[0] != 1)
             {
-                error = "LOD0 debe usar multiplicador 1 para representar la unidad voxel base.";
+                error = "LOD0 must use multiplier 1 to represent the base voxel size.";
+                return false;
+            }
+            if (lodScreenHeights == null || lodScreenHeights.Length < lodMultipliers.Length)
+            {
+                error = "Each LOD level requires an explicit screen-height transition.";
+                return false;
+            }
+            if (!Enum.IsDefined(typeof(VoxelLodTransitionMode), lodTransitionMode))
+            {
+                error = "The LOD transition mode is unsupported.";
                 return false;
             }
             if (UsesAdaptiveLodTransitions &&
@@ -196,7 +207,7 @@ namespace LocalModels.VoxelBridge
                  lodLargeModelAdditionalStrength < 0f ||
                  lodLargeModelAdditionalStrength > 1f))
             {
-                error = "La adaptación LOD requiere intensidades entre 0 y 1, tamaños positivos y factores máximos ordenados. El máximo para modelos grandes no puede ser menor que el máximo general.";
+                error = "LOD adaptation requires strengths between 0 and 1, positive sizes and ordered maximum scales. The large-model maximum cannot be lower than the general maximum.";
                 return false;
             }
             if (reduceSmallObjectShadows &&
@@ -204,7 +215,7 @@ namespace LocalModels.VoxelBridge
                  !IsFinitePositive(penultimateLodShadowSizeThreshold) ||
                  penultimateLodShadowSizeThreshold > lastLodShadowSizeThreshold))
             {
-                error = "La optimización de sombras requiere umbrales positivos y el umbral del penúltimo LOD no puede superar al del último LOD.";
+                error = "Shadow optimization requires positive thresholds. The penultimate LOD threshold cannot exceed the final LOD threshold.";
                 return false;
             }
 
@@ -215,15 +226,15 @@ namespace LocalModels.VoxelBridge
                 int multiplier = lodMultipliers[i];
                 if (multiplier < 1 || (multiplier & (multiplier - 1)) != 0 || multiplier <= previous)
                 {
-                    error = "Los multiplicadores LOD deben ser potencias de dos estrictamente crecientes.";
+                    error = "LOD multipliers must be strictly increasing powers of two.";
                     return false;
                 }
                 previous = multiplier;
 
                 float height = GetLodScreenHeight(i);
-                if (height <= 0f || height >= previousHeight)
+                if (!float.IsFinite(height) || height <= 0f || height > 1f || height >= previousHeight)
                 {
-                    error = "Las transiciones LOD deben ser mayores que cero y estrictamente descendentes.";
+                    error = "LOD transitions must be finite, greater than zero, at most 1, and strictly decreasing.";
                     return false;
                 }
                 previousHeight = height;
@@ -290,8 +301,8 @@ namespace LocalModels.VoxelBridge
             var plan = new VoxelGridPlan(voxelSize, origin, size, bounds, chunkCellSize);
             if (plan.CellCount > MaximumDenseCellCount)
                 throw new InvalidOperationException(
-                    $"La rejilla necesita {plan.CellCount:N0} celdas, por encima del límite seguro de " +
-                    $"{MaximumDenseCellCount:N0}. Aumenta la unidad voxel o divide el asset de origen.");
+                    $"The grid requires {plan.CellCount:N0} cells, exceeding the safe limit of " +
+                    $"{MaximumDenseCellCount:N0}. Increase the voxel size or split the source asset.");
             return plan;
         }
     }

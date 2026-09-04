@@ -32,19 +32,19 @@ namespace LocalModels.VoxelBridge
         private MessageType statusType = MessageType.Info;
         private bool hasUnsupportedIndexMap;
 
-        [MenuItem("Tools/Voxel Bridge/Vincular IDs semánticos")]
+        [MenuItem("Tools/Voxel Bridge/Bind Semantic IDs")]
         private static void OpenWindow()
         {
-            var window = GetWindow<VoxelSemanticBindingWindow>("IDs semánticos VOX");
+            var window = GetWindow<VoxelSemanticBindingWindow>("VOX Semantic IDs");
             window.minSize = new Vector2(860f, 460f);
             window.UseSelectedVox();
             window.Show();
         }
 
-        [MenuItem("Assets/Voxel Bridge/Vincular IDs semánticos", false, 2050)]
+        [MenuItem("Assets/Voxel Bridge/Bind Semantic IDs", false, 2050)]
         private static void OpenForSelection() => OpenWindow();
 
-        [MenuItem("Assets/Voxel Bridge/Vincular IDs semánticos", true)]
+        [MenuItem("Assets/Voxel Bridge/Bind Semantic IDs", true)]
         private static bool ValidateOpenForSelection() =>
             IsVoxPath(AssetDatabase.GetAssetPath(Selection.activeObject));
 
@@ -66,27 +66,27 @@ namespace LocalModels.VoxelBridge
 
         private void OnGUI()
         {
-            EditorGUILayout.LabelField("Vinculación semántica de .vox", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(".vox Semantic Bindings", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox(
                 "Asigna un ColorID y un SurfaceID globales a cada slot utilizado. Un perfil de " +
                 "mapeo limita los colores candidatos y propone la coincidencia perceptual más cercana.",
                 MessageType.Info);
 
             EditorGUI.BeginChangeCheck();
-            voxAsset = EditorGUILayout.ObjectField("Archivo .vox", voxAsset,
+            voxAsset = EditorGUILayout.ObjectField(".vox File", voxAsset,
                 typeof(UnityEngine.Object), false);
             if (EditorGUI.EndChangeCheck()) Reload();
 
             EditorGUI.BeginChangeCheck();
             colorPalette = (VoxelColorPalette)EditorGUILayout.ObjectField(
-                "Paleta de colores", colorPalette, typeof(VoxelColorPalette), false);
+                "Color Palette", colorPalette, typeof(VoxelColorPalette), false);
             surfacePalette = (VoxelSurfacePalette)EditorGUILayout.ObjectField(
-                "Paleta de superficies", surfacePalette, typeof(VoxelSurfacePalette), false);
+                "Surface Palette", surfacePalette, typeof(VoxelSurfacePalette), false);
             if (EditorGUI.EndChangeCheck()) Reload();
 
             EditorGUI.BeginChangeCheck();
             mappingProfile = (VoxelColorMappingProfile)EditorGUILayout.ObjectField(
-                new GUIContent("Perfil de mapeo",
+                new GUIContent("Mapping Profile",
                     "Selecciona los ColorIDs candidatos y los umbrales del mapeo OKLab."),
                 mappingProfile, typeof(VoxelColorMappingProfile), false);
             if (EditorGUI.EndChangeCheck())
@@ -98,12 +98,12 @@ namespace LocalModels.VoxelBridge
 
             using (new EditorGUILayout.HorizontalScope())
             {
-                if (GUILayout.Button("Crear perfil para esta paleta")) CreateMappingProfile();
+                if (GUILayout.Button("Create Profile for This Palette")) CreateMappingProfile();
                 using (new EditorGUI.DisabledScope(mappingProfile == null || rows.Count == 0))
                 {
-                    if (GUILayout.Button("Asignar slots sin ColorID")) ApplyProfileToUnmapped();
+                    if (GUILayout.Button("Assign Unmapped Color Slots")) ApplyProfileToUnmapped();
                 }
-                if (mappingProfile != null && GUILayout.Button("Seleccionar perfil"))
+                if (mappingProfile != null && GUILayout.Button("Select Profile"))
                 {
                     Selection.activeObject = mappingProfile;
                     EditorGUIUtility.PingObject(mappingProfile);
@@ -127,7 +127,7 @@ namespace LocalModels.VoxelBridge
                                 surfacePalette.TryGetSurface(row.SurfaceId, out _));
             using (new EditorGUI.DisabledScope(!complete))
             {
-                if (GUILayout.Button("Guardar vinculación semántica", GUILayout.Height(30f)))
+                if (GUILayout.Button("Save Semantic Bindings", GUILayout.Height(30f)))
                     SaveBindings();
             }
             if (!profileValid)
@@ -147,18 +147,18 @@ namespace LocalModels.VoxelBridge
                 .Where(entry => entry != null).OrderBy(entry => entry.Id).ToArray() ??
                 Array.Empty<VoxelSurfaceDefinition>();
             string[] colorLabels = colors.Select(entry =>
-                $"{entry.Id:D3} · {entry.DisplayName}").Prepend("Sin asignar").ToArray();
+                $"{entry.Id:D3} · {entry.DisplayName}").Prepend("Unassigned").ToArray();
             string[] surfaceLabels = surfaces.Select(entry =>
-                $"{entry.Id:D3} · {entry.DisplayName}").Prepend("Sin asignar").ToArray();
+                $"{entry.Id:D3} · {entry.DisplayName}").Prepend("Unassigned").ToArray();
 
             EditorGUILayout.Space(4f);
-            EditorGUILayout.LabelField($"Slots utilizados: {rows.Count}", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField($"Used Slots: {rows.Count}", EditorStyles.boldLabel);
             using (new EditorGUILayout.HorizontalScope())
             {
                 GUILayout.Space(138f);
-                GUILayout.Label("Color original", EditorStyles.miniBoldLabel, GUILayout.Width(88f));
-                GUILayout.Label("ColorID asignado", EditorStyles.miniBoldLabel, GUILayout.MinWidth(190f));
-                GUILayout.Label("Distancia", EditorStyles.miniBoldLabel, GUILayout.Width(76f));
+                GUILayout.Label("Original Color", EditorStyles.miniBoldLabel, GUILayout.Width(88f));
+                GUILayout.Label("Assigned ColorID", EditorStyles.miniBoldLabel, GUILayout.MinWidth(190f));
+                GUILayout.Label("Distance", EditorStyles.miniBoldLabel, GUILayout.Width(76f));
                 GUILayout.Label("SurfaceID", EditorStyles.miniBoldLabel, GUILayout.MinWidth(180f));
             }
 
@@ -224,7 +224,7 @@ namespace LocalModels.VoxelBridge
             {
                 if (!colorPalette.TryGetColor(row.ColorId, out Color32 color))
                 {
-                    SetStatus($"El ColorID {row.ColorId} no existe en la paleta global.", MessageType.Error);
+                    SetStatus($"ColorID {row.ColorId} does not exist in the global palette.", MessageType.Error);
                     return;
                 }
                 bindings.Add(new VoxelSemanticSlotMetadata
@@ -247,10 +247,10 @@ namespace LocalModels.VoxelBridge
                 : string.Empty;
             if (distantMappings > 0)
                 risk += $"\n\n{distantMappings} asignación(es) superan el umbral de advertencia del perfil.";
-            if (!EditorUtility.DisplayDialog("Guardar vinculación semántica",
+            if (!EditorUtility.DisplayDialog("Save Semantic Bindings",
                     "Se actualizará la paleta RGBA del .vox y su sidecar. " +
                     "Es recomendable mantener ambos archivos bajo control de versiones." + risk,
-                    "Guardar", "Cancelar"))
+                    "Save", "Cancel"))
                 return;
 
             if (VoxelSemanticBindingService.TryBind(
@@ -273,12 +273,12 @@ namespace LocalModels.VoxelBridge
             hasUnsupportedIndexMap = false;
             if (voxAsset == null)
             {
-                SetStatus("Selecciona un archivo .vox generado por Voxel Bridge.", MessageType.Info);
+                SetStatus("Select a .vox file generated by Voxel Bridge.", MessageType.Info);
                 return;
             }
             if (!IsVoxPath(loadedPath))
             {
-                SetStatus("El asset seleccionado no es un archivo .vox.", MessageType.Error);
+                SetStatus("The selected asset is not a .vox file.", MessageType.Error);
                 return;
             }
 
@@ -306,7 +306,7 @@ namespace LocalModels.VoxelBridge
 
                 if (colorPalette == null || surfacePalette == null)
                 {
-                    SetStatus("Asigna las paletas globales de color y superficie.", MessageType.Error);
+                    SetStatus("Assign the global color and surface palettes.", MessageType.Error);
                     return;
                 }
 
@@ -343,7 +343,7 @@ namespace LocalModels.VoxelBridge
             catch (Exception exception)
             {
                 rows.Clear();
-                SetStatus("No se pudo leer el archivo: " + exception.Message, MessageType.Error);
+                SetStatus("Could not read file: " + exception.Message, MessageType.Error);
             }
         }
 
@@ -420,7 +420,7 @@ namespace LocalModels.VoxelBridge
             if (!mappingProfile.TryValidate(out error)) return false;
             if (mappingProfile.ColorPalette != colorPalette)
             {
-                error = "El perfil de mapeo y la ventana utilizan paletas de colores diferentes.";
+                error = "The mapping profile and the window use different color palettes.";
                 return false;
             }
             return true;
@@ -459,13 +459,13 @@ namespace LocalModels.VoxelBridge
             int rejected = mappingProfile == null ? 0 : rows.Count(row =>
                 row.ColorId < 0 && row.SuggestedColorId >= 0);
             if (unmapped == 0 && warnings == 0)
-                SetStatus("La tabla está completa y lista para validarse.", MessageType.Info);
+                SetStatus("All slots are mapped and ready for validation.", MessageType.Info);
             else if (unmapped == 0)
-                SetStatus($"Tabla completa con {warnings} coincidencia(s) por encima del umbral de advertencia.",
+                SetStatus($"All slots are mapped; {warnings} match(es) exceed the warning threshold.",
                     MessageType.Warning);
             else
-                SetStatus($"{unmapped} slot(s) permanecen sin ColorID. " +
-                    $"{rejected} superan la distancia automática máxima.", MessageType.Warning);
+                SetStatus($"{unmapped} slot(s) have no ColorID. " +
+                    $"{rejected} exceed the maximum automatic distance.", MessageType.Warning);
         }
 
         private void CreateMappingProfile()
@@ -473,11 +473,11 @@ namespace LocalModels.VoxelBridge
             if (colorPalette == null)
             {
                 EditorUtility.DisplayDialog(
-                    "Voxel Bridge", "Asigna primero la paleta global de colores.", "Cerrar");
+                    "Voxel Bridge", "Asigna primero la paleta global de colores.", "Close");
                 return;
             }
             string path = EditorUtility.SaveFilePanelInProject(
-                "Crear perfil de mapeo de color", "VoxelColorMappingProfile", "asset",
+                "Create Color Mapping Profile", "VoxelColorMappingProfile", "asset",
                 "Selecciona una ubicación para el perfil.", VoxelPaletteAssetUtility.PaletteFolder);
             if (string.IsNullOrEmpty(path)) return;
 

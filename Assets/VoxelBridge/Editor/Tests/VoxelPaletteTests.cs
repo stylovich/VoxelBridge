@@ -41,7 +41,7 @@ namespace LocalModels.VoxelBridge.Tests
                     palette.Entries.Select(entry => entry.Id));
                 Assert.That(palette.Entries.Select(entry => (Color32)entry.Color).Distinct().Count(),
                     Is.EqualTo(VoxelRecommendedColorLibrary.ActiveEntryCount),
-                    "La biblioteca recomendada no debe contener colores RGBA duplicados.");
+                    "The recommended library must not contain duplicate RGBA colors.");
                 Assert.That(palette.Entries.Single(entry => entry.Id == 1).DisplayName,
                     Does.StartWith("Neutral"));
                 Assert.That(palette.Entries.Single(entry => entry.Id == 32).DisplayName,
@@ -101,12 +101,12 @@ namespace LocalModels.VoxelBridge.Tests
                 palette.MutableEntries.Add(new VoxelColorDefinition(0, "Default", Color.white));
                 palette.MutableEntries.Add(new VoxelColorDefinition(0, "Duplicate", Color.black));
                 Assert.That(palette.TryValidate(out string duplicateError), Is.False);
-                StringAssert.Contains("duplicado", duplicateError);
+                StringAssert.Contains("duplicated", duplicateError);
 
                 palette.MutableEntries.Clear();
                 palette.MutableEntries.Add(new VoxelColorDefinition(256, "Invalid", Color.white));
                 Assert.That(palette.TryValidate(out string rangeError), Is.False);
-                StringAssert.Contains("fuera del rango", rangeError);
+                StringAssert.Contains("outside", rangeError);
 
                 palette.MutableEntries.Clear();
                 palette.MutableEntries.Add(new VoxelColorDefinition(1, "No Default", Color.white));
@@ -164,7 +164,7 @@ namespace LocalModels.VoxelBridge.Tests
                 palette.MutableEntries.Add(new VoxelSurfaceDefinition(
                     0, "Default", (VoxelSurfaceRenderClass)99, 0f, 0f, 0f, 1f));
                 Assert.That(palette.TryValidate(out string error), Is.False);
-                StringAssert.Contains("clase de render desconocida", error);
+                StringAssert.Contains("unknown render class", error);
             }
             finally
             {
@@ -221,6 +221,38 @@ namespace LocalModels.VoxelBridge.Tests
             finally
             {
                 Object.DestroyImmediate(palette);
+            }
+        }
+
+        [Test]
+        public void GeneratorRejectsAssetTypeCollisionWithoutOverwritingData()
+        {
+            string folderName = "VoxelLutCollision_" + System.Guid.NewGuid().ToString("N");
+            string folder = "Assets/" + folderName;
+            AssetDatabase.CreateFolder("Assets", folderName);
+            var colors = ScriptableObject.CreateInstance<VoxelColorPalette>();
+            string palettePath = folder + "/Colors.asset";
+            AssetDatabase.CreateAsset(colors, palettePath);
+            AssetDatabase.CreateFolder(folder, "Generated");
+            string collisionPath = VoxelPaletteLutGenerator.GetGeneratedTextureAssetPath(palettePath, colors.name);
+            var existing = ScriptableObject.CreateInstance<VoxelSurfacePalette>();
+            AssetDatabase.CreateAsset(existing, collisionPath);
+            string originalGuid = AssetDatabase.AssetPathToGUID(collisionPath);
+            string originalJson = EditorJsonUtility.ToJson(existing);
+            try
+            {
+                Assert.That(VoxelPaletteLutGenerator.TryRebuild(
+                    colors, out Texture2D lut, out string error), Is.False);
+                Assert.That(error, Is.Not.Empty);
+                Assert.That(lut, Is.Null);
+                Assert.That(colors.GeneratedLut, Is.Null);
+                Assert.That(AssetDatabase.AssetPathToGUID(collisionPath), Is.EqualTo(originalGuid));
+                Assert.That(AssetDatabase.LoadMainAssetAtPath(collisionPath), Is.SameAs(existing));
+                Assert.That(EditorJsonUtility.ToJson(existing), Is.EqualTo(originalJson));
+            }
+            finally
+            {
+                AssetDatabase.DeleteAsset(folder);
             }
         }
 

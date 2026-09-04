@@ -257,7 +257,7 @@ namespace LocalModels.VoxelBridge
             }
             catch (Exception exception)
             {
-                Debug.LogWarning($"Voxel Bridge ignoró el checkpoint dañado '{path}': {exception.Message}");
+                Debug.LogWarning($"Voxel Bridge ignored damaged checkpoint '{path}': {exception.Message}");
                 return false;
             }
         }

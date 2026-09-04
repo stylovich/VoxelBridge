@@ -47,17 +47,17 @@ namespace LocalModels.VoxelBridge
         {
             if (!CanPlace(sourceObject))
                 throw new InvalidOperationException(
-                    "La colocación individual requiere un GameObject perteneciente a una escena cargada.");
+                    "Single placement requires a GameObject in a loaded scene.");
 
             GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(build.PrefabAssetPath);
             if (prefab == null)
                 throw new InvalidOperationException(
-                    $"No se encontró el prefab convertido de '{sourceObject.name}'.");
+                    $"The converted prefab for '{sourceObject.name}' was not found.");
 
             var instance = PrefabUtility.InstantiatePrefab(prefab, sourceObject.scene) as GameObject;
             if (instance == null)
                 throw new InvalidOperationException(
-                    $"No se pudo instanciar el prefab convertido de '{sourceObject.name}'.");
+                    $"The converted prefab for '{sourceObject.name}' could not be instantiated.");
 
             try
             {
@@ -82,11 +82,11 @@ namespace LocalModels.VoxelBridge
 
             Undo.IncrementCurrentGroup();
             int undoGroup = Undo.GetCurrentGroup();
-            Undo.SetCurrentGroupName("Colocar modelo voxel en escena");
-            Undo.RegisterCreatedObjectUndo(instance, "Colocar modelo voxel");
+            Undo.SetCurrentGroupName("Place voxel model in scene");
+            Undo.RegisterCreatedObjectUndo(instance, "Place voxel model");
             if (disableOriginalObject)
             {
-                Undo.RecordObject(sourceObject, "Desactivar objeto visual original");
+                Undo.RecordObject(sourceObject, "Disable original visual object");
                 sourceObject.SetActive(false);
             }
 
@@ -101,7 +101,7 @@ namespace LocalModels.VoxelBridge
         {
             if (!CanPlace(sourceParent))
                 throw new InvalidOperationException(
-                    "La colocación automática requiere un objeto padre perteneciente a una escena cargada.");
+                    "Automatic placement requires a parent object in a loaded scene.");
             if (batch == null) throw new ArgumentNullException(nameof(batch));
 
             VoxelLodBatchItemResult[] successful = batch.Items
@@ -109,16 +109,16 @@ namespace LocalModels.VoxelBridge
                 .ToArray();
             if (successful.Length == 0)
                 throw new InvalidOperationException(
-                    "El lote no contiene conversiones correctas para colocar en la escena.");
+                    "The batch contains no successful conversions to place in the scene.");
 
             Undo.IncrementCurrentGroup();
             int undoGroup = Undo.GetCurrentGroup();
-            Undo.SetCurrentGroupName("Colocar lote voxel en escena");
+            Undo.SetCurrentGroupName("Place voxel batch in scene");
 
             string rootName = GameObjectUtility.GetUniqueNameForSibling(
                 sourceParent.transform.parent, sourceParent.name + "_Voxel");
             var voxelRoot = new GameObject(rootName);
-            Undo.RegisterCreatedObjectUndo(voxelRoot, "Crear raíz voxel");
+            Undo.RegisterCreatedObjectUndo(voxelRoot, "Create voxel root");
             voxelRoot.transform.SetParent(sourceParent.transform.parent, false);
             voxelRoot.transform.SetSiblingIndex(sourceParent.transform.GetSiblingIndex() + 1);
             CopyLocalTransform(sourceParent.transform, voxelRoot.transform);
@@ -135,13 +135,13 @@ namespace LocalModels.VoxelBridge
                     item.BuildResult.PrefabAssetPath);
                 if (prefab == null)
                     throw new InvalidOperationException(
-                        $"No se encontró el prefab convertido de '{item.Source.name}'.");
+                        $"The converted prefab for '{item.Source.name}' was not found.");
 
                 var instance = PrefabUtility.InstantiatePrefab(prefab, voxelRoot.transform) as GameObject;
                 if (instance == null)
                     throw new InvalidOperationException(
-                        $"No se pudo instanciar el prefab convertido de '{item.Source.name}'.");
-                Undo.RegisterCreatedObjectUndo(instance, "Colocar modelo voxel");
+                        $"The converted prefab for '{item.Source.name}' could not be instantiated.");
+                Undo.RegisterCreatedObjectUndo(instance, "Place voxel model");
                 instance.name = item.Source.name;
                 CopyLocalTransform(item.Source.transform, instance.transform);
                 SnapWorldPosition(instance.transform, item.Source.transform.position, profile);
@@ -159,7 +159,7 @@ namespace LocalModels.VoxelBridge
             if (originalRootDisabled)
             {
                 bool originalActive = sourceParent.activeSelf;
-                Undo.RecordObject(sourceParent, "Desactivar raíz visual original");
+                Undo.RecordObject(sourceParent, "Disable original visual root");
                 sourceParent.SetActive(false);
                 voxelRoot.SetActive(originalActive);
             }

@@ -101,12 +101,34 @@ namespace LocalModels.VoxelBridge.Tests
             {
                 profile.ConfigureForTests(palette, 20f, 10f);
                 Assert.That(profile.TryValidate(out string thresholdError), Is.False);
-                StringAssert.Contains("umbrales", thresholdError);
+                StringAssert.Contains("Thresholds", thresholdError);
 
                 profile.ConfigureForTests(palette, 8f, 20f);
                 profile.MutableAdditionalColorIds.Add(55);
                 Assert.That(profile.TryValidate(out string idError), Is.False);
-                StringAssert.Contains("no existe", idError);
+                StringAssert.Contains("does not exist", idError);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(profile);
+                UnityEngine.Object.DestroyImmediate(palette);
+            }
+        }
+
+        [Test]
+        public void ProfileRejectsNonFiniteThresholds()
+        {
+            VoxelColorPalette palette = CreatePalette((0, Color.white));
+            VoxelColorMappingProfile profile = ScriptableObject.CreateInstance<VoxelColorMappingProfile>();
+            try
+            {
+                foreach (float invalid in new[] { float.NaN, float.PositiveInfinity, float.NegativeInfinity })
+                {
+                    profile.ConfigureForTests(palette, invalid, 20f);
+                    Assert.That(profile.TryValidate(out _), Is.False, "Non-finite warning threshold.");
+                    profile.ConfigureForTests(palette, 8f, invalid);
+                    Assert.That(profile.TryValidate(out _), Is.False, "Non-finite automatic threshold.");
+                }
             }
             finally
             {
@@ -146,6 +168,11 @@ namespace LocalModels.VoxelBridge.Tests
                     Is.EqualTo(AssetDatabase.AssetPathToGUID(folder + "/Profile.asset")));
                 Assert.That(metadata.colorMappingProfileAssetPath,
                     Is.EqualTo(folder + "/Profile.asset"));
+                metadata.colorPaletteGuid = Guid.NewGuid().ToString("N");
+                Assert.That(VoxelSemanticTransport.TryLoadPalettes(
+                    metadata, out _, out _, out string paletteError), Is.False,
+                    "A missing palette GUID must not resolve to another asset at the stored path.");
+                Assert.That(paletteError, Is.Not.Empty);
             }
             finally
             {

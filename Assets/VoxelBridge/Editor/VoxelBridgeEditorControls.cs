@@ -26,7 +26,7 @@ namespace LocalModels.VoxelBridge
         private static void Pick(ref string assetPath)
         {
             string selected = EditorUtility.OpenFolderPanel(
-                "Carpeta dentro de Assets", Application.dataPath, string.Empty);
+                "Folder Inside Assets", Application.dataPath, string.Empty);
             if (string.IsNullOrEmpty(selected)) return;
             selected = selected.Replace('\\', '/');
             string dataPath = Application.dataPath.Replace('\\', '/');
@@ -35,7 +35,7 @@ namespace LocalModels.VoxelBridge
             if (!isAssetsRoot && !isInsideAssets)
             {
                 EditorUtility.DisplayDialog("Voxel Bridge",
-                    "La carpeta debe estar dentro de Assets.", "Cerrar");
+                    "La carpeta debe estar dentro de Assets.", "Close");
                 return;
             }
             assetPath = "Assets" + selected.Substring(dataPath.Length);
@@ -53,7 +53,7 @@ namespace LocalModels.VoxelBridge
             if (!File.Exists(path))
             {
                 EditorUtility.DisplayDialog("Voxel Bridge",
-                    "No se encontró el archivo .vox seleccionado.", "Cerrar");
+                    "No se encontró el archivo .vox seleccionado.", "Close");
                 return;
             }
             OpenPath(path);
@@ -65,7 +65,7 @@ namespace LocalModels.VoxelBridge
             if (!File.Exists(executable))
             {
                 executable = EditorUtility.OpenFilePanel(
-                    "Selecciona MagicaVoxel.exe", string.Empty, "exe");
+                    "Select MagicaVoxel.exe", string.Empty, "exe");
                 if (string.IsNullOrEmpty(executable)) return;
                 EditorPrefs.SetString(ExecutablePathKey, executable);
             }
@@ -83,7 +83,7 @@ namespace LocalModels.VoxelBridge
             {
                 Debug.LogException(exception);
                 EditorUtility.DisplayDialog("Voxel Bridge",
-                    "No se pudo abrir MagicaVoxel: " + exception.Message, "Cerrar");
+                    "No se pudo abrir MagicaVoxel: " + exception.Message, "Close");
             }
         }
     }

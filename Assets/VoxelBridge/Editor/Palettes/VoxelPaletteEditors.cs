@@ -12,15 +12,12 @@ namespace LocalModels.VoxelBridge
 
         private void OnEnable()
         {
-            var palette = (VoxelColorPalette)target;
-            if (palette.EnsureInitialized()) EditorUtility.SetDirty(palette);
-
             SerializedProperty entries = serializedObject.FindProperty("entries");
             entriesList = new ReorderableList(serializedObject, entries,
                 draggable: true, displayHeader: true, displayAddButton: true,
                 displayRemoveButton: true)
             {
-                drawHeaderCallback = rect => EditorGUI.LabelField(rect, "ID        Nombre                         Color"),
+                drawHeaderCallback = rect => EditorGUI.LabelField(rect, "ID        Name                           Color"),
                 drawElementCallback = DrawEntry,
                 onAddCallback = AddEntry,
                 onRemoveCallback = RemoveEntry
@@ -41,14 +38,15 @@ namespace LocalModels.VoxelBridge
             DrawValidationAndLut(palette);
 
             EditorGUILayout.Space(6f);
-            if (GUILayout.Button("Restaurar biblioteca maestra recomendada") &&
+            if (GUILayout.Button("Restore Recommended Master Library") &&
                 EditorUtility.DisplayDialog(
-                    "Restaurar biblioteca maestra",
+                    "Restore Master Library",
                     "Se reemplazarán todas las entradas de color y los IDs retirados. " +
-                    "Los perfiles se restauran desde la ventana de paletas globales.",
-                    "Restaurar", "Cancelar"))
+                    "Los modelos que utilizan estos ColorID adoptarán los colores restaurados. " +
+                    "Los perfiles se restauran desde la ventana Global Palettes.",
+                    "Restore", "Cancel"))
             {
-                Undo.RecordObject(palette, "Restaurar biblioteca de colores voxel");
+                Undo.RecordObject(palette, "Restore Voxel Color Library");
                 palette.ResetToRecommended();
                 EditorUtility.SetDirty(palette);
                 serializedObject.Update();
@@ -80,10 +78,10 @@ namespace LocalModels.VoxelBridge
         {
             serializedObject.ApplyModifiedProperties();
             var palette = (VoxelColorPalette)target;
-            Undo.RecordObject(palette, "Añadir color voxel");
+            Undo.RecordObject(palette, "Add Voxel Color");
             if (!palette.TryAddEntry(out _, out string error))
             {
-                EditorUtility.DisplayDialog("Voxel Bridge", error, "Cerrar");
+                EditorUtility.DisplayDialog("Voxel Bridge", error, "Close");
                 return;
             }
             EditorUtility.SetDirty(palette);
@@ -95,10 +93,10 @@ namespace LocalModels.VoxelBridge
         {
             serializedObject.ApplyModifiedProperties();
             var palette = (VoxelColorPalette)target;
-            Undo.RecordObject(palette, "Eliminar color voxel");
+            Undo.RecordObject(palette, "Remove Voxel Color");
             if (!palette.TryRemoveEntryAt(list.index, out string error))
             {
-                EditorUtility.DisplayDialog("Voxel Bridge", error, "Cerrar");
+                EditorUtility.DisplayDialog("Voxel Bridge", error, "Close");
                 return;
             }
             EditorUtility.SetDirty(palette);
@@ -115,10 +113,10 @@ namespace LocalModels.VoxelBridge
                 EditorGUILayout.HelpBox("Paleta válida y LUT actualizada.", MessageType.Info);
 
             using (new EditorGUI.DisabledScope(true))
-                EditorGUILayout.ObjectField("LUT generada", palette.GeneratedLut, typeof(Texture2D), false);
-            if (GUILayout.Button("Regenerar LUT de color") &&
+                EditorGUILayout.ObjectField("Generated LUT", palette.GeneratedLut, typeof(Texture2D), false);
+            if (GUILayout.Button("Rebuild Color LUT") &&
                 !VoxelPaletteLutGenerator.TryRebuild(palette, out _, out error))
-                EditorUtility.DisplayDialog("Voxel Bridge", error, "Cerrar");
+                EditorUtility.DisplayDialog("Voxel Bridge", error, "Close");
         }
 
         private static void DrawRetiredIds(System.Collections.Generic.IReadOnlyList<int> retiredIds)
@@ -137,9 +135,6 @@ namespace LocalModels.VoxelBridge
 
         private void OnEnable()
         {
-            var palette = (VoxelSurfacePalette)target;
-            if (palette.EnsureInitialized()) EditorUtility.SetDirty(palette);
-
             SerializedProperty entries = serializedObject.FindProperty("entries");
             entriesList = new ReorderableList(serializedObject, entries,
                 draggable: true, displayHeader: true, displayAddButton: true,
@@ -147,7 +142,7 @@ namespace LocalModels.VoxelBridge
             {
                 elementHeightCallback = _ => EditorGUIUtility.singleLineHeight * 3f + 8f,
                 drawHeaderCallback = rect => EditorGUI.LabelField(
-                    rect, "ID        Nombre                         Clase de render"),
+                    rect, "ID        Name                           Render Class"),
                 drawElementCallback = DrawEntry,
                 onAddCallback = AddEntry,
                 onRemoveCallback = RemoveEntry
@@ -169,12 +164,13 @@ namespace LocalModels.VoxelBridge
             DrawValidationAndLut(palette);
 
             EditorGUILayout.Space(6f);
-            if (GUILayout.Button("Restaurar superficies recomendadas") &&
+            if (GUILayout.Button("Restore Recommended Surfaces") &&
                 EditorUtility.DisplayDialog(
-                    "Restaurar superficies", "Se reemplazarán todas las entradas y los IDs retirados.",
-                    "Restaurar", "Cancelar"))
+                    "Restore Surfaces", "Se reemplazarán todas las entradas y los IDs retirados. " +
+                    "Los modelos que utilizan estos SurfaceID adoptarán las propiedades restauradas.",
+                    "Restore", "Cancel"))
             {
-                Undo.RecordObject(palette, "Restaurar superficies voxel");
+                Undo.RecordObject(palette, "Restore Voxel Surfaces");
                 palette.ResetRecommendedProfiles();
                 EditorUtility.SetDirty(palette);
                 serializedObject.Update();
@@ -221,10 +217,10 @@ namespace LocalModels.VoxelBridge
         {
             serializedObject.ApplyModifiedProperties();
             var palette = (VoxelSurfacePalette)target;
-            Undo.RecordObject(palette, "Añadir superficie voxel");
+            Undo.RecordObject(palette, "Add Voxel Surface");
             if (!palette.TryAddEntry(out _, out string error))
             {
-                EditorUtility.DisplayDialog("Voxel Bridge", error, "Cerrar");
+                EditorUtility.DisplayDialog("Voxel Bridge", error, "Close");
                 return;
             }
             EditorUtility.SetDirty(palette);
@@ -236,10 +232,10 @@ namespace LocalModels.VoxelBridge
         {
             serializedObject.ApplyModifiedProperties();
             var palette = (VoxelSurfacePalette)target;
-            Undo.RecordObject(palette, "Eliminar superficie voxel");
+            Undo.RecordObject(palette, "Remove Voxel Surface");
             if (!palette.TryRemoveEntryAt(list.index, out string error))
             {
-                EditorUtility.DisplayDialog("Voxel Bridge", error, "Cerrar");
+                EditorUtility.DisplayDialog("Voxel Bridge", error, "Close");
                 return;
             }
             EditorUtility.SetDirty(palette);
@@ -256,10 +252,10 @@ namespace LocalModels.VoxelBridge
                 EditorGUILayout.HelpBox("Paleta válida y LUT actualizada.", MessageType.Info);
 
             using (new EditorGUI.DisabledScope(true))
-                EditorGUILayout.ObjectField("LUT generada", palette.GeneratedLut, typeof(Texture2D), false);
-            if (GUILayout.Button("Regenerar LUT de superficies") &&
+                EditorGUILayout.ObjectField("Generated LUT", palette.GeneratedLut, typeof(Texture2D), false);
+            if (GUILayout.Button("Rebuild Surface LUT") &&
                 !VoxelPaletteLutGenerator.TryRebuild(palette, out _, out error))
-                EditorUtility.DisplayDialog("Voxel Bridge", error, "Cerrar");
+                EditorUtility.DisplayDialog("Voxel Bridge", error, "Close");
         }
 
         private static void DrawRetiredIds(System.Collections.Generic.IReadOnlyList<int> retiredIds)

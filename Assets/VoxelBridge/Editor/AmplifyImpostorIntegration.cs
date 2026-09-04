@@ -244,11 +244,11 @@ namespace LocalModels.VoxelBridge
             VoxelImpostorSettings settings = profile.GetSettings(quality);
             manifestAssetPath = VoxelLodPipeline.NormalizeAssetPath(manifestAssetPath);
             if (!VoxelLodPipeline.TryReadManifest(manifestAssetPath, out VoxelLodSetManifest manifest))
-                throw new InvalidDataException("El manifiesto de la familia voxel no es válido.");
+                throw new InvalidDataException("The voxel family manifest is invalid.");
             if (manifest.lods == null || manifest.lods.Length == 0)
-                throw new InvalidDataException("La familia no contiene ningún LOD voxel.");
+                throw new InvalidDataException("The family does not contain any voxel LODs.");
             if (!TryGetLastVoxelTransition(manifest, out float lastVoxelTransition))
-                throw new InvalidDataException("No se pudo determinar la transición del último LOD voxel.");
+                throw new InvalidDataException("Could not determine the last voxel LOD transition.");
             if (!settings.TryValidate(lastVoxelTransition, out string profileError))
                 throw new InvalidOperationException(profileError);
             if (!TryResolveApi(out Api api, out AmplifyImpostorCompatibility compatibility))
@@ -262,7 +262,7 @@ namespace LocalModels.VoxelBridge
                 prefabAsset = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
             }
             if (prefabAsset == null)
-                throw new InvalidDataException("No se encontró el prefab de la familia voxel.");
+                throw new InvalidDataException("Could not find the voxel family prefab.");
 
             string familyFolder = VoxelLodPipeline.NormalizeAssetPath(
                 Path.GetDirectoryName(manifestAssetPath));
@@ -275,7 +275,7 @@ namespace LocalModels.VoxelBridge
             Object data = AssetDatabase.LoadMainAssetAtPath(impostorAssetPath);
             if (data != null && !api.AssetType.IsInstanceOfType(data))
                 throw new InvalidDataException(
-                    $"'{impostorAssetPath}' existe pero no es un asset compatible de Amplify Impostors.");
+                    $"'{impostorAssetPath}' exists but is not a supported Amplify Impostors asset.");
             if (data == null)
             {
                 data = ScriptableObject.CreateInstance(api.AssetType);
@@ -291,19 +291,19 @@ namespace LocalModels.VoxelBridge
                 previewScene = EditorSceneManager.NewPreviewScene();
                 var instance = PrefabUtility.InstantiatePrefab(prefabAsset, previewScene) as GameObject;
                 if (instance == null)
-                    throw new InvalidOperationException("No se pudo crear la instancia temporal del prefab.");
+                    throw new InvalidOperationException("Could not create the temporary prefab instance.");
                 instance.SetActive(true);
 
                 LODGroup lodGroup = instance.GetComponent<LODGroup>();
-                if (lodGroup == null) throw new InvalidDataException("El prefab no contiene un LODGroup.");
+                if (lodGroup == null) throw new InvalidDataException("The prefab does not contain an LODGroup.");
                 LOD[] lods = lodGroup.GetLODs();
                 if (lods.Length == 0)
-                    throw new InvalidDataException("El LODGroup no contiene niveles para hornear.");
+                    throw new InvalidDataException("The LODGroup does not contain any levels to bake.");
                 Renderer[] sourceRenderers = (lods[0].renderers ?? Array.Empty<Renderer>())
                     .Where(renderer => renderer != null)
                     .ToArray();
                 if (sourceRenderers.Length == 0)
-                    throw new InvalidDataException("LOD0 no contiene renderers para hornear el impostor.");
+                    throw new InvalidDataException("LOD0 does not contain any renderers to bake the impostor.");
 
                 Component component = instance.AddComponent(api.ComponentType);
                 api.DataProperty.SetValue(component, data);
@@ -327,7 +327,7 @@ namespace LocalModels.VoxelBridge
                 catch (TargetInvocationException exception) when (exception.InnerException != null)
                 {
                     throw new InvalidOperationException(
-                        "Amplify Impostors no pudo completar el horneado: " +
+                        "Amplify Impostors could not complete the bake: " +
                         exception.InnerException.Message, exception.InnerException);
                 }
                 finally
@@ -343,7 +343,7 @@ namespace LocalModels.VoxelBridge
                 if (!(api.MeshField.GetValue(data) is Mesh) ||
                     !(api.MaterialField.GetValue(data) is Material generatedMaterial))
                     throw new InvalidOperationException(
-                        "Amplify terminó sin producir el mesh o el material del impostor.");
+                        "Amplify finished without producing the impostor mesh or material.");
 
                 ConfigureRenderPipeline(api, component);
                 ConfigureGeneratedMaterialForActivePipeline(
@@ -359,7 +359,6 @@ namespace LocalModels.VoxelBridge
                 if (previewScene.IsValid()) EditorSceneManager.ClosePreviewScene(previewScene);
             }
 
-            manifest.formatVersion = Mathf.Max(3, manifest.formatVersion);
             manifest.impostor = new VoxelImpostorEntry
             {
                 assetPath = impostorAssetPath,
@@ -381,9 +380,9 @@ namespace LocalModels.VoxelBridge
             manifestAssetPath = VoxelLodPipeline.NormalizeAssetPath(manifestAssetPath);
             if (!VoxelLodPipeline.TryReadManifest(
                     manifestAssetPath, out VoxelLodSetManifest manifest))
-                throw new InvalidDataException("El manifiesto de la familia voxel no es válido.");
+                throw new InvalidDataException("The voxel family manifest is invalid.");
             if (!HasConfiguredImpostor(manifest))
-                throw new InvalidOperationException("La familia no contiene un impostor.");
+                throw new InvalidOperationException("The family does not contain an impostor.");
 
             VoxelImpostorEntry previousImpostor = manifest.impostor;
             bool previousDisabled = manifest.impostorDisabled;
@@ -477,7 +476,7 @@ namespace LocalModels.VoxelBridge
             string enumName = GetActiveRenderPipelineEnumName();
             if (!Enum.TryParse(api.RenderPipelineField.FieldType, enumName, out object value))
                 throw new InvalidDataException(
-                    $"Amplify Impostors no expone el pipeline '{enumName}' esperado.");
+                    $"Amplify Impostors does not expose the expected '{enumName}' pipeline.");
             api.RenderPipelineField.SetValue(component, value);
         }
 
@@ -487,8 +486,8 @@ namespace LocalModels.VoxelBridge
             string detected = api.RenderPipelineField.GetValue(component)?.ToString();
             if (!string.Equals(expected, detected, StringComparison.Ordinal))
                 throw new InvalidOperationException(
-                    $"Amplify Impostors detectó el pipeline '{detected ?? "desconocido"}' " +
-                    $"durante el horneado; se esperaba '{expected}'.");
+                    $"Amplify Impostors detected pipeline '{detected ?? "unknown"}' " +
+                    $"during baking; expected '{expected}'.");
         }
 
         private static string GetActiveRenderPipelineEnumName()
@@ -507,15 +506,15 @@ namespace LocalModels.VoxelBridge
             if (GetActiveRenderPipeline() != ActiveRenderPipeline.Hdrp) return null;
 
             Object sourcePreset = AssetDatabase.LoadMainAssetAtPath(
-                "Assets/AmplifyImpostors/Plugins/EditorResources/Presets/BakePreset.asset");
+                DefaultPresetPath);
             Shader bakeShader = Shader.Find("Hidden/Voxel Bridge/Impostor Bake HDRP");
             if (sourcePreset == null || bakeShader == null)
                 throw new InvalidDataException(
-                    "No se encontró el preset o el shader de horneado HDRP de Amplify Impostors.");
+                    "Could not find the Amplify Impostors HDRP bake preset or shader.");
             if (!bakeShader.isSupported)
                 throw new InvalidDataException(
-                    $"El shader de horneado HDRP '{bakeShader.name}' no es compatible con " +
-                    "la configuración gráfica activa.");
+                    $"HDRP bake shader '{bakeShader.name}' does not support " +
+                    "the active graphics configuration.");
 
             Object preset = Object.Instantiate(sourcePreset);
             preset.name = "Voxel Bridge HDRP Bake Preset";
@@ -543,25 +542,12 @@ namespace LocalModels.VoxelBridge
             Shader shader = Shader.Find(shaderName);
             if (shader == null)
                 throw new InvalidDataException(
-                    $"No se encontró el shader runtime '{shaderName}' de Amplify Impostors.");
+                    $"Could not find the Amplify Impostors runtime shader '{shaderName}'.");
             if (material.shader == shader) return false;
 
             material.shader = shader;
             EditorUtility.SetDirty(material);
             return true;
-        }
-
-        internal static VoxelImpostorBatchBuildResult GenerateForBatch(
-            VoxelLodBatchBuildResult batch, VoxelImpostorProfile profile,
-            VoxelImpostorQuality quality, Func<float, string, bool> cancelProgress = null,
-            Func<string, VoxelImpostorProfile, VoxelImpostorQuality,
-                VoxelImpostorBuildResult> generate = null)
-        {
-            if (batch == null) throw new ArgumentNullException(nameof(batch));
-            return GenerateForManifests(
-                batch.Items.Where(item => item.Succeeded)
-                    .Select(item => item.BuildResult.ManifestAssetPath),
-                profile, quality, cancelProgress, generate);
         }
 
         internal static VoxelImpostorBatchBuildResult GenerateForBatch(
@@ -746,7 +732,7 @@ namespace LocalModels.VoxelBridge
                 VoxelImpostorBatchPlanEntry entry = plan.Entries[index];
                 if (cancelProgress != null && cancelProgress(
                         (float)index / plan.Entries.Length,
-                        $"Impostor {index + 1} de {plan.Entries.Length} · " +
+                        $"Impostor {index + 1} of {plan.Entries.Length} · " +
                         Path.GetFileName(entry.ManifestAssetPath)))
                     return new VoxelImpostorBatchBuildResult(
                         plan.CandidateCount, builds, failures, true,
@@ -776,7 +762,7 @@ namespace LocalModels.VoxelBridge
             }
 
             cancelProgress?.Invoke(
-                1f, $"Impostores terminados: {builds.Count} de {plan.Entries.Length}");
+                1f, $"Impostors completed: {builds.Count} of {plan.Entries.Length}");
             return new VoxelImpostorBatchBuildResult(
                 plan.CandidateCount, builds, failures, false,
                 plan.Skips, plan.EstimatedAtlasBytes,
@@ -807,7 +793,7 @@ namespace LocalModels.VoxelBridge
                 string path = paths[index];
                 if (cancelProgress != null && cancelProgress(
                         (float)index / paths.Length,
-                        $"Impostor {index + 1} de {paths.Length} · {Path.GetFileName(path)}"))
+                        $"Impostor {index + 1} of {paths.Length} · {Path.GetFileName(path)}"))
                     return new VoxelImpostorBatchBuildResult(
                         paths.Length, builds, failures, true);
 
@@ -830,7 +816,7 @@ namespace LocalModels.VoxelBridge
                 }
             }
 
-            cancelProgress?.Invoke(1f, $"Impostores terminados: {builds.Count} de {paths.Length}");
+            cancelProgress?.Invoke(1f, $"Impostors completed: {builds.Count} of {paths.Length}");
             return new VoxelImpostorBatchBuildResult(paths.Length, builds, failures, false);
         }
 
@@ -860,12 +846,14 @@ namespace LocalModels.VoxelBridge
             transitionHeight = 0f;
             if (manifest?.lods == null || manifest.lods.Length == 0) return false;
 
-            int lastLodIndex = manifest.lods.Max(entry => entry.lodIndex);
             VoxelLodEntry lastEntry = manifest.lods
                 .Where(entry => entry != null)
                 .OrderBy(entry => entry.lodIndex)
                 .LastOrDefault();
-            if (lastEntry != null && lastEntry.screenRelativeTransitionHeight > 0f)
+            if (lastEntry == null) return false;
+            int lastLodIndex = lastEntry.lodIndex;
+            if (lastEntry.screenRelativeTransitionHeight > 0f &&
+                lastEntry.screenRelativeTransitionHeight <= 1f)
             {
                 transitionHeight = Mathf.Clamp01(lastEntry.screenRelativeTransitionHeight);
                 return transitionHeight > 0f;
@@ -874,12 +862,13 @@ namespace LocalModels.VoxelBridge
             VoxelStyleProfile voxelProfile = string.IsNullOrEmpty(manifest.profileAssetPath)
                 ? null
                 : AssetDatabase.LoadAssetAtPath<VoxelStyleProfile>(manifest.profileAssetPath);
-            if (voxelProfile != null)
+            if (voxelProfile != null && voxelProfile.TryValidate(out _) &&
+                lastLodIndex >= 0 && lastLodIndex < voxelProfile.LodCount)
             {
                 transitionHeight = manifest.lodGroupSize > 0f
                     ? voxelProfile.GetLodScreenHeight(lastLodIndex, manifest.lodGroupSize)
                     : voxelProfile.GetLodScreenHeight(lastLodIndex);
-                return transitionHeight > 0f;
+                return transitionHeight > 0f && transitionHeight <= 1f;
             }
 
             GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(manifest.prefabAssetPath);
@@ -891,12 +880,11 @@ namespace LocalModels.VoxelBridge
                 if (voxelLodCount > 0)
                 {
                     transitionHeight = lods[voxelLodCount - 1].screenRelativeTransitionHeight;
-                    return transitionHeight > 0f;
+                    return transitionHeight > 0f && transitionHeight <= 1f;
                 }
             }
 
-            transitionHeight = Mathf.Max(0.01f, 0.6f * Mathf.Pow(0.5f, lastLodIndex));
-            return true;
+            return false;
         }
 
         internal static bool TryAppendExistingImpostor(
@@ -906,14 +894,14 @@ namespace LocalModels.VoxelBridge
             error = null;
             if (root == null || group == null || entry == null)
             {
-                error = "La configuración del impostor está incompleta.";
+                error = "The impostor configuration is incomplete.";
                 return false;
             }
 
             Object data = AssetDatabase.LoadMainAssetAtPath(entry.assetPath);
             if (data == null)
             {
-                error = $"No se encontró el asset '{entry.assetPath}'.";
+                error = $"Could not find asset '{entry.assetPath}'.";
                 return false;
             }
 
@@ -922,28 +910,29 @@ namespace LocalModels.VoxelBridge
             FieldInfo materialField = data.GetType().GetField("Material", fields);
             if (meshField == null || materialField == null)
             {
-                error = "El asset instalado cambió la estructura esperada de Mesh/Material.";
+                error = "The installed asset does not match the expected Mesh/Material structure.";
                 return false;
             }
             if (!(meshField.GetValue(data) is Mesh mesh) ||
                 !(materialField.GetValue(data) is Material material))
             {
-                error = "El asset del impostor todavía no contiene Mesh y Material.";
+                error = "The impostor asset does not contain a Mesh and Material yet.";
                 return false;
             }
 
             LOD[] voxelLods = group.GetLODs();
             if (voxelLods.Length == 0)
             {
-                error = "El prefab no contiene LODs voxel.";
+                error = "The prefab does not contain voxel LODs.";
                 return false;
             }
             float lastVoxelTransition = voxelLods[voxelLods.Length - 1]
                 .screenRelativeTransitionHeight;
-            if (entry.cullScreenHeight <= 0f || entry.cullScreenHeight >= lastVoxelTransition)
+            if (float.IsNaN(entry.cullScreenHeight) || entry.cullScreenHeight <= 0f ||
+                entry.cullScreenHeight >= lastVoxelTransition)
             {
-                error = $"El descarte {entry.cullScreenHeight:0.####} debe ser menor que " +
-                        $"la transición voxel {lastVoxelTransition:0.####}.";
+                error = $"Cull height {entry.cullScreenHeight:0.####} must be finite, positive, and lower than " +
+                        $"voxel transition {lastVoxelTransition:0.####}.";
                 return false;
             }
 
@@ -1027,16 +1016,8 @@ namespace LocalModels.VoxelBridge
             {
                 preset = AssetDatabase.LoadMainAssetAtPath(DefaultPresetPath);
                 if (preset == null || !api.PresetField.FieldType.IsInstanceOfType(preset))
-                {
-                    string guid = AssetDatabase.FindAssets("t:AmplifyImpostorBakePreset")
-                        .FirstOrDefault();
-                    preset = string.IsNullOrEmpty(guid)
-                        ? null
-                        : AssetDatabase.LoadMainAssetAtPath(AssetDatabase.GUIDToAssetPath(guid));
-                }
-                if (preset == null || !api.PresetField.FieldType.IsInstanceOfType(preset))
                     throw new InvalidDataException(
-                        "No se encontró un Bake Preset compatible de Amplify Impostors.");
+                        "Could not find the default Amplify Impostors bake preset.");
                 api.PresetField.SetValue(data, preset);
             }
 
@@ -1066,7 +1047,7 @@ namespace LocalModels.VoxelBridge
             {
                 compatibility = new AmplifyImpostorCompatibility(
                     AmplifyImpostorCompatibilityStatus.NotInstalled, null,
-                    "Amplify Impostors no está instalado. La familia voxel seguirá funcionando sin impostor.");
+                    "Amplify Impostors is not installed. The voxel family remains usable without an impostor.");
                 return false;
             }
 
@@ -1086,15 +1067,15 @@ namespace LocalModels.VoxelBridge
             {
                 compatibility = new AmplifyImpostorCompatibility(
                     AmplifyImpostorCompatibilityStatus.ApiConflict, null,
-                    "Amplify Impostors está instalado, pero no expone la información de versión esperada. No se aplicó ningún cambio.");
+                    "Amplify Impostors is installed but does not expose the expected version information. No changes were applied.");
                 return false;
             }
             if (!version.Equals(SupportedVersion, StringComparison.Ordinal))
             {
                 compatibility = new AmplifyImpostorCompatibility(
                     AmplifyImpostorCompatibilityStatus.UnsupportedVersion, version,
-                    $"Amplify Impostors {version} no ha sido validado por este adaptador " +
-                    $"(versión admitida: {SupportedVersion}). No se aplicó ningún cambio.");
+                    $"Amplify Impostors {version} is not supported by this adapter " +
+                    $"(supported version: {SupportedVersion}). No changes were applied.");
                 return false;
             }
 
@@ -1105,10 +1086,10 @@ namespace LocalModels.VoxelBridge
                 string message = patchStatus switch
                 {
                     AmplifyPipelinePatchResult.Required =>
-                        "Amplify Impostors requiere el parche de compatibilidad antes de hornear.",
+                        "Amplify Impostors requires the compatibility patch before baking.",
                     AmplifyPipelinePatchResult.NotInstalled =>
-                        "No se encontró la fuente instalada de Amplify Impostors.",
-                    _ => "La fuente instalada de Amplify Impostors no admite el parche de compatibilidad."
+                        "Could not find the installed Amplify Impostors source.",
+                    _ => "The installed Amplify Impostors source is not supported by the compatibility patch."
                 };
                 if (!string.IsNullOrWhiteSpace(patchDetail)) message += " " + patchDetail;
                 compatibility = new AmplifyImpostorCompatibility(
@@ -1158,31 +1139,37 @@ namespace LocalModels.VoxelBridge
                          api.LodGroupProperty?.PropertyType == typeof(LODGroup) &&
                          api.RenderersProperty?.PropertyType == typeof(Renderer[]) &&
                          api.LodReplacementField?.FieldType.IsEnum == true &&
-                          api.FolderPathField?.FieldType == typeof(string) &&
-                          api.ImpostorNameField?.FieldType == typeof(string) &&
-                          api.RenderPipelineField?.FieldType.IsEnum == true &&
-                          api.RenderMethod != null && api.CheckHdrpMaterialMethod != null &&
-                          api.MeshField != null &&
-                         api.MaterialField != null && api.ImpostorTypeField?.FieldType.IsEnum == true &&
-                         api.LockedSizesField != null && api.SelectedSizeField != null &&
-                         api.TextureSizeField != null && api.DecoupleFramesField != null &&
-                         api.HorizontalFramesField != null && api.VerticalFramesField != null &&
-                         api.PixelPaddingField != null && api.MaxVerticesField != null &&
-                          api.ToleranceField != null && api.NormalScaleField != null &&
-                          api.PresetField != null &&
-                          api.BakeShaderField?.FieldType == typeof(Shader);
+                         api.FolderPathField?.FieldType == typeof(string) &&
+                         api.ImpostorNameField?.FieldType == typeof(string) &&
+                         api.RenderPipelineField?.FieldType.IsEnum == true &&
+                         api.RenderMethod != null && api.CheckHdrpMaterialMethod != null &&
+                         api.MeshField?.FieldType == typeof(Mesh) &&
+                         api.MaterialField?.FieldType == typeof(Material) &&
+                         api.ImpostorTypeField?.FieldType.IsEnum == true &&
+                         api.LockedSizesField?.FieldType == typeof(bool) &&
+                         api.SelectedSizeField?.FieldType == typeof(int) &&
+                         api.TextureSizeField?.FieldType == typeof(Vector2) &&
+                         api.DecoupleFramesField?.FieldType == typeof(bool) &&
+                         api.HorizontalFramesField?.FieldType == typeof(int) &&
+                         api.VerticalFramesField?.FieldType == typeof(int) &&
+                         api.PixelPaddingField?.FieldType == typeof(int) &&
+                         api.MaxVerticesField?.FieldType == typeof(int) &&
+                         api.ToleranceField?.FieldType == typeof(float) &&
+                         api.NormalScaleField?.FieldType == typeof(float) &&
+                         api.PresetField != null &&
+                         api.BakeShaderField?.FieldType == typeof(Shader);
             if (!valid)
             {
                 api = null;
                 compatibility = new AmplifyImpostorCompatibility(
                     AmplifyImpostorCompatibilityStatus.ApiConflict, version,
-                    "La API instalada de Amplify Impostors no coincide con la firma validada. No se aplicó ningún cambio; revisa el warning antes de actualizar el adaptador.");
+                    "The installed Amplify Impostors API does not match the validated signature. No changes were applied; inspect the installed API before updating the adapter.");
                 return false;
             }
 
             compatibility = new AmplifyImpostorCompatibility(
                 AmplifyImpostorCompatibilityStatus.Ready, version,
-                $"Amplify Impostors {version} detectado. El horneado usará el pipeline activo y los renderers de LOD0.");
+                $"Amplify Impostors {version} detected. Baking uses the active pipeline and LOD0 renderers.");
             return true;
         }
 

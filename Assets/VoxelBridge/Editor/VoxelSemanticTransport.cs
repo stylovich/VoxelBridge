@@ -59,15 +59,15 @@ namespace LocalModels.VoxelBridge
         public static VoxelSemanticVoxDocument Parse(byte[] bytes)
         {
             if (bytes == null || bytes.Length < 20)
-                throw new InvalidDataException("El archivo VOX está truncado.");
+                throw new InvalidDataException("The VOX document is truncated.");
 
             using var stream = new MemoryStream(bytes, writable: false);
             using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
             if (ReadId(reader) != "VOX ")
-                throw new InvalidDataException("El archivo no contiene la cabecera VOX.");
+                throw new InvalidDataException("The file has no VOX header.");
             int version = reader.ReadInt32();
             if (ReadId(reader) != "MAIN")
-                throw new InvalidDataException("El archivo VOX no contiene el chunk MAIN.");
+                throw new InvalidDataException("The VOX document has no MAIN chunk.");
             int mainContentBytes = ReadNonNegativeSize(reader, "MAIN");
             int mainChildrenBytes = ReadNonNegativeSize(reader, "MAIN");
             EnsureRemaining(stream, checked((long)mainContentBytes + mainChildrenBytes), "MAIN");
@@ -91,15 +91,15 @@ namespace LocalModels.VoxelBridge
                 int childBytes = ReadNonNegativeSize(reader, id);
                 long totalBytes = checked(12L + contentBytes + childBytes);
                 if (chunkStart + totalBytes > mainEnd)
-                    throw new InvalidDataException($"El chunk {id} excede los límites de MAIN.");
+                    throw new InvalidDataException($"Chunk {id} exceeds the bounds of MAIN.");
 
                 long contentStart = stream.Position;
                 if (id == "RGBA")
                 {
                     if (hasPalette)
-                        throw new InvalidDataException("El archivo VOX contiene más de un chunk RGBA.");
+                        throw new InvalidDataException("The VOX document contains more than one RGBA chunk.");
                     if (contentBytes != 1024)
-                        throw new InvalidDataException("El chunk RGBA no tiene el tamaño esperado.");
+                        throw new InvalidDataException("The RGBA chunk has an invalid size.");
                     for (int i = 0; i < palette.Length; i++)
                         palette[i] = new Color32(
                             reader.ReadByte(), reader.ReadByte(), reader.ReadByte(), reader.ReadByte());
@@ -108,10 +108,10 @@ namespace LocalModels.VoxelBridge
                 else if (id == "XYZI")
                 {
                     if (contentBytes < 4)
-                        throw new InvalidDataException("El chunk XYZI está truncado.");
+                        throw new InvalidDataException("The XYZI chunk is truncated.");
                     int count = reader.ReadInt32();
                     if (count < 0 || checked(4L + count * 4L) > contentBytes)
-                        throw new InvalidDataException("El recuento de vóxeles XYZI no es válido.");
+                        throw new InvalidDataException("The XYZI voxel count is invalid.");
                     for (int i = 0; i < count; i++)
                     {
                         reader.ReadByte();
@@ -119,7 +119,7 @@ namespace LocalModels.VoxelBridge
                         reader.ReadByte();
                         byte slot = reader.ReadByte();
                         if (slot == 0)
-                            throw new InvalidDataException("XYZI contiene el slot de paleta reservado 0.");
+                            throw new InvalidDataException("XYZI contains reserved palette slot 0.");
                         usedSlots.Add(slot);
                         slotUsageCounts[slot] = checked(slotUsageCounts[slot] + 1);
                     }
@@ -127,7 +127,7 @@ namespace LocalModels.VoxelBridge
                 else if (id == "NOTE")
                 {
                     if (hasNotes)
-                        throw new InvalidDataException("El archivo VOX contiene más de un chunk NOTE.");
+                        throw new InvalidDataException("The VOX document contains more than one NOTE chunk.");
                     hasNotes = true;
                     ValidateNotes(reader, contentStart + contentBytes);
                 }
@@ -138,19 +138,19 @@ namespace LocalModels.VoxelBridge
 
                 stream.Position = chunkStart;
                 if (totalBytes > int.MaxValue)
-                    throw new InvalidDataException($"El chunk {id} es demasiado grande.");
+                    throw new InvalidDataException($"Chunk {id} is too large.");
                 chunks.Add(new RawChunk { Id = id, Bytes = reader.ReadBytes((int)totalBytes) });
             }
 
             if (stream.Position != mainEnd)
-                throw new InvalidDataException("El tamaño declarado por MAIN no coincide con el archivo.");
+                throw new InvalidDataException("The size declared by MAIN does not match the file.");
             if (mainEnd != stream.Length)
-                throw new InvalidDataException("El archivo VOX contiene datos fuera del chunk MAIN.");
+                throw new InvalidDataException("The VOX document contains data outside MAIN.");
             if (!hasPalette)
                 throw new InvalidDataException(
-                    "El archivo VOX no contiene una paleta RGBA explícita y no se puede vincular de forma segura.");
+                    "The VOX document has no explicit RGBA palette and cannot be bound safely.");
             if (usedSlots.Count == 0)
-                throw new InvalidDataException("El archivo VOX no contiene vóxeles ocupados.");
+                throw new InvalidDataException("The VOX document contains no occupied voxels.");
 
             byte[] orderedSlots = usedSlots.OrderBy(value => value).ToArray();
             return new VoxelSemanticVoxDocument(
@@ -166,9 +166,9 @@ namespace LocalModels.VoxelBridge
             foreach (VoxelSemanticSlotMetadata entry in semanticSlots)
             {
                 if (entry == null || entry.slot < 1 || entry.slot > byte.MaxValue)
-                    throw new InvalidDataException("La tabla semántica contiene un slot fuera de 1..255.");
+                    throw new InvalidDataException("The semantic table contains a slot outside 1..255.");
                 if (!seenSlots.Add(entry.slot))
-                    throw new InvalidDataException($"El slot {entry.slot} está duplicado en la tabla semántica.");
+                    throw new InvalidDataException($"Slot {entry.slot} is duplicated in the semantic table.");
                 palette[entry.slot - 1] = entry.displayColor;
             }
 
@@ -183,17 +183,8 @@ namespace LocalModels.VoxelBridge
                 }
             });
             var outputChildren = new List<byte[]>(children.Count);
-            bool wroteRgba = false;
             foreach (RawChunk child in children)
-            {
-                if (child.Id == "RGBA")
-                {
-                    if (!wroteRgba) outputChildren.Add(rgba);
-                    wroteRgba = true;
-                }
-                else outputChildren.Add(child.Bytes);
-            }
-            if (!wroteRgba) outputChildren.Add(rgba);
+                outputChildren.Add(child.Id == "RGBA" ? rgba : child.Bytes);
 
             int childrenBytes = 0;
             foreach (byte[] child in outputChildren)
@@ -214,17 +205,17 @@ namespace LocalModels.VoxelBridge
         private static void ValidateNotes(BinaryReader reader, long contentEnd)
         {
             if (contentEnd - reader.BaseStream.Position < 4)
-                throw new InvalidDataException("El chunk NOTE está truncado.");
+                throw new InvalidDataException("The NOTE chunk is truncated.");
             int count = reader.ReadInt32();
             if (count < 0 || count > 256)
-                throw new InvalidDataException("El chunk NOTE contiene un número de entradas no válido.");
+                throw new InvalidDataException("The NOTE chunk contains an invalid entry count.");
             for (int i = 0; i < count; i++)
             {
                 if (contentEnd - reader.BaseStream.Position < 4)
-                    throw new InvalidDataException("El chunk NOTE está truncado.");
+                    throw new InvalidDataException("The NOTE chunk is truncated.");
                 int length = reader.ReadInt32();
                 if (length < 0 || length > contentEnd - reader.BaseStream.Position)
-                    throw new InvalidDataException("Una entrada de NOTE tiene una longitud no válida.");
+                    throw new InvalidDataException("A NOTE entry has an invalid length.");
                 reader.BaseStream.Position += length;
             }
         }
@@ -249,14 +240,14 @@ namespace LocalModels.VoxelBridge
         private static int ReadNonNegativeSize(BinaryReader reader, string chunk)
         {
             int value = reader.ReadInt32();
-            if (value < 0) throw new InvalidDataException($"El chunk {chunk} contiene un tamaño negativo.");
+            if (value < 0) throw new InvalidDataException($"Chunk {chunk} contains a negative size.");
             return value;
         }
 
         private static void EnsureRemaining(Stream stream, long bytes, string chunk)
         {
             if (bytes < 0 || stream.Length - stream.Position < bytes)
-                throw new InvalidDataException($"El chunk {chunk} está truncado.");
+                throw new InvalidDataException($"Chunk {chunk} is truncated.");
         }
 
         private static string ReadId(BinaryReader reader) =>
@@ -265,7 +256,7 @@ namespace LocalModels.VoxelBridge
         private static void WriteId(BinaryWriter writer, string id)
         {
             if (id == null || id.Length != 4)
-                throw new ArgumentException("El identificador de chunk VOX debe tener cuatro caracteres.");
+                throw new ArgumentException("A VOX chunk identifier must contain four characters.");
             writer.Write(Encoding.ASCII.GetBytes(id));
         }
     }
@@ -292,7 +283,7 @@ namespace LocalModels.VoxelBridge
                 if (!mappingProfile.TryValidate(out error)) return false;
                 if (mappingProfile.ColorPalette != colorPalette)
                 {
-                    error = "El perfil de mapeo utiliza una paleta de colores diferente.";
+                    error = "The mapping profile uses a different color palette.";
                     return false;
                 }
             }
@@ -300,14 +291,14 @@ namespace LocalModels.VoxelBridge
             string surfacePath = AssetDatabase.GetAssetPath(surfacePalette);
             if (string.IsNullOrEmpty(colorPath) || string.IsNullOrEmpty(surfacePath))
             {
-                error = "Las paletas globales deben estar guardadas como assets antes de vincular un VOX.";
+                error = "Global palettes must be saved as assets before binding a VOX document.";
                 return false;
             }
             string colorGuid = AssetDatabase.AssetPathToGUID(colorPath);
             string surfaceGuid = AssetDatabase.AssetPathToGUID(surfacePath);
             if (string.IsNullOrEmpty(colorGuid) || string.IsNullOrEmpty(surfaceGuid))
             {
-                error = "Las paletas globales no tienen un GUID de asset válido.";
+                error = "The global palettes do not have valid asset GUIDs.";
                 return false;
             }
             if (!VoxelPaletteLutBuilder.TryBuildColorPixels(
@@ -352,18 +343,18 @@ namespace LocalModels.VoxelBridge
             warning = null;
             if (document == null)
             {
-                error = "No se pudo leer el documento VOX.";
+                error = "The VOX document could not be read.";
                 return false;
             }
             if (metadata == null || metadata.formatVersion != 1 || metadata.slots == null)
             {
-                error = "El sidecar no contiene metadata semántica compatible.";
+                error = "The sidecar contains no compatible semantic metadata.";
                 return false;
             }
             if (document.HasUnsupportedIndexMap)
             {
-                error = "El archivo contiene un IMAP. Su dirección de remapeo no está " +
-                        "certificada para el transporte semántico.";
+                error = "The file contains an IMAP. Its remapping direction has not been " +
+                        "validated for semantic transport.";
                 return false;
             }
             if (!TryValidateBindings(metadata.slots, colorPalette, surfacePalette, out error))
@@ -371,7 +362,7 @@ namespace LocalModels.VoxelBridge
             if (!string.Equals(metadata.slotTableHash, ComputeSlotTableHash(metadata.slots),
                     StringComparison.Ordinal))
             {
-                error = "La huella de la tabla semántica no coincide con el sidecar.";
+                error = "The semantic table hash does not match the sidecar.";
                 return false;
             }
 
@@ -384,14 +375,14 @@ namespace LocalModels.VoxelBridge
             {
                 if (!bySlot.TryGetValue(slot, out VoxelSemanticSlotMetadata entry))
                 {
-                    error = $"El slot utilizado {slot} no existe en la tabla semántica del sidecar.";
+                    error = $"Used slot {slot} is missing from the sidecar semantic table.";
                     slotToSemantic = null;
                     return false;
                 }
                 Color32 actual = document.Palette[slot - 1];
                 if (!entry.displayColor.Equals(actual))
                 {
-                    error = $"El color del slot {slot} cambió desde la última vinculación semántica.";
+                    error = $"The color of slot {slot} changed since its last semantic binding.";
                     slotToSemantic = null;
                     return false;
                 }
@@ -402,19 +393,19 @@ namespace LocalModels.VoxelBridge
             if (VoxelPaletteLutBuilder.TryBuildColorPixels(
                     colorPalette, out _, out string colorHash, out _) &&
                 !string.Equals(colorHash, metadata.colorPaletteHash, StringComparison.Ordinal))
-                warnings.Add("la paleta global de color cambió");
+                warnings.Add("the global color palette changed");
             if (VoxelPaletteLutBuilder.TryBuildSurfacePixels(
                     surfacePalette, out _, out string surfaceHash, out _) &&
                 !string.Equals(surfaceHash, metadata.surfacePaletteHash, StringComparison.Ordinal))
-                warnings.Add("la paleta global de superficies cambió");
+                warnings.Add("the global surface palette changed");
             bool ambiguousDuplicateColors = metadata.slots
                 .GroupBy(entry => entry.displayColor)
                 .Any(group => group.Select(entry =>
                         VoxelSemanticEncoding.Pack(entry.colorId, entry.surfaceId))
                     .Distinct().Count() > 1);
             if (ambiguousDuplicateColors)
-                warnings.Add("hay slots RGB idénticos con superficies distintas; " +
-                             "su reordenamiento al guardar en MagicaVoxel aún no está certificado");
+                warnings.Add("identical RGB slots use different surfaces; " +
+                             "slot reordering when saving in MagicaVoxel has not been validated");
             warning = warnings.Count > 0 ? string.Join("; ", warnings) : null;
             error = null;
             return true;
@@ -428,32 +419,31 @@ namespace LocalModels.VoxelBridge
             surfacePalette = null;
             if (metadata == null)
             {
-                error = "El sidecar no contiene metadata semántica.";
+                error = "The sidecar contains no semantic metadata.";
                 return false;
             }
-            string colorPath = ResolveAssetPath(
-                metadata.colorPaletteGuid, metadata.colorPaletteAssetPath);
-            string surfacePath = ResolveAssetPath(
-                metadata.surfacePaletteGuid, metadata.surfacePaletteAssetPath);
+            if (string.IsNullOrWhiteSpace(metadata.colorPaletteGuid) ||
+                string.IsNullOrWhiteSpace(metadata.surfacePaletteGuid))
+            {
+                error = "The sidecar contains no valid global palette GUIDs. Bind the VOX document to its palettes again.";
+                return false;
+            }
+            string colorPath = AssetDatabase.GUIDToAssetPath(metadata.colorPaletteGuid);
+            string surfacePath = AssetDatabase.GUIDToAssetPath(metadata.surfacePaletteGuid);
+            if (string.IsNullOrWhiteSpace(colorPath) || string.IsNullOrWhiteSpace(surfacePath))
+            {
+                error = "A global palette referenced by GUID is missing. Restore the palette or bind the VOX document again.";
+                return false;
+            }
             colorPalette = AssetDatabase.LoadAssetAtPath<VoxelColorPalette>(colorPath);
             surfacePalette = AssetDatabase.LoadAssetAtPath<VoxelSurfacePalette>(surfacePath);
             if (colorPalette == null || surfacePalette == null)
             {
-                error = "No se pudieron cargar las paletas globales referenciadas por el sidecar.";
+                error = "The global palettes referenced by the sidecar could not be loaded.";
                 return false;
             }
             error = null;
             return true;
-        }
-
-        private static string ResolveAssetPath(string guid, string fallbackPath)
-        {
-            if (!string.IsNullOrWhiteSpace(guid))
-            {
-                string guidPath = AssetDatabase.GUIDToAssetPath(guid);
-                if (!string.IsNullOrWhiteSpace(guidPath)) return guidPath;
-            }
-            return fallbackPath;
         }
 
         public static string ComputeSlotTableHash(
@@ -479,18 +469,18 @@ namespace LocalModels.VoxelBridge
         {
             if (slots == null || slots.Count == 0 || slots.Count > byte.MaxValue)
             {
-                error = "La tabla semántica debe contener entre 1 y 255 slots.";
+                error = "The semantic table must contain between 1 and 255 slots.";
                 return false;
             }
             if (colorPalette == null)
             {
-                error = "La paleta global de colores no está asignada.";
+                error = "The global color palette is not assigned.";
                 return false;
             }
             if (!colorPalette.TryValidate(out error)) return false;
             if (surfacePalette == null)
             {
-                error = "La paleta global de superficies no está asignada.";
+                error = "The global surface palette is not assigned.";
                 return false;
             }
             if (!surfacePalette.TryValidate(out error)) return false;
@@ -501,29 +491,29 @@ namespace LocalModels.VoxelBridge
             {
                 if (entry == null || entry.slot < 1 || entry.slot > byte.MaxValue)
                 {
-                    error = "La tabla semántica contiene un slot fuera del rango 1..255.";
+                    error = "The semantic table contains a slot outside 1..255.";
                     return false;
                 }
                 if (!seen.Add(entry.slot))
                 {
-                    error = $"El slot {entry.slot} está duplicado en la tabla semántica.";
+                    error = $"Slot {entry.slot} is duplicated in the semantic table.";
                     return false;
                 }
                 if (!colorPalette.TryGetColor(entry.colorId, out _))
                 {
-                    error = $"El slot {entry.slot} referencia un ColorID desconocido: {entry.colorId}.";
+                    error = $"Slot {entry.slot} references an unknown ColorID: {entry.colorId}.";
                     return false;
                 }
                 if (!surfacePalette.TryGetSurface(entry.surfaceId, out _))
                 {
-                    error = $"El slot {entry.slot} referencia un SurfaceID desconocido: {entry.surfaceId}.";
+                    error = $"Slot {entry.slot} references an unknown SurfaceID: {entry.surfaceId}.";
                     return false;
                 }
                 ushort semanticId = VoxelSemanticEncoding.Pack(entry.colorId, entry.surfaceId);
                 if (!semanticPairs.Add(semanticId))
                 {
-                    error = $"El par ColorID {entry.colorId} + SurfaceID {entry.surfaceId} " +
-                            "aparece en más de un slot.";
+                    error = $"ColorID {entry.colorId} + SurfaceID {entry.surfaceId} " +
+                            "appears in more than one slot.";
                     return false;
                 }
             }
@@ -547,13 +537,13 @@ namespace LocalModels.VoxelBridge
         {
             if (grid == null) throw new ArgumentNullException(nameof(grid));
             if (!grid.IsSemantic)
-                throw new ArgumentException("La rejilla no contiene IDs semánticos.", nameof(grid));
+                throw new ArgumentException("The grid contains no semantic IDs.", nameof(grid));
             if (colorPalette == null)
-                throw new InvalidDataException("La paleta de color no está asignada.");
+                throw new InvalidDataException("The color palette is not assigned.");
             if (!colorPalette.TryValidate(out string colorError))
                 throw new InvalidDataException(colorError);
             if (surfacePalette == null)
-                throw new InvalidDataException("La paleta de superficies no está asignada.");
+                throw new InvalidDataException("The surface palette is not assigned.");
             if (!surfacePalette.TryValidate(out string surfaceError))
                 throw new InvalidDataException(surfaceError);
 
@@ -566,10 +556,10 @@ namespace LocalModels.VoxelBridge
                 frequencies[semanticId] = count + 1;
             }
             if (frequencies.Count == 0)
-                throw new InvalidOperationException("No hay vóxeles para exportar.");
+                throw new InvalidOperationException("There are no voxels to export.");
             if (frequencies.Count > byte.MaxValue)
                 throw new InvalidDataException(
-                    $"El volumen utiliza {frequencies.Count} pares ColorID + SurfaceID; un VOX admite como máximo 255.");
+                    $"The volume uses {frequencies.Count} ColorID + SurfaceID pairs; a VOX document supports at most 255.");
 
             ushort[] ordered = frequencies.OrderByDescending(pair => pair.Value)
                 .ThenBy(pair => pair.Key)
@@ -584,9 +574,9 @@ namespace LocalModels.VoxelBridge
                 int colorId = VoxelSemanticEncoding.ColorId(semanticId);
                 int surfaceId = VoxelSemanticEncoding.SurfaceId(semanticId);
                 if (!colorPalette.TryGetColor(colorId, out Color32 color))
-                    throw new InvalidDataException($"El volumen referencia un ColorID desconocido: {colorId}.");
+                    throw new InvalidDataException($"The volume references an unknown ColorID: {colorId}.");
                 if (!surfacePalette.TryGetSurface(surfaceId, out _))
-                    throw new InvalidDataException($"El volumen referencia un SurfaceID desconocido: {surfaceId}.");
+                    throw new InvalidDataException($"The volume references an unknown SurfaceID: {surfaceId}.");
                 byte slot = (byte)(i + 1);
                 semanticToSlot.Add(semanticId, slot);
                 palette[i] = color;
@@ -610,15 +600,6 @@ namespace LocalModels.VoxelBridge
 
     internal static class VoxelSemanticBindingService
     {
-        public static bool TryBind(string voxAssetPath,
-            IReadOnlyList<VoxelSemanticSlotMetadata> bindings,
-            VoxelColorPalette colorPalette, VoxelSurfacePalette surfacePalette,
-            out string message)
-        {
-            return TryBind(voxAssetPath, bindings, colorPalette, surfacePalette,
-                null, out message);
-        }
-
         public static bool TryBind(string voxAssetPath,
             IReadOnlyList<VoxelSemanticSlotMetadata> bindings,
             VoxelColorPalette colorPalette, VoxelSurfacePalette surfacePalette,
@@ -647,7 +628,7 @@ namespace LocalModels.VoxelBridge
                     return false;
 
                 byte[] updatedVox = document.BuildSemanticBytes(semantic.slots);
-                metadata.formatVersion = Math.Max(4, metadata.formatVersion);
+                metadata.formatVersion = 4;
                 metadata.semantic = semantic;
                 string updatedMetadata = JsonUtility.ToJson(metadata, true);
 
@@ -667,8 +648,8 @@ namespace LocalModels.VoxelBridge
                 if (VoxelImporterIntegration.IsInstalled)
                     VoxelImporterIntegration.ApplyAndReimport(
                         voxAssetPath, out importerMessage, forceReimport: true);
-                message = "Vinculación semántica guardada.";
-                if (!string.IsNullOrEmpty(warning)) message += " Advertencia: " + warning + ".";
+                message = "Semantic binding saved.";
+                if (!string.IsNullOrEmpty(warning)) message += " Warning: " + warning + ".";
                 if (!string.IsNullOrEmpty(importerMessage)) message += " " + importerMessage;
                 return true;
             }
@@ -688,7 +669,7 @@ namespace LocalModels.VoxelBridge
                         Debug.LogException(rollbackException);
                     }
                 }
-                message = "No se pudo guardar la vinculación semántica: " + exception.Message;
+                message = "Could not save semantic binding: " + exception.Message;
                 return false;
             }
         }
@@ -703,7 +684,7 @@ namespace LocalModels.VoxelBridge
             foreach (byte slot in usedSlots)
             {
                 if (bound.Contains(slot)) continue;
-                error = $"El slot utilizado {slot} no tiene ColorID y SurfaceID asignados.";
+                error = $"Used slot {slot} has no assigned ColorID and SurfaceID.";
                 return false;
             }
             error = null;

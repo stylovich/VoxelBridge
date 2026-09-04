@@ -18,7 +18,6 @@ namespace LocalModels.VoxelBridge
     internal sealed class VoxelLodBatchSourceEstimate
     {
         public readonly Object ReuseKey;
-        public readonly Object ConversionSource;
         public readonly string SourceName;
         public readonly VoxelGridPlan[] LodPlans;
         public readonly long EstimatedPeakBytes;
@@ -41,13 +40,12 @@ namespace LocalModels.VoxelBridge
                     : VoxelLodBatchMemoryRisk.Normal;
 
         public VoxelLodBatchSourceEstimate(
-            Object reuseKey, Object conversionSource, string sourceName,
+            Object reuseKey, string sourceName,
             IEnumerable<VoxelGridPlan> lodPlans, long estimatedPeakBytes,
             long totalDenseCells, long memoryBudgetBytes, int initialLodIndex,
             int initialVoxelMultiplier, string error)
         {
             ReuseKey = reuseKey;
-            ConversionSource = conversionSource;
             SourceName = sourceName;
             LodPlans = lodPlans?.ToArray() ?? Array.Empty<VoxelGridPlan>();
             EstimatedPeakBytes = estimatedPeakBytes;
@@ -71,8 +69,6 @@ namespace LocalModels.VoxelBridge
         public int InvalidCount => Sources.Count(source => !source.IsValid);
         public int OverBudgetCount => Sources.Count(source => source.IsOverBudget);
         public int AdaptedCount => Sources.Count(source => source.IsValid && source.WasAdapted);
-        public int ElevatedCount => Sources.Count(source =>
-            source.Risk == VoxelLodBatchMemoryRisk.Elevated);
         public long EstimatedPeakBytes => Sources.Length == 0
             ? 0
             : Sources.Max(source => source.EstimatedPeakBytes);
@@ -121,13 +117,13 @@ namespace LocalModels.VoxelBridge
                 VoxelLodBatchSourcePlan plan = uniquePlans[index];
                 if (cancelProgress != null && cancelProgress(
                         uniquePlans.Length == 0 ? 1f : (float)index / uniquePlans.Length,
-                        $"Analizando {index + 1} de {uniquePlans.Length}: {plan.Source.name}"))
-                    throw new OperationCanceledException("Análisis del lote cancelado.");
+                        $"Analyzing {index + 1} of {uniquePlans.Length}: {plan.Source.name}"))
+                    throw new OperationCanceledException("Batch analysis cancelled.");
 
                 estimates.Add(Estimate(plan, profile, lodOptions, batchOptions));
             }
 
-            cancelProgress?.Invoke(1f, "Análisis de memoria terminado");
+            cancelProgress?.Invoke(1f, "Memory analysis complete");
             return new VoxelLodBatchPreflight(
                 CreateSignature(plans, profile, lodOptions, batchOptions), estimates,
                 plans.Length, plans.Count(plan => plan.Ignored));
@@ -209,7 +205,7 @@ namespace LocalModels.VoxelBridge
             catch (Exception exception)
             {
                 return new VoxelLodBatchSourceEstimate(
-                    reuseKey, conversionSource, sourceName,
+                    reuseKey, sourceName,
                     Array.Empty<VoxelGridPlan>(), 0, 0,
                     batchOptions.MaximumEstimatedMemoryBytes, 0, 1, exception.Message);
             }
@@ -229,7 +225,7 @@ namespace LocalModels.VoxelBridge
                 try
                 {
                     VoxelLodBatchSourceEstimate estimate = EstimateAtMultiplier(
-                        reuseKey, conversionSource, sourceName, profile, lodOptions,
+                        reuseKey, sourceName, profile,
                         batchOptions, bounds, sourceOverhead,
                         initialLodIndex, initialMultiplier);
                     lastValid = estimate;
@@ -243,19 +239,19 @@ namespace LocalModels.VoxelBridge
 
             if (lastValid != null) return lastValid;
             string suffix = batchOptions.AdaptInitialVoxelSize && maximumInitialLod > 0
-                ? $" No se encontró una rejilla válida hasta LOD{maximumInitialLod} " +
+                ? $" No valid grid was found up to LOD{maximumInitialLod} " +
                   $"(×{lastInitialMultiplier})."
                 : string.Empty;
             return new VoxelLodBatchSourceEstimate(
-                reuseKey, conversionSource, sourceName,
+                reuseKey, sourceName,
                 Array.Empty<VoxelGridPlan>(), 0, 0,
                 batchOptions.MaximumEstimatedMemoryBytes, lastInitialLod,
-                lastInitialMultiplier, (lastError ?? "La fuente no se puede analizar.") + suffix);
+                lastInitialMultiplier, (lastError ?? "The source could not be analyzed.") + suffix);
         }
 
         private static VoxelLodBatchSourceEstimate EstimateAtMultiplier(
-            Object reuseKey, Object conversionSource, string sourceName,
-            VoxelStyleProfile profile, VoxelLodBuildOptions lodOptions,
+            Object reuseKey, string sourceName,
+            VoxelStyleProfile profile,
             VoxelLodBatchOptions batchOptions,
             Bounds bounds, long sourceOverhead, int initialLodIndex,
             int initialMultiplier)
@@ -281,7 +277,7 @@ namespace LocalModels.VoxelBridge
             }
 
             return new VoxelLodBatchSourceEstimate(
-                reuseKey, conversionSource, sourceName, lodPlans,
+                reuseKey, sourceName, lodPlans,
                 peakBytes, totalCells, batchOptions.MaximumEstimatedMemoryBytes,
                 initialLodIndex, initialMultiplier, null);
         }

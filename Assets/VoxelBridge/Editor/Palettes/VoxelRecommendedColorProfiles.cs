@@ -43,7 +43,7 @@ namespace LocalModels.VoxelBridge
                 BrightEnds()),
 
             new("ColorProfile_Architecture",
-                "Biblioteca no emisiva amplia con una selección reducida de acentos intensos. " +
+                "Biblioteca cromática amplia con una selección reducida de acentos intensos. " +
                 "Recomendado para edificios, interiores y estructuras de fondo.",
                 Ranges((0, VoxelRecommendedColorLibrary.PastelLast)),
                 BrightEnds()),
@@ -77,16 +77,27 @@ namespace LocalModels.VoxelBridge
             .Select(preset => ProfileFolder + "/" + preset.FileName + ".asset")
             .ToArray();
 
+        internal static bool TryValidateAssetPaths(out string error)
+        {
+            foreach (string path in AssetPaths)
+            {
+                if (!VoxelPaletteLutGenerator.TryValidateAssetType<VoxelColorMappingProfile>(path, out error))
+                    return false;
+            }
+            error = null;
+            return true;
+        }
+
         internal static bool TryCreateOrResetAssets(VoxelColorPalette palette,
-            bool replaceExisting, out VoxelColorMappingProfile[] profiles, out string error)
+            out VoxelColorMappingProfile[] profiles, out string error)
         {
             profiles = null;
             if (palette == null)
             {
-                error = "La paleta global de colores no está asignada.";
+                error = "The global color palette is not assigned.";
                 return false;
             }
-            if (!palette.TryValidate(out error)) return false;
+            if (!palette.TryValidate(out error) || !TryValidateAssetPaths(out error)) return false;
 
             try
             {
@@ -100,13 +111,7 @@ namespace LocalModels.VoxelBridge
                     bool created = profile == null;
                     if (created)
                         profile = ScriptableObject.CreateInstance<VoxelColorMappingProfile>();
-                    else if (!replaceExisting)
-                    {
-                        result.Add(profile);
-                        continue;
-                    }
-
-                    if (!created) Undo.RecordObject(profile, "Restaurar perfil de color recomendado");
+                    if (!created) Undo.RecordObject(profile, "Restore Recommended Color Profile");
                     profile.ConfigureRecommended(
                         palette, preset.Description, preset.Ranges, preset.AdditionalIds);
                     if (!profile.TryValidate(out error))
@@ -127,7 +132,7 @@ namespace LocalModels.VoxelBridge
             }
             catch (Exception exception)
             {
-                error = "No se pudieron crear los perfiles de color recomendados: " + exception.Message;
+                error = "Could not create the recommended color profiles: " + exception.Message;
                 return false;
             }
         }

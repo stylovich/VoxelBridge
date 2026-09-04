@@ -53,7 +53,7 @@ namespace LocalModels.VoxelBridge
                 }
                 chunk.GlobalIndices.Add(index);
             }
-            if (byCoordinate.Count == 0) throw new InvalidOperationException("No hay vóxeles para exportar.");
+            if (byCoordinate.Count == 0) throw new InvalidOperationException("There are no voxels to export.");
 
             var chunks = new List<ChunkBuild>(byCoordinate.Values);
             chunks.Sort((a, b) =>
@@ -248,8 +248,10 @@ namespace LocalModels.VoxelBridge
         public static VoxelGrid Read(string path, VoxelBridgeMetadata metadata)
         {
             if (metadata == null) throw new ArgumentNullException(nameof(metadata));
+            if (metadata.formatVersion != 3 && metadata.formatVersion != 4)
+                throw new InvalidDataException($"Unsupported Voxel Bridge metadata version: {metadata.formatVersion}.");
             if (metadata.unityGridSize.x <= 0 || metadata.unityGridSize.y <= 0 || metadata.unityGridSize.z <= 0)
-                throw new InvalidDataException("Los metadatos no contienen una rejilla válida.");
+                throw new InvalidDataException("The metadata does not contain a valid grid.");
 
             bool isSemantic = metadata.formatVersion >= 4;
             ushort[] slotToSemantic = null;
@@ -257,7 +259,7 @@ namespace LocalModels.VoxelBridge
             {
                 if (metadata.semantic == null)
                     throw new InvalidDataException(
-                        "El sidecar v4 no contiene metadata semántica.");
+                        "The v4 sidecar contains no semantic metadata.");
                 VoxelSemanticVoxDocument semanticDocument = VoxelSemanticVoxDocument.Read(path);
                 if (!VoxelSemanticTransport.TryLoadPalettes(metadata.semantic,
                         out VoxelColorPalette colorPalette,
@@ -275,43 +277,70 @@ namespace LocalModels.VoxelBridge
             var palette = new Color32[256];
             using var stream = File.OpenRead(path);
             using var reader = new BinaryReader(stream);
-            if (ReadId(reader) != "VOX ") throw new InvalidDataException("El archivo no es VOX.");
+            EnsureAvailable(stream, stream.Length, 20, "VOX header");
+            if (ReadId(reader) != "VOX ") throw new InvalidDataException("The file is not a VOX document.");
             reader.ReadInt32();
-            if (ReadId(reader) != "MAIN") throw new InvalidDataException("Falta el chunk MAIN.");
+            if (ReadId(reader) != "MAIN") throw new InvalidDataException("The MAIN chunk is missing.");
             int mainContent = reader.ReadInt32();
             int mainChildren = reader.ReadInt32();
+            if (mainContent < 0 || mainChildren < 0)
+                throw new InvalidDataException("The MAIN chunk contains a negative size.");
+            EnsureAvailable(stream, stream.Length, (long)mainContent + mainChildren, "MAIN");
             stream.Position += mainContent;
             long mainEnd = stream.Position + mainChildren;
+            if (mainEnd != stream.Length)
+                throw new InvalidDataException("The VOX document contains data outside MAIN.");
             Vector3Int pendingSize = Vector3Int.zero;
+            bool hasPalette = false;
             while (stream.Position < mainEnd)
             {
+                EnsureAvailable(stream, mainEnd, 12, "chunk header");
                 string id = ReadId(reader);
                 int contentBytes = reader.ReadInt32();
                 int childrenBytes = reader.ReadInt32();
+                if (contentBytes < 0 || childrenBytes < 0)
+                    throw new InvalidDataException($"Chunk {id} contains a negative size.");
+                EnsureAvailable(stream, mainEnd, (long)contentBytes + childrenBytes, id);
                 long contentStart = stream.Position;
                 if (id == "SIZE")
                 {
+                    if (contentBytes != 12 || pendingSize != Vector3Int.zero)
+                        throw new InvalidDataException("The SIZE chunk is invalid or has no matching XYZI chunk.");
                     int x = reader.ReadInt32();
                     int voxY = reader.ReadInt32();
                     int voxZ = reader.ReadInt32();
+                    if (x < 1 || x > 256 || voxY < 1 || voxY > 256 || voxZ < 1 || voxZ > 256)
+                        throw new InvalidDataException("SIZE dimensions must be between 1 and 256.");
                     pendingSize = new Vector3Int(x, voxZ, voxY);
                 }
                 else if (id == "XYZI")
                 {
+                    if (contentBytes < 4 || pendingSize == Vector3Int.zero)
+                        throw new InvalidDataException("The XYZI chunk is truncated or has no preceding SIZE chunk.");
                     var model = new Model { Size = pendingSize };
                     int count = reader.ReadInt32();
+                    if (count < 0 || 4L + count * 4L != contentBytes)
+                        throw new InvalidDataException("The XYZI voxel count does not match its chunk size.");
                     for (int i = 0; i < count; i++)
                         model.Voxels.Add((reader.ReadByte(), reader.ReadByte(), reader.ReadByte(), reader.ReadByte()));
                     models.Add(model);
+                    pendingSize = Vector3Int.zero;
                 }
                 else if (id == "RGBA")
                 {
+                    if (hasPalette || contentBytes != 1024)
+                        throw new InvalidDataException("The RGBA chunk is duplicated or has an invalid size.");
                     for (int i = 0; i < 256; i++)
                         palette[i] = new Color32(reader.ReadByte(), reader.ReadByte(), reader.ReadByte(), reader.ReadByte());
+                    hasPalette = true;
                 }
                 stream.Position = contentStart + contentBytes + childrenBytes;
             }
-            if (models.Count == 0) throw new InvalidDataException("El archivo VOX no contiene modelos.");
+            if (pendingSize != Vector3Int.zero)
+                throw new InvalidDataException("A SIZE chunk has no matching XYZI chunk.");
+            if (models.Count == 0) throw new InvalidDataException("The VOX document contains no models.");
+            if (!hasPalette)
+                throw new InvalidDataException("The VOX document has no explicit RGBA palette. Re-export it with its palette before generating LODs.");
 
             var grid = new VoxelGrid(
                 metadata.unityGridSize, metadata.gridOrigin, metadata.voxelSize, isSemantic);
@@ -328,31 +357,38 @@ namespace LocalModels.VoxelBridge
                     }
                 };
             }
+            if (chunks.Length != models.Count)
+                throw new InvalidDataException("The sidecar model count does not match the VOX document. Re-export the model and its sidecar before generating LODs.");
+            var mappedModels = new HashSet<int>();
             foreach (VoxelChunkMetadata chunk in chunks)
             {
-                if (chunk.modelIndex < 0 || chunk.modelIndex >= models.Count)
-                    throw new InvalidDataException("Los metadatos de chunks no coinciden con el VOX.");
+                if (chunk == null || chunk.modelIndex < 0 || chunk.modelIndex >= models.Count ||
+                    !mappedModels.Add(chunk.modelIndex))
+                    throw new InvalidDataException("The chunk metadata does not match the VOX models.");
                 Model model = models[chunk.modelIndex];
                 foreach ((byte x, byte voxY, byte voxZ, byte paletteIndex) in model.Voxels)
                 {
-                    int gx = chunk.gridOffset.x + x;
-                    int gy = chunk.gridOffset.y + voxZ;
-                    int gz = chunk.gridOffset.z + voxY;
+                    if (x >= model.Size.x || voxZ >= model.Size.y || voxY >= model.Size.z)
+                        throw new InvalidDataException($"Model {chunk.modelIndex} contains a voxel outside its SIZE bounds.");
+                    if (paletteIndex == 0)
+                        throw new InvalidDataException("XYZI uses reserved palette slot 0.");
+                    long gx = (long)chunk.gridOffset.x + x;
+                    long gy = (long)chunk.gridOffset.y + voxZ;
+                    long gz = (long)chunk.gridOffset.z + voxY;
                     if (gx < 0 || gy < 0 || gz < 0 ||
-                        gx >= grid.Size.x || gy >= grid.Size.y || gz >= grid.Size.z) continue;
-                    int index = grid.Index(gx, gy, gz);
+                        gx >= grid.Size.x || gy >= grid.Size.y || gz >= grid.Size.z)
+                        throw new InvalidDataException(
+                            $"Model {chunk.modelIndex} contains a voxel outside the saved grid at ({gx}, {gy}, {gz}). " +
+                            "Re-export the model and its sidecar with matching bounds before generating LODs.");
+                    int index = grid.Index((int)gx, (int)gy, (int)gz);
                     grid.Occupied[index] = true;
                     if (isSemantic)
                     {
-                        if (paletteIndex == 0)
-                            throw new InvalidDataException("XYZI utiliza el slot de paleta reservado 0.");
                         grid.SemanticIds[index] = slotToSemantic[paletteIndex];
                     }
                     else
                     {
-                        grid.Colors[index] = paletteIndex > 0
-                            ? palette[paletteIndex - 1]
-                            : Color.white;
+                        grid.Colors[index] = palette[paletteIndex - 1];
                     }
                 }
             }
@@ -360,6 +396,12 @@ namespace LocalModels.VoxelBridge
         }
 
         private static string ReadId(BinaryReader reader) => Encoding.ASCII.GetString(reader.ReadBytes(4));
+
+        private static void EnsureAvailable(Stream stream, long end, long bytes, string chunk)
+        {
+            if (bytes < 0 || bytes > end - stream.Position)
+                throw new InvalidDataException($"Chunk {chunk} is truncated or exceeds its parent bounds.");
+        }
     }
 
     internal static class VoxelGridDownsampler
@@ -378,7 +420,7 @@ namespace LocalModels.VoxelBridge
                 if (!found) { min = cellMin; max = cellMax; found = true; }
                 else { min = Vector3.Min(min, cellMin); max = Vector3.Max(max, cellMax); }
             }
-            if (!found) throw new InvalidOperationException("El LOD anterior no contiene vóxeles.");
+            if (!found) throw new InvalidOperationException("The previous LOD contains no voxels.");
 
             Bounds bounds = new Bounds((min + max) * 0.5f, max - min);
             VoxelGridPlan plan = VoxelGridPlanner.Create(bounds, targetVoxelSize, padding, chunkCellSize);

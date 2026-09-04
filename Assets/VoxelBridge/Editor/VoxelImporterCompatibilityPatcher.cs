@@ -44,30 +44,27 @@ namespace LocalModels.VoxelBridge
             "            for (int j = 0; j < 4; j++) normals.Add(scaledNormal);\n" +
             "            // Voxel Bridge normal-scale compatibility patch. END";
 
-        [MenuItem("Tools/Voxel Bridge/Compatibilidad/Aplicar parche de normales de Voxel Importer")]
+        [MenuItem("Tools/Voxel Bridge/Compatibility/Apply Voxel Importer Normal Patch")]
         private static void ApplyNormalsPatchMenu()
         {
             if (!TryApplyToProject(out VoxelImporterPatchResult result, out string message))
             {
                 Debug.LogWarning(message);
                 if (!Application.isBatchMode)
-                    EditorUtility.DisplayDialog("Voxel Bridge - parche no aplicado", message, "Aceptar");
+                    EditorUtility.DisplayDialog("Voxel Bridge - Patch Not Applied", message, "OK");
                 return;
             }
 
             if (result == VoxelImporterPatchResult.Applied)
             {
                 SessionState.SetBool(PendingVoxReimportSessionKey, true);
-                Debug.Log(message);
                 AssetDatabase.ImportAsset(ImporterAssetPath, ImportAssetOptions.ForceUpdate);
-            }
-            else
-            {
-                Debug.Log(message);
             }
 
             if (!Application.isBatchMode)
-                EditorUtility.DisplayDialog("Voxel Bridge", message, "Aceptar");
+                EditorUtility.DisplayDialog("Voxel Bridge", message, "OK");
+            else
+                Debug.Log(message);
         }
 
         [InitializeOnLoadMethod]
@@ -78,7 +75,6 @@ namespace LocalModels.VoxelBridge
             SessionState.EraseBool(PendingVoxReimportSessionKey);
             EditorApplication.delayCall += () =>
             {
-                Debug.Log("Voxel Bridge regenerará los .vox después de aplicar el parche de normales.");
                 VoxelBridgeBatch.SyncAllGeneratedVoxAssets(false);
             };
         }
@@ -89,14 +85,14 @@ namespace LocalModels.VoxelBridge
             string projectRoot = Directory.GetParent(Application.dataPath)?.FullName;
             if (string.IsNullOrEmpty(projectRoot))
             {
-                message = "Voxel Bridge no pudo encontrar la raíz del proyecto. No se modificó ningún archivo.";
+                message = "Voxel Bridge could not find the project root. No files were changed.";
                 return false;
             }
 
             string absolutePath = Path.GetFullPath(Path.Combine(projectRoot, ImporterAssetPath));
             if (!File.Exists(absolutePath))
             {
-                message = $"No se encontró '{ImporterAssetPath}'. Instala Voxel Importer antes de aplicar el parche.";
+                message = $"Could not find '{ImporterAssetPath}'. Install Voxel Importer before applying the patch.";
                 return false;
             }
 
@@ -110,25 +106,25 @@ namespace LocalModels.VoxelBridge
                 result = TryPatchSource(source, out string patchedSource, out string detail);
                 if (result == VoxelImporterPatchResult.Conflict)
                 {
-                    message = "Voxel Bridge detectó cambios incompatibles en VoxelBaseCore.cs. " +
-                              "El parche no se aplicó y el archivo quedó intacto. " + detail;
+                    message = "Voxel Bridge detected incompatible changes in VoxelBaseCore.cs. " +
+                              "The patch was not applied; the file is unchanged. " + detail;
                     return false;
                 }
 
                 if (result == VoxelImporterPatchResult.AlreadyApplied)
                 {
-                    message = "El parche de normales de Voxel Importer ya está aplicado.";
+                    message = "The Voxel Importer normal patch is already applied.";
                     return true;
                 }
 
                 File.WriteAllText(absolutePath, patchedSource, new UTF8Encoding(hasUtf8Bom));
-                message = "Parche de normales aplicado a Voxel Importer. " +
-                          "Unity recompilará el asset; después sincroniza o reimporta los .vox generados.";
+                message = "Applied the Voxel Importer normal patch. " +
+                          "Unity will recompile the asset and synchronize the generated .vox files.";
                 return true;
             }
             catch (Exception exception)
             {
-                message = "Voxel Bridge no pudo aplicar el parche y no puede confirmar el estado del archivo: " +
+                message = "Voxel Bridge could not apply the patch and cannot confirm the file state: " +
                           exception.Message;
                 return false;
             }
@@ -141,7 +137,7 @@ namespace LocalModels.VoxelBridge
             detail = null;
             if (source == null)
             {
-                detail = "El código fuente está vacío.";
+                detail = "The source code is empty.";
                 return VoxelImporterPatchResult.Conflict;
             }
 
@@ -152,7 +148,8 @@ namespace LocalModels.VoxelBridge
             int addEditFaceMethods = CountOccurrences(source, AddEditFaceMethodSignature);
 
             if (beginMarkers == 2 && endMarkers == 2 && originalStatements == 0 &&
-                addFaceMethods == 1 && addEditFaceMethods == 1)
+                addFaceMethods == 1 && addEditFaceMethods == 1 &&
+                CountOccurrences(source.Replace("\r\n", "\n"), PatchedNormalStatements) == 2)
             {
                 return VoxelImporterPatchResult.AlreadyApplied;
             }
@@ -160,9 +157,9 @@ namespace LocalModels.VoxelBridge
             if (beginMarkers != 0 || endMarkers != 0 || originalStatements != 2 ||
                 addFaceMethods != 1 || addEditFaceMethods != 1)
             {
-                detail = $"Firma esperada: 2 asignaciones de normales y una copia de cada método; " +
-                         $"encontrado: normales={originalStatements}, AddFace={addFaceMethods}, " +
-                         $"AddEditFace={addEditFaceMethods}, marcadores={beginMarkers}/{endMarkers}.";
+                detail = $"Expected signature: 2 normal assignments and one instance of each method; " +
+                         $"found: normals={originalStatements}, AddFace={addFaceMethods}, " +
+                         $"AddEditFace={addEditFaceMethods}, markers={beginMarkers}/{endMarkers}.";
                 return VoxelImporterPatchResult.Conflict;
             }
 

@@ -21,21 +21,21 @@ namespace LocalModels.VoxelBridge
         private string generatedVoxPath;
         private string status;
 
-        [MenuItem("Tools/Voxel Bridge/Conversión por resolución", false, 110)]
+        [MenuItem("Tools/Voxel Bridge/Resolution-Based Conversion", false, 110)]
         private static void OpenWindow()
         {
             var window = GetWindow<VoxelResolutionWindow>();
-            window.titleContent = new GUIContent("VOX por resolución");
+            window.titleContent = new GUIContent("Resolution-Based VOX");
             window.minSize = new Vector2(440, 430);
             if (VoxelBridgeSourceSelection.IsSupported(Selection.activeObject))
                 window.source = Selection.activeObject;
             window.Show();
         }
 
-        [MenuItem("Assets/Voxel Bridge/Convertir a VOX por resolución", false, 2101)]
+        [MenuItem("Assets/Voxel Bridge/Convert to VOX by Resolution", false, 2101)]
         private static void OpenFromSelection() => OpenWindow();
 
-        [MenuItem("Assets/Voxel Bridge/Convertir a VOX por resolución", true)]
+        [MenuItem("Assets/Voxel Bridge/Convert to VOX by Resolution", true)]
         private static bool ValidateOpenFromSelection() =>
             VoxelBridgeSourceSelection.IsSupported(Selection.activeObject);
 
@@ -47,46 +47,46 @@ namespace LocalModels.VoxelBridge
 
         private void OnGUI()
         {
-            EditorGUILayout.LabelField("Conversión puntual por resolución", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Single Resolution-Based Conversion", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox(
                 "Genera un único .vox indicando cuántas celdas tendrá el eje más largo. No crea perfiles, LODs ni manifiestos.",
                 MessageType.Info);
-            source = EditorGUILayout.ObjectField(new GUIContent("Modelo", "GameObject, prefab, FBX/OBJ o Mesh"),
+            source = EditorGUILayout.ObjectField(new GUIContent("Source Model", "GameObject, prefab, FBX/OBJ o Mesh"),
                 source, typeof(Object), true);
-            resolution = EditorGUILayout.IntSlider("Resolución del eje mayor", resolution, 8, 256);
-            padding = EditorGUILayout.IntSlider("Margen", padding, 0, 8);
-            fillInterior = EditorGUILayout.Toggle("Rellenar interior", fillInterior);
-            hideInternalCavities = EditorGUILayout.Toggle("Ocultar cavidades cerradas", hideInternalCavities);
+            resolution = EditorGUILayout.IntSlider("Longest Axis Resolution", resolution, 8, 256);
+            padding = EditorGUILayout.IntSlider("Padding", padding, 0, 8);
+            fillInterior = EditorGUILayout.Toggle("Fill Interior", fillInterior);
+            hideInternalCavities = EditorGUILayout.Toggle("Hide Enclosed Cavities", hideInternalCavities);
             if (!fillInterior)
                 EditorGUILayout.HelpBox(
                     "Sin relleno se genera una carcasa hueca. Ignore Cavity solo oculta cavidades sin conexión al exterior.",
                     MessageType.None);
-            colorMode = (VoxelColorMode)EditorGUILayout.Popup("Origen del color", (int)colorMode,
-                new[] { "Material + textura", "Solo material", "Color único" });
+            colorMode = (VoxelColorMode)EditorGUILayout.Popup("Color Source", (int)colorMode,
+                new[] { "Material + Texture", "Material Only", "Single Color" });
             if (colorMode == VoxelColorMode.SingleColor)
                 singleColor = EditorGUILayout.ColorField("Color", singleColor);
             if (colorMode == VoxelColorMode.MaterialAndTexture)
-                alphaCutoff = EditorGUILayout.Slider("Corte de alpha", alphaCutoff, 0f, 1f);
-            VoxelBridgeFolderPicker.Draw("Carpeta de salida", ref exportFolder);
+                alphaCutoff = EditorGUILayout.Slider("Alpha Cutoff", alphaCutoff, 0f, 1f);
+            VoxelBridgeFolderPicker.Draw("Output Folder", ref exportFolder);
 
             bool canConvert = source != null && VoxelBridgeSourceSelection.IsSupported(source) &&
                               VoxelLodPipeline.IsAssetFolder(exportFolder) && resolution > padding * 2;
             using (new EditorGUI.DisabledScope(!canConvert))
             {
-                if (GUILayout.Button("Convertir a un archivo .vox", GUILayout.Height(36))) Convert();
+                if (GUILayout.Button("Convert to a .vox File", GUILayout.Height(36))) Convert();
             }
 
             if (!string.IsNullOrEmpty(generatedVoxPath))
             {
                 EditorGUILayout.Space(10);
                 using (new EditorGUI.DisabledScope(true))
-                    EditorGUILayout.ObjectField("Resultado .vox", generatedVox, typeof(Object), false);
+                    EditorGUILayout.ObjectField(".vox Result", generatedVox, typeof(Object), false);
                 EditorGUILayout.SelectableLabel(generatedVoxPath, EditorStyles.textField,
                     GUILayout.Height(EditorGUIUtility.singleLineHeight));
                 EditorGUILayout.BeginHorizontal();
-                if (GUILayout.Button("Mostrar archivo"))
+                if (GUILayout.Button("Reveal File"))
                     EditorUtility.RevealInFinder(VoxelLodPipeline.AssetPathToAbsolute(generatedVoxPath));
-                if (GUILayout.Button("Abrir en MagicaVoxel")) MagicaVoxelLauncher.OpenAsset(generatedVox);
+                if (GUILayout.Button("Open in MagicaVoxel")) MagicaVoxelLauncher.OpenAsset(generatedVox);
                 EditorGUILayout.EndHorizontal();
             }
             if (!string.IsNullOrEmpty(status)) EditorGUILayout.HelpBox(status, MessageType.None);
@@ -108,9 +108,9 @@ namespace LocalModels.VoxelBridge
                 };
                 VoxelizationResult result = MeshVoxelizer.Voxelize(source, settings,
                     (progress, message) => EditorUtility.DisplayCancelableProgressBar(
-                        "Voxel Bridge · Resolución", message, progress * 0.9f));
-                EditorUtility.DisplayProgressBar("Voxel Bridge · Resolución",
-                    "Reduciendo la paleta a 255 colores", 0.93f);
+                        "Voxel Bridge · Resolution", message, progress * 0.9f));
+                EditorUtility.DisplayProgressBar("Voxel Bridge · Resolution",
+                    "Reducing palette to 255 colors", 0.93f);
                 QuantizedVoxels quantized = VoxelColorQuantizer.Quantize(result.Grid);
 
                 string safeName = VoxelLodPipeline.MakeSafeFileName(source.name);
@@ -138,18 +138,18 @@ namespace LocalModels.VoxelBridge
                 generatedVox = AssetDatabase.LoadMainAssetAtPath(generatedVoxPath);
                 Selection.activeObject = generatedVox;
                 EditorGUIUtility.PingObject(generatedVox);
-                status = $"{metadata.voxelCount:N0} vóxeles · {metadata.paletteColorCount} colores · " +
-                         $"rejilla {metadata.voxGridSize.x}×{metadata.voxGridSize.y}×{metadata.voxGridSize.z}.";
+                status = $"{metadata.voxelCount:N0} voxels · {metadata.paletteColorCount} colors · " +
+                         $"grid {metadata.voxGridSize.x}×{metadata.voxGridSize.y}×{metadata.voxGridSize.z}.";
             }
             catch (OperationCanceledException)
             {
-                status = "Conversión cancelada.";
+                status = "Conversion cancelled.";
             }
             catch (Exception exception)
             {
                 status = "Error: " + exception.Message;
                 Debug.LogException(exception);
-                EditorUtility.DisplayDialog("Voxel Bridge", status, "Cerrar");
+                EditorUtility.DisplayDialog("Voxel Bridge", status, "Close");
             }
             finally
             {

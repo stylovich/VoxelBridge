@@ -94,7 +94,7 @@ namespace LocalModels.VoxelBridge.Tests
                 VoxelGrid invalid = CreateSurfaceIdGrid(256);
                 InvalidDataException exception = Assert.Throws<InvalidDataException>(() =>
                     VoxelSemanticQuantizer.Quantize(invalid, colors, surfaces));
-                StringAssert.Contains("máximo 255", exception.Message);
+                StringAssert.Contains("at most 255", exception.Message);
             }
             finally
             {
@@ -123,7 +123,7 @@ namespace LocalModels.VoxelBridge.Tests
                 metadata.slotTableHash = VoxelSemanticTransport.ComputeSlotTableHash(metadata.slots);
                 Assert.That(VoxelSemanticTransport.TryResolveSlotSemantics(
                     document, metadata, colors, surfaces, out _, out _, out string colorError), Is.False);
-                StringAssert.Contains("color del slot", colorError);
+                StringAssert.Contains("color of slot", colorError);
 
                 metadata = CreateMetadata(quantized.SemanticSlots, colors, surfaces);
                 byte[] imap = Enumerable.Range(0, 256).Select(index => (byte)index).ToArray();
@@ -230,7 +230,7 @@ namespace LocalModels.VoxelBridge.Tests
         }
 
         [Test]
-        public void VolumeReader_UsesFormatVersionToDistinguishLegacyAndSemanticData()
+        public void VolumeReader_UsesFormatVersionToDistinguishRgbAndSemanticData()
         {
             var grid = new VoxelGrid(Vector3Int.one, Vector3.zero, 1f);
             grid.Occupied[0] = true;
@@ -240,7 +240,7 @@ namespace LocalModels.VoxelBridge.Tests
             {
                 QuantizedVoxels quantized = VoxelColorQuantizer.Quantize(grid);
                 VoxWriteResult write = VoxelChunkedVoxWriter.Write(path, grid, quantized, 16);
-                var legacy = new VoxelBridgeMetadata
+                var rgbMetadata = new VoxelBridgeMetadata
                 {
                     formatVersion = 3,
                     voxelSize = 1f,
@@ -249,15 +249,79 @@ namespace LocalModels.VoxelBridge.Tests
                     semantic = new VoxelSemanticMetadata()
                 };
 
-                VoxelGrid restored = VoxelVolumeReader.Read(path, legacy);
+                VoxelGrid restored = VoxelVolumeReader.Read(path, rgbMetadata);
                 Assert.That(restored.IsSemantic, Is.False);
                 Assert.That(restored.Colors[0], Is.EqualTo(grid.Colors[0]));
 
-                legacy.formatVersion = 4;
-                legacy.semantic = null;
+                rgbMetadata.formatVersion = 4;
+                rgbMetadata.semantic = null;
                 InvalidDataException exception = Assert.Throws<InvalidDataException>(() =>
-                    VoxelVolumeReader.Read(path, legacy));
+                    VoxelVolumeReader.Read(path, rgbMetadata));
                 StringAssert.Contains("v4", exception.Message);
+            }
+            finally
+            {
+                if (File.Exists(path)) File.Delete(path);
+            }
+        }
+
+        [Test]
+        public void VolumeReader_RejectsVoxelsOutsideSavedBounds()
+        {
+            var grid = new VoxelGrid(new Vector3Int(2, 1, 1), Vector3.zero, 1f);
+            grid.Occupied[1] = true;
+            grid.Colors[1] = Color.red;
+            string path = Path.Combine(Path.GetTempPath(),
+                "VoxelBounds_" + Guid.NewGuid().ToString("N") + ".vox");
+            try
+            {
+                VoxWriteResult written = VoxelChunkedVoxWriter.Write(
+                    path, grid, VoxelColorQuantizer.Quantize(grid), 16);
+                var metadata = new VoxelBridgeMetadata
+                {
+                    voxelSize = 1f,
+                    unityGridSize = Vector3Int.one,
+                    chunks = written.Chunks
+                };
+                Assert.Throws<InvalidDataException>(() => VoxelVolumeReader.Read(path, metadata));
+            }
+            finally
+            {
+                if (File.Exists(path)) File.Delete(path);
+            }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void VolumeReader_RejectsCorruptChunkLengths(bool negativeLength)
+        {
+            var grid = new VoxelGrid(Vector3Int.one, Vector3.zero, 1f);
+            grid.Occupied[0] = true;
+            grid.Colors[0] = Color.red;
+            string path = Path.Combine(Path.GetTempPath(),
+                "VoxelChunkBounds_" + Guid.NewGuid().ToString("N") + ".vox");
+            try
+            {
+                VoxWriteResult written = VoxelChunkedVoxWriter.Write(
+                    path, grid, VoxelColorQuantizer.Quantize(grid), 16);
+                byte[] bytes = File.ReadAllBytes(path);
+                if (negativeLength)
+                {
+                    // MAIN child byte count follows VOX and MAIN headers.
+                    Array.Copy(BitConverter.GetBytes(-1), 0, bytes, 16, sizeof(int));
+                }
+                else
+                {
+                    Array.Resize(ref bytes, bytes.Length - 1);
+                }
+                File.WriteAllBytes(path, bytes);
+                var metadata = new VoxelBridgeMetadata
+                {
+                    voxelSize = 1f,
+                    unityGridSize = Vector3Int.one,
+                    chunks = written.Chunks
+                };
+                Assert.Throws<InvalidDataException>(() => VoxelVolumeReader.Read(path, metadata));
             }
             finally
             {

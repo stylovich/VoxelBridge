@@ -10,10 +10,10 @@ namespace LocalModels.VoxelBridge
         [SerializeField] private VoxelSurfacePalette surfacePalette;
         private Vector2 scroll;
 
-        [MenuItem("Tools/Voxel Bridge/Paletas globales", false, 130)]
+        [MenuItem("Tools/Voxel Bridge/Global Palettes", false, 130)]
         private static void Open()
         {
-            VoxelPaletteWindow window = GetWindow<VoxelPaletteWindow>("Paletas voxel");
+            VoxelPaletteWindow window = GetWindow<VoxelPaletteWindow>("Voxel Palettes");
             window.minSize = new Vector2(470f, 360f);
             window.LoadDefaultsIfAvailable();
             window.Show();
@@ -24,7 +24,7 @@ namespace LocalModels.VoxelBridge
         private void OnGUI()
         {
             scroll = EditorGUILayout.BeginScrollView(scroll);
-            EditorGUILayout.LabelField("Paletas globales", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Global Palettes", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox(
                 "Los modelos almacenan ColorID y SurfaceID estables. Las propiedades PBR pertenecen a la " +
                 "paleta de superficies y las LUT se generan como texturas RGBA32 de 256×1.",
@@ -37,12 +37,12 @@ namespace LocalModels.VoxelBridge
             EditorGUILayout.Space(8f);
             using (new EditorGUILayout.HorizontalScope())
             {
-                if (GUILayout.Button("Crear o cargar paletas canónicas"))
+                if (GUILayout.Button("Create or Load Canonical Palettes"))
                     CreateOrLoadCanonicalPalettes();
-                if (GUILayout.Button("Regenerar ambas LUT"))
+                if (GUILayout.Button("Rebuild Both LUTs"))
                     RebuildBoth();
             }
-            if (GUILayout.Button("Instalar biblioteca y perfiles de color recomendados"))
+            if (GUILayout.Button("Install Recommended Color Library and Profiles"))
                 InstallRecommendedColorLibrary();
 
             EditorGUILayout.Space(10f);
@@ -54,9 +54,9 @@ namespace LocalModels.VoxelBridge
 
         private void DrawColorSection()
         {
-            EditorGUILayout.LabelField("Colores", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Colors", EditorStyles.boldLabel);
             colorPalette = (VoxelColorPalette)EditorGUILayout.ObjectField(
-                "Paleta", colorPalette, typeof(VoxelColorPalette), false);
+                "Palette", colorPalette, typeof(VoxelColorPalette), false);
             if (colorPalette == null)
             {
                 EditorGUILayout.HelpBox("Asigna o crea una paleta global de colores.", MessageType.Warning);
@@ -70,17 +70,17 @@ namespace LocalModels.VoxelBridge
                 "Los perfiles seleccionan subconjuntos de esta misma paleta.", MessageType.None);
             using (new EditorGUILayout.HorizontalScope())
             {
-                if (GUILayout.Button("Seleccionar paleta")) Select(colorPalette);
-                if (GUILayout.Button("Regenerar LUT de color")) Rebuild(colorPalette);
+                if (GUILayout.Button("Select Palette")) Select(colorPalette);
+                if (GUILayout.Button("Rebuild Color LUT")) Rebuild(colorPalette);
             }
             DrawGeneratedTexture(colorPalette.GeneratedLut);
         }
 
         private void DrawSurfaceSection()
         {
-            EditorGUILayout.LabelField("Superficies", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Surfaces", EditorStyles.boldLabel);
             surfacePalette = (VoxelSurfacePalette)EditorGUILayout.ObjectField(
-                "Paleta", surfacePalette, typeof(VoxelSurfacePalette), false);
+                "Palette", surfacePalette, typeof(VoxelSurfacePalette), false);
             if (surfacePalette == null)
             {
                 EditorGUILayout.HelpBox("Asigna o crea una paleta global de superficies.", MessageType.Warning);
@@ -91,8 +91,8 @@ namespace LocalModels.VoxelBridge
                 VoxelPaletteLutGenerator.IsCurrent(surfacePalette));
             using (new EditorGUILayout.HorizontalScope())
             {
-                if (GUILayout.Button("Seleccionar paleta")) Select(surfacePalette);
-                if (GUILayout.Button("Regenerar LUT de superficie")) Rebuild(surfacePalette);
+                if (GUILayout.Button("Select Palette")) Select(surfacePalette);
+                if (GUILayout.Button("Rebuild Surface LUT")) Rebuild(surfacePalette);
             }
             DrawGeneratedTexture(surfacePalette.GeneratedLut);
         }
@@ -110,7 +110,7 @@ namespace LocalModels.VoxelBridge
         private static void DrawGeneratedTexture(Texture2D texture)
         {
             using (new EditorGUI.DisabledScope(true))
-                EditorGUILayout.ObjectField("LUT generada", texture, typeof(Texture2D), false);
+                EditorGUILayout.ObjectField("Generated LUT", texture, typeof(Texture2D), false);
         }
 
         private void CreateOrLoadCanonicalPalettes()
@@ -118,7 +118,7 @@ namespace LocalModels.VoxelBridge
             if (!VoxelPaletteAssetUtility.TryEnsureCanonicalAssets(
                     out colorPalette, out surfacePalette, out string error))
             {
-                EditorUtility.DisplayDialog("Voxel Bridge", error, "Cerrar");
+                EditorUtility.DisplayDialog("Voxel Bridge", error, "Close");
                 return;
             }
             Repaint();
@@ -127,16 +127,17 @@ namespace LocalModels.VoxelBridge
         private void InstallRecommendedColorLibrary()
         {
             if (!EditorUtility.DisplayDialog(
-                    "Instalar biblioteca recomendada",
+                    "Install Recommended Library",
                     "Se reemplazará la paleta global de colores y se crearán o restaurarán los " +
-                    "perfiles recomendados. Los GUID de assets existentes se conservarán.",
-                    "Instalar", "Cancelar"))
+                    "perfiles recomendados. Los GUID de assets existentes se conservarán, pero los modelos " +
+                    "que utilizan estos ColorID adoptarán los colores de la biblioteca restaurada.",
+                    "Install", "Cancel"))
                 return;
 
             if (!VoxelPaletteAssetUtility.TryInstallRecommendedColorLibrary(
                     out colorPalette, out VoxelColorMappingProfile[] profiles, out string error))
             {
-                EditorUtility.DisplayDialog("Voxel Bridge", error, "Cerrar");
+                EditorUtility.DisplayDialog("Voxel Bridge", error, "Close");
                 return;
             }
             Selection.objects = new UnityEngine.Object[] { colorPalette }
@@ -149,7 +150,7 @@ namespace LocalModels.VoxelBridge
             if (colorPalette == null || surfacePalette == null)
             {
                 EditorUtility.DisplayDialog(
-                    "Voxel Bridge", "Asigna ambas paletas antes de regenerar las LUT.", "Cerrar");
+                    "Voxel Bridge", "Asigna ambas paletas antes de regenerar las LUT.", "Close");
                 return;
             }
             bool colorOk = VoxelPaletteLutGenerator.TryRebuild(
@@ -159,7 +160,7 @@ namespace LocalModels.VoxelBridge
             if (!colorOk || !surfaceOk)
             {
                 EditorUtility.DisplayDialog(
-                    "Voxel Bridge", colorError ?? surfaceError, "Cerrar");
+                    "Voxel Bridge", colorError ?? surfaceError, "Close");
             }
             Repaint();
         }
@@ -167,7 +168,7 @@ namespace LocalModels.VoxelBridge
         private static void Rebuild(VoxelColorPalette palette)
         {
             if (!VoxelPaletteLutGenerator.TryRebuild(palette, out Texture2D texture, out string error))
-                EditorUtility.DisplayDialog("Voxel Bridge", error, "Cerrar");
+                EditorUtility.DisplayDialog("Voxel Bridge", error, "Close");
             else
                 EditorGUIUtility.PingObject(texture);
         }
@@ -175,7 +176,7 @@ namespace LocalModels.VoxelBridge
         private static void Rebuild(VoxelSurfacePalette palette)
         {
             if (!VoxelPaletteLutGenerator.TryRebuild(palette, out Texture2D texture, out string error))
-                EditorUtility.DisplayDialog("Voxel Bridge", error, "Cerrar");
+                EditorUtility.DisplayDialog("Voxel Bridge", error, "Close");
             else
                 EditorGUIUtility.PingObject(texture);
         }
@@ -195,19 +196,19 @@ namespace LocalModels.VoxelBridge
         }
     }
 
-    public static class VoxelPaletteAssetUtility
+    internal static class VoxelPaletteAssetUtility
     {
         internal const string PaletteFolder = "Assets/VoxelBridge/Palettes";
         internal const string ColorPalettePath = PaletteFolder + "/VoxelColorPalette.asset";
         internal const string SurfacePalettePath = PaletteFolder + "/VoxelSurfacePalette.asset";
 
-        [MenuItem("Assets/Create/Voxel Bridge/Crear paletas globales canónicas", false, 301)]
+        [MenuItem("Assets/Create/Voxel Bridge/Canonical Global Palettes", false, 301)]
         private static void CreateCanonicalAssetsMenu()
         {
             if (!TryEnsureCanonicalAssets(
                     out VoxelColorPalette color, out VoxelSurfacePalette surface, out string error))
             {
-                EditorUtility.DisplayDialog("Voxel Bridge", error, "Cerrar");
+                EditorUtility.DisplayDialog("Voxel Bridge", error, "Close");
                 return;
             }
             Selection.objects = new UnityEngine.Object[] { color, surface };
@@ -216,6 +217,9 @@ namespace LocalModels.VoxelBridge
         internal static bool TryEnsureCanonicalAssets(out VoxelColorPalette colorPalette,
             out VoxelSurfacePalette surfacePalette, out string error)
         {
+            colorPalette = null;
+            surfacePalette = null;
+            if (!TryValidateCanonicalAssetPaths(out error)) return false;
             VoxelPaletteLutGenerator.EnsureAssetFolder(PaletteFolder);
             colorPalette = AssetDatabase.LoadAssetAtPath<VoxelColorPalette>(ColorPalettePath);
             surfacePalette = AssetDatabase.LoadAssetAtPath<VoxelSurfacePalette>(SurfacePalettePath);
@@ -231,9 +235,6 @@ namespace LocalModels.VoxelBridge
                 AssetDatabase.CreateAsset(surfacePalette, SurfacePalettePath);
             }
 
-            if (colorPalette.EnsureInitialized()) EditorUtility.SetDirty(colorPalette);
-            if (surfacePalette.EnsureInitialized()) EditorUtility.SetDirty(surfacePalette);
-
             if (!VoxelPaletteLutGenerator.TryRebuild(colorPalette, out _, out error)) return false;
             if (!VoxelPaletteLutGenerator.TryRebuild(surfacePalette, out _, out error)) return false;
             AssetDatabase.SaveAssets();
@@ -246,15 +247,17 @@ namespace LocalModels.VoxelBridge
             out VoxelColorMappingProfile[] profiles, out string error)
         {
             profiles = null;
+            colorPalette = null;
+            if (!VoxelRecommendedColorProfiles.TryValidateAssetPaths(out error)) return false;
             if (!TryEnsureCanonicalAssets(
                     out colorPalette, out _, out error))
                 return false;
 
-            Undo.RecordObject(colorPalette, "Instalar biblioteca de colores recomendada");
+            Undo.RecordObject(colorPalette, "Install Recommended Color Library");
             colorPalette.ResetToRecommended();
             EditorUtility.SetDirty(colorPalette);
             if (!VoxelRecommendedColorProfiles.TryCreateOrResetAssets(
-                    colorPalette, replaceExisting: true, out profiles, out error))
+                    colorPalette, out profiles, out error))
                 return false;
             if (!VoxelPaletteLutGenerator.TryRebuild(colorPalette, out _, out error))
                 return false;
@@ -262,12 +265,22 @@ namespace LocalModels.VoxelBridge
             return true;
         }
 
-        public static void ApplyRecommendedColorLibrary()
+        private static bool TryValidateCanonicalAssetPaths(out string error)
         {
-            if (!TryInstallRecommendedColorLibrary(
-                    out _, out VoxelColorMappingProfile[] profiles, out string error))
-                throw new System.InvalidOperationException(error);
-            Debug.Log($"Voxel Bridge instaló la biblioteca maestra y {profiles.Length} perfiles de color.");
+            if (!VoxelPaletteLutGenerator.TryValidateAssetType<VoxelColorPalette>(ColorPalettePath, out error) ||
+                !VoxelPaletteLutGenerator.TryValidateAssetType<VoxelSurfacePalette>(SurfacePalettePath, out error))
+                return false;
+
+            foreach (string path in new[] { ColorPalettePath, SurfacePalettePath })
+            {
+                UnityEngine.Object palette = AssetDatabase.LoadMainAssetAtPath(path);
+                string paletteName = palette != null ? palette.name : System.IO.Path.GetFileNameWithoutExtension(path);
+                string texturePath = VoxelPaletteLutGenerator.GetGeneratedTextureAssetPath(path, paletteName);
+                if (!VoxelPaletteLutGenerator.TryValidateAssetType<Texture2D>(texturePath, out error))
+                    return false;
+            }
+            error = null;
+            return true;
         }
     }
 }

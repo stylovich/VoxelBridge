@@ -8,7 +8,7 @@ El sistema proporciona paletas globales, IDs estables, generación de LUT y tran
 
 ## Assets canónicos
 
-La ventana `Tools > Voxel Bridge > Paletas globales` crea y administra:
+La ventana `Tools > Voxel Bridge > Global Palettes` crea y administra:
 
 - `Assets/VoxelBridge/Palettes/VoxelColorPalette.asset`: colores globales.
 - `Assets/VoxelBridge/Palettes/VoxelSurfacePalette.asset`: perfiles físicos globales.
@@ -60,19 +60,19 @@ Los perfiles iniciales son valores de partida estilísticos. Deben calibrarse vi
 
 ## Flujo de edición
 
-1. Abrir `Tools > Voxel Bridge > Paletas globales`.
-2. Seleccionar `Crear o cargar paletas canónicas` cuando los assets todavía no existan.
+1. Abrir `Tools > Voxel Bridge > Global Palettes`.
+2. Seleccionar `Create or Load Canonical Palettes` cuando los assets todavía no existan.
 3. Seleccionar la paleta que se desea modificar.
 4. Añadir, reordenar, renombrar o ajustar entradas desde su Inspector.
 5. Corregir cualquier ID duplicado, fuera de rango, nombre duplicado o valor PBR inválido indicado por la validación.
-6. Seleccionar `Regenerar LUT` y confirmar que el estado sea `Paleta válida y LUT actualizada`.
+6. Seleccionar `Rebuild Color LUT` o `Rebuild Surface LUT` y comprobar que la paleta y su LUT sean válidas y estén actualizadas.
 7. Versionar juntos la paleta y su LUT generada.
 
 El número de ID es de sólo lectura en el Inspector para evitar cambios accidentales. Las migraciones intencionales de IDs requerirán una herramienta dedicada que también remapee los assets dependientes.
 
 ## Vinculación semántica de `.vox`
 
-Abrir `Tools > Voxel Bridge > Vincular IDs semánticos` o utilizar `Assets > Voxel Bridge > Vincular IDs semánticos` sobre un archivo `.vox`.
+Abrir `Tools > Voxel Bridge > Bind Semantic IDs` o utilizar `Assets > Voxel Bridge > Bind Semantic IDs` sobre un archivo `.vox`.
 
 La ventana muestra únicamente los slots utilizados por `XYZI`. Cada slot debe tener:
 
@@ -91,6 +91,8 @@ La herramienta convierte los colores sRGB a OKLab y selecciona el ColorID permit
 - el umbral a partir del cual una coincidencia requiere revisión;
 - la distancia máxima permitida para una asignación automática;
 - los ColorIDs disponibles para el modelo.
+
+Crear los perfiles mediante `Create > Voxel Bridge > Color Mapping Profile`. `Install Recommended Color Library and Profiles`, en `Global Palettes`, instala o restaura la biblioteca recomendada y sus perfiles después de una confirmación explícita. Antes de reemplazar valores se comprueba que las rutas de destino no contengan assets de otro tipo.
 
 Una coincidencia que supera la distancia máxima permanece sin asignar y requiere una elección manual o una ampliación explícita de la paleta. Aplicar un perfil sólo completa slots sin ColorID; no sobrescribe vinculaciones existentes. La paleta global nunca incorpora colores como efecto lateral de una importación.
 
@@ -115,7 +117,7 @@ Los perfiles recomendados seleccionan estos rangos sin duplicar los colores:
 
 - `All`: todos los IDs activos;
 - `UrbanIndustrial`: neutros, tierras, pasteles controlados y acentos de seguridad;
-- `Architecture`: biblioteca no emisiva amplia y acentos intensos limitados;
+- `Architecture`: biblioteca cromática amplia y acentos intensos limitados;
 - `Vehicles`: colores de pintura y señalización sin la banda pastel;
 - `Nature`: neutros, verdes, cianes, azules, tierras y pasteles naturales;
 - `MutedNeon`: base neutra u orgánica con la banda completa de acentos intensos.
@@ -130,19 +132,19 @@ El sidecar semántico utiliza `VoxelBridgeMetadata` versión 4 y un bloque semá
 - huella canónica de la tabla local.
 - referencia opcional al perfil de mapeo de color utilizado durante la autoría.
 
-El GUID es la referencia principal y permite mover la paleta dentro del proyecto. Un cambio de huella global produce una advertencia porque ajustar un perfil PBR sin cambiar su ID es válido. Un cambio de la tabla local o del RGBA utilizado produce un error.
+El GUID identifica la paleta y permite moverla dentro del proyecto conservando su archivo `.meta`. Las rutas almacenadas son información de diagnóstico: si un GUID no se resuelve, la lectura falla aunque exista otro asset en la ruta antigua. Un cambio de huella global produce una advertencia porque ajustar un perfil PBR sin cambiar su ID es válido. Un cambio de la tabla local o del RGBA utilizado produce un error.
 
-Los sidecars de versiones 1 a 3 continúan utilizando colores RGB legacy. No se convierten automáticamente a `ColorID 0` ni reciben una superficie predeterminada.
+El flujo RGB utiliza sidecars v3 y la vinculación semántica produce sidecars v4. Ambos son formatos activos. Las versiones v1, v2 y las versiones desconocidas se rechazan y requieren regenerar la conversión. Una entrada RGB no recibe automáticamente `ColorID 0` ni una superficie predeterminada.
 
 ## Conservación durante LODs y MagicaVoxel
 
 Un volumen semántico almacena el par en 16 bits: ocho para `ColorID` y ocho para `SurfaceID`. Esta representación sustituye al array RGB de la rejilla y evita mantener ambas copias en memoria.
 
-La reducción manual selecciona el par mayoritario dentro de cada nueva celda. Los empates se resuelven por el valor estable menor. La duplicación manual copia el `.vox` y su sidecar sin reinterpretación. Las familias generadas automáticamente desde una malla continúan en modo legacy hasta disponer de la asignación de superficies desde materiales fuente.
+La reducción manual selecciona el par mayoritario dentro de cada nueva celda. Los empates se resuelven por el valor estable menor. La duplicación manual copia el `.vox` y su sidecar sin reinterpretación. Las familias generadas automáticamente desde una malla utilizan RGB hasta vincular sus IDs; la asignación de superficies desde materiales fuente pertenece al desarrollo previsto del mesher.
 
 Voxel Bridge lee los índices directamente del binario `.vox`. El mesh y el atlas generados por Voxel Importer se utilizan como previsualización, no como fuente semántica, porque el importador puede compactar su paleta interna.
 
-Los chunks `NOTE` y `MATL` se conservan, pero no determinan los IDs. Cualquier `IMAP` se rechaza hasta disponer de un fixture que verifique su dirección y comportamiento en la versión de MagicaVoxel utilizada.
+Los chunks `NOTE` y `MATL` se conservan, pero no determinan los IDs. Cualquier `IMAP` se rechaza hasta disponer de un fixture que verifique su dirección y comportamiento en la versión de MagicaVoxel utilizada. La lectura del volumen comprueba la correspondencia de modelos, los tamaños de chunks y los límites de las celdas. Una edición que exceda la rejilla del sidecar requiere regenerar el volumen y sus metadatos antes de reducir LODs.
 
 El mismo RGB puede ocupar dos slots locales cuando necesita superficies diferentes. Voxel Bridge conserva esos slots mientras controla la escritura. MagicaVoxel puede reordenar slots visualmente idénticos al volver a guardar; este caso no se considera certificado hasta completar una prueba controlada de round-trip.
 

@@ -178,8 +178,6 @@ namespace LocalModels.VoxelBridge
         public readonly Color32[] Palette;
         public readonly VoxelSemanticSlotMetadata[] SemanticSlots;
 
-        public bool IsSemantic => SemanticSlots != null;
-
         public QuantizedVoxels(byte[] indices, Color32[] palette,
             VoxelSemanticSlotMetadata[] semanticSlots = null)
         {
@@ -254,7 +252,7 @@ namespace LocalModels.VoxelBridge
             }
 
             if (histogram.Count == 0)
-                throw new InvalidOperationException("No hay vóxeles para exportar.");
+                throw new InvalidOperationException("There are no voxels to export.");
 
             var boxes = new List<Box> { new Box(histogram.Values.ToList()) };
             while (boxes.Count < maxColors)

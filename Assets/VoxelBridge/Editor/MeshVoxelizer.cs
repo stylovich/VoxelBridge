@@ -22,7 +22,6 @@ namespace LocalModels.VoxelBridge
     {
         public VoxelGrid Grid;
         public Bounds SourceBounds;
-        public int TriangleCount;
         public int OccupiedVoxelCount;
     }
 
@@ -48,18 +47,18 @@ namespace LocalModels.VoxelBridge
             if (!physicalSizeMode)
                 settings.Resolution = Mathf.Clamp(settings.Resolution, 8, 256);
             if (!physicalSizeMode && settings.Resolution <= settings.Padding * 2)
-                throw new ArgumentException("La resolución debe ser mayor que el padding de ambos lados.");
+                throw new ArgumentException("Resolution must exceed the padding on both sides.");
 
             List<MeshSource> sources = ExtractMeshes(source, settings.IncludeInactiveObjects);
             if (sources.Count == 0)
-                throw new InvalidOperationException("El objeto seleccionado no contiene MeshFilter ni SkinnedMeshRenderer.");
+                throw new InvalidOperationException("The selected object contains no MeshFilter or SkinnedMeshRenderer.");
 
             try
             {
                 Bounds bounds = CalculateBounds(sources);
                 float longest = Mathf.Max(bounds.size.x, Mathf.Max(bounds.size.y, bounds.size.z));
                 if (longest <= 1e-6f)
-                    throw new InvalidOperationException("El modelo no tiene volumen utilizable.");
+                    throw new InvalidOperationException("The model has no usable volume.");
 
                 float voxelSize;
                 Vector3Int size;
@@ -107,8 +106,8 @@ namespace LocalModels.VoxelBridge
                             {
                                 if ((triangleDone & 127) == 0 && cancelProgress != null &&
                                     cancelProgress((float)triangleDone / Mathf.Max(1, triangleTotal),
-                                        $"Voxelizando triángulo {triangleDone:N0} de {triangleTotal:N0}"))
-                                    throw new OperationCanceledException("Voxelización cancelada.");
+                                        $"Voxelizing triangle {triangleDone:N0} of {triangleTotal:N0}"))
+                                    throw new OperationCanceledException("Voxelization cancelled.");
 
                                 int i0 = triangles[t], i1 = triangles[t + 1], i2 = triangles[t + 2];
                                 Vector3 a = meshSource.Vertices[i0];
@@ -128,24 +127,23 @@ namespace LocalModels.VoxelBridge
 
                 int occupiedVoxelCount = grid.CountOccupied();
                 if (occupiedVoxelCount == 0)
-                    throw new InvalidOperationException("No se generaron vóxeles. Prueba una resolución mayor o revisa la transparencia del material.");
+                    throw new InvalidOperationException("No voxels were generated. Increase the resolution or check material transparency.");
 
                 if (settings.FillInterior)
                 {
                     if (grid.Occupied.LongLength >= 8_000_000)
                         GC.Collect();
-                    if (cancelProgress != null && cancelProgress(0.94f, "Rellenando el interior"))
-                        throw new OperationCanceledException("Voxelización cancelada.");
+                    if (cancelProgress != null && cancelProgress(0.94f, "Filling interior"))
+                        throw new OperationCanceledException("Voxelization cancelled.");
                     FillInterior(grid);
                     occupiedVoxelCount = grid.CountOccupied();
                 }
 
-                cancelProgress?.Invoke(1f, "Voxelización terminada");
+                cancelProgress?.Invoke(1f, "Voxelization complete");
                 return new VoxelizationResult
                 {
                     Grid = grid,
                     SourceBounds = bounds,
-                    TriangleCount = triangleTotal,
                     OccupiedVoxelCount = occupiedVoxelCount
                 };
             }
@@ -165,7 +163,7 @@ namespace LocalModels.VoxelBridge
             try
             {
                 if (sources.Count == 0)
-                    throw new InvalidOperationException("El objeto seleccionado no contiene mallas.");
+                    throw new InvalidOperationException("The selected object contains no meshes.");
                 return CalculateBounds(sources);
             }
             finally
@@ -187,7 +185,7 @@ namespace LocalModels.VoxelBridge
             }
 
             if (!(source is GameObject root))
-                throw new ArgumentException("Selecciona un GameObject, prefab, FBX/OBJ o Mesh.");
+                throw new ArgumentException("Select a GameObject, prefab, FBX/OBJ or Mesh.");
 
             bool isAsset = AssetDatabase.Contains(root);
             GameObject workingRoot = isAsset ? UnityEngine.Object.Instantiate(root) : root;
@@ -254,7 +252,7 @@ namespace LocalModels.VoxelBridge
             catch (Exception exception)
             {
                 throw new InvalidOperationException(
-                    $"No se pudo leer la malla '{mesh.name}'. Activa Read/Write en sus Import Settings.", exception);
+                    $"Could not read mesh '{mesh.name}'. Enable Read/Write in its Import Settings.", exception);
             }
 
             for (int i = 0; i < vertices.Length; i++) vertices[i] = transform.MultiplyPoint3x4(vertices[i]);
@@ -280,7 +278,7 @@ namespace LocalModels.VoxelBridge
                     else bounds.Encapsulate(vertex);
                 }
             }
-            if (!initialized) throw new InvalidOperationException("Las mallas seleccionadas no contienen vértices.");
+            if (!initialized) throw new InvalidOperationException("The selected meshes contain no vertices.");
             return bounds;
         }
 

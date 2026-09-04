@@ -30,7 +30,7 @@ namespace LocalModels.VoxelBridge
     }
 
     [CreateAssetMenu(fileName = "VoxelColorMappingProfile",
-        menuName = "Voxel Bridge/Perfil de mapeo de color")]
+        menuName = "Voxel Bridge/Color Mapping Profile")]
     public sealed class VoxelColorMappingProfile : ScriptableObject
     {
         [SerializeField] private VoxelColorPalette colorPalette;
@@ -72,7 +72,7 @@ namespace LocalModels.VoxelBridge
                 .ToArray();
             if (colors.Length == 0)
             {
-                error = "El perfil no permite ningún ColorID activo de la paleta global.";
+                error = "The profile does not allow any active ColorID from the global palette.";
                 return false;
             }
 
@@ -84,19 +84,20 @@ namespace LocalModels.VoxelBridge
         {
             if (colorPalette == null)
             {
-                error = "El perfil no tiene una paleta global de colores asignada.";
+                error = "The profile has no assigned global color palette.";
                 return false;
             }
             if (!colorPalette.TryValidate(out error)) return false;
             if (allowedRanges == null || additionalColorIds == null)
             {
-                error = "Las colecciones de ColorID del perfil no están inicializadas.";
+                error = "The profile ColorID collections are not initialized.";
                 return false;
             }
-            if (warningDistance < 0f || warningDistance > 100f ||
+            if (float.IsNaN(warningDistance) || float.IsNaN(maximumAutomaticDistance) ||
+                warningDistance < 0f || warningDistance > 100f ||
                 maximumAutomaticDistance < warningDistance || maximumAutomaticDistance > 100f)
             {
-                error = "Los umbrales deben cumplir 0 ≤ advertencia ≤ asignación automática ≤ 100.";
+                error = "Thresholds must satisfy 0 ≤ warning ≤ automatic mapping ≤ 100 and be finite.";
                 return false;
             }
 
@@ -105,14 +106,14 @@ namespace LocalModels.VoxelBridge
                 VoxelColorIdRange range = allowedRanges[index];
                 if (range == null)
                 {
-                    error = $"El rango de ColorID en la posición {index} está vacío.";
+                    error = $"The ColorID range at index {index} is empty.";
                     return false;
                 }
                 if (range.FirstId < VoxelPaletteConstants.MinimumId ||
                     range.LastId > VoxelPaletteConstants.MaximumId ||
                     range.FirstId > range.LastId)
                 {
-                    error = $"El rango {range.FirstId}..{range.LastId} no es válido.";
+                    error = $"The range {range.FirstId}..{range.LastId} is invalid.";
                     return false;
                 }
             }
@@ -122,17 +123,17 @@ namespace LocalModels.VoxelBridge
             {
                 if (id < VoxelPaletteConstants.MinimumId || id > VoxelPaletteConstants.MaximumId)
                 {
-                    error = $"El ColorID adicional {id} está fuera del rango 0..255.";
+                    error = $"Additional ColorID {id} is outside the 0..255 range.";
                     return false;
                 }
                 if (!seenAdditional.Add(id))
                 {
-                    error = $"El ColorID adicional {id} está duplicado.";
+                    error = $"Additional ColorID {id} is duplicated.";
                     return false;
                 }
                 if (!colorPalette.TryGetColor(id, out _))
                 {
-                    error = $"El ColorID adicional {id} no existe en la paleta global.";
+                    error = $"Additional ColorID {id} does not exist in the global palette.";
                     return false;
                 }
             }
@@ -141,7 +142,7 @@ namespace LocalModels.VoxelBridge
                 (seenAdditional.Contains(entry.Id) || allowedRanges.Any(range => range.Contains(entry.Id))));
             if (!hasSelection)
             {
-                error = "El perfil no permite ningún ColorID activo de la paleta global.";
+                error = "The profile does not allow any active ColorID from the global palette.";
                 return false;
             }
 

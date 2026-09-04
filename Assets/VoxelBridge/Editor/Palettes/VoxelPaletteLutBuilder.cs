@@ -16,13 +16,13 @@ namespace LocalModels.VoxelBridge
             contentHash = null;
             if (palette == null)
             {
-                error = "La paleta de colores no está asignada.";
+                error = "The color palette is not assigned.";
                 return false;
             }
             if (!palette.TryValidate(out error)) return false;
             if (!palette.TryGetColor(VoxelPaletteConstants.DefaultId, out Color32 fallback))
             {
-                error = "No se pudo resolver el ColorID 0.";
+                error = "Could not resolve ColorID 0.";
                 return false;
             }
 
@@ -41,14 +41,14 @@ namespace LocalModels.VoxelBridge
             contentHash = null;
             if (palette == null)
             {
-                error = "La paleta de superficies no está asignada.";
+                error = "The surface palette is not assigned.";
                 return false;
             }
             if (!palette.TryValidate(out error)) return false;
             if (!palette.TryGetSurface(VoxelPaletteConstants.DefaultId,
                     out VoxelSurfaceDefinition fallback))
             {
-                error = "No se pudo resolver el SurfaceID 0.";
+                error = "Could not resolve SurfaceID 0.";
                 return false;
             }
 
@@ -138,7 +138,7 @@ namespace LocalModels.VoxelBridge
                     out texture, out error))
                 return false;
 
-            Undo.RecordObject(palette, "Regenerar LUT de colores voxel");
+            Undo.RecordObject(palette, "Rebuild Voxel Color LUT");
             palette.SetGeneratedLut(texture, hash);
             EditorUtility.SetDirty(palette);
             AssetDatabase.SaveAssets();
@@ -156,7 +156,7 @@ namespace LocalModels.VoxelBridge
                     out texture, out error))
                 return false;
 
-            Undo.RecordObject(palette, "Regenerar LUT de superficies voxel");
+            Undo.RecordObject(palette, "Rebuild Voxel Surface LUT");
             palette.SetGeneratedLut(texture, hash);
             EditorUtility.SetDirty(palette);
             AssetDatabase.SaveAssets();
@@ -170,20 +170,13 @@ namespace LocalModels.VoxelBridge
             string palettePath = AssetDatabase.GetAssetPath(palette);
             if (string.IsNullOrEmpty(palettePath))
             {
-                error = "Guarda la paleta como asset antes de generar su LUT.";
+                error = "Save the palette as an asset before generating its LUT.";
                 return false;
             }
 
-            string paletteDirectory = Path.GetDirectoryName(palettePath)?.Replace('\\', '/');
-            if (string.IsNullOrEmpty(paletteDirectory))
-            {
-                error = $"No se pudo resolver la carpeta de '{palettePath}'.";
-                return false;
-            }
-
-            string generatedDirectory = paletteDirectory + "/Generated";
-            EnsureAssetFolder(generatedDirectory);
-            string texturePath = generatedDirectory + "/" + palette.name + "_LUT.asset";
+            string texturePath = GetGeneratedTextureAssetPath(palettePath, palette.name);
+            if (!TryValidateAssetType<Texture2D>(texturePath, out error)) return false;
+            EnsureAssetFolder(Path.GetDirectoryName(texturePath)?.Replace('\\', '/'));
             Texture2D existing = AssetDatabase.LoadAssetAtPath<Texture2D>(texturePath);
             Texture2D generated = CreateTexture(palette.name + "_LUT", pixels, linear);
 
@@ -194,13 +187,38 @@ namespace LocalModels.VoxelBridge
             }
             else
             {
-                Undo.RecordObject(existing, "Regenerar LUT voxel");
+                Undo.RecordObject(existing, "Rebuild Voxel LUT");
                 EditorUtility.CopySerialized(generated, existing);
                 UnityEngine.Object.DestroyImmediate(generated);
                 EditorUtility.SetDirty(existing);
                 texture = existing;
             }
 
+            error = null;
+            return true;
+        }
+
+        internal static string GetGeneratedTextureAssetPath(string palettePath, string paletteName) =>
+            Path.GetDirectoryName(palettePath)?.Replace('\\', '/') + "/Generated/" + paletteName + "_LUT.asset";
+
+        internal static bool TryValidateAssetType<T>(string assetPath, out string error)
+            where T : UnityEngine.Object
+        {
+            UnityEngine.Object existing = AssetDatabase.LoadMainAssetAtPath(assetPath);
+            if (existing != null && existing is T)
+            {
+                error = null;
+                return true;
+            }
+
+            string projectRoot = Directory.GetParent(Application.dataPath)?.FullName;
+            string absolutePath = Path.Combine(projectRoot ?? string.Empty, assetPath);
+            if (existing != null || File.Exists(absolutePath) || Directory.Exists(absolutePath))
+            {
+                error = $"'{assetPath}' already exists and is not a readable {typeof(T).Name} asset. " +
+                        "Move or rename the conflicting asset before continuing.";
+                return false;
+            }
             error = null;
             return true;
         }
@@ -249,7 +267,7 @@ namespace LocalModels.VoxelBridge
             string parent = Path.GetDirectoryName(folder)?.Replace('\\', '/');
             string name = Path.GetFileName(folder);
             if (string.IsNullOrEmpty(parent) || string.IsNullOrEmpty(name))
-                throw new InvalidOperationException($"Ruta de carpeta de assets inválida: {folder}");
+                throw new InvalidOperationException($"Invalid asset folder path: {folder}");
             EnsureAssetFolder(parent);
             AssetDatabase.CreateFolder(parent, name);
         }

@@ -83,7 +83,6 @@ namespace LocalModels.VoxelBridge
     internal sealed class VoxelLodBatchItemResult
     {
         public readonly GameObject Source;
-        public readonly Object ConversionSource;
         public readonly VoxelLodBuildResult BuildResult;
         public readonly string Error;
         public readonly bool Reused;
@@ -98,7 +97,6 @@ namespace LocalModels.VoxelBridge
             bool reused = false, string error = null, bool resumed = false)
         {
             Source = plan.Source;
-            ConversionSource = plan.ConversionSource;
             BuildResult = buildResult;
             Error = error;
             Reused = reused;
@@ -203,7 +201,7 @@ namespace LocalModels.VoxelBridge
             VoxelLodBatchSourcePlan[] plans = GetAutomaticBatchPlans(parent, batchOptions);
             if (plans.Length == 0)
                 throw new InvalidOperationException(
-                    "El objeto padre no contiene hijos directos con mallas para voxelizar.");
+                    "The parent object has no direct children containing meshes to voxelize.");
 
             int excludedInactiveDirectChildren = batchOptions.IgnoreInactiveObjects
                 ? CountInactiveDirectChildren(parent)
@@ -219,8 +217,8 @@ namespace LocalModels.VoxelBridge
                 effectiveOptions.ExportFolder);
             if (cleanedFamilies > 0)
                 Debug.LogWarning(
-                    $"Voxel Bridge eliminó {cleanedFamilies} familia(s) incompletas marcadas " +
-                    "por una ejecución interrumpida.");
+                    $"Voxel Bridge removed {cleanedFamilies} incomplete families marked " +
+                    "by an interrupted run.");
 
             var items = new List<VoxelLodBatchItemResult>();
             string checkpointSignature = VoxelLodBatchIdentity.CreateBatchSignature(
@@ -238,7 +236,7 @@ namespace LocalModels.VoxelBridge
                 GameObject current = plan.Source;
                 float progressBase = (float)sourceIndex / plans.Length;
                 if (cancelProgress != null && cancelProgress(progressBase,
-                        $"Modelo {sourceIndex + 1} de {plans.Length}: preparando {current.name}"))
+                        $"Model {sourceIndex + 1} of {plans.Length}: preparing {current.name}"))
                 {
                     VoxelLodBatchMemoryCleaner.ReleaseUnusedMemory(parent, profile);
                     return new VoxelLodBatchBuildResult(
@@ -262,14 +260,14 @@ namespace LocalModels.VoxelBridge
 
                 VoxelLodBatchSourceEstimate estimate = preflight.Find(plan.ReuseKey);
                 string preflightError = estimate == null
-                    ? "No se encontró el análisis previo de esta fuente."
+                    ? "No preflight analysis was found for this source."
                     : estimate.Error;
                 if (string.IsNullOrEmpty(preflightError) &&
                     (batchOptions.AdaptInitialVoxelSize ||
                      batchOptions.SkipSourcesOverMemoryBudget) && estimate.IsOverBudget)
                     preflightError =
-                        $"Memoria estimada {VoxelLodBatchAnalyzer.FormatBytes(estimate.EstimatedPeakBytes)}, " +
-                        $"por encima del presupuesto de {VoxelLodBatchAnalyzer.FormatBytes(estimate.MemoryBudgetBytes)}.";
+                        $"Estimated memory {VoxelLodBatchAnalyzer.FormatBytes(estimate.EstimatedPeakBytes)} " +
+                        $"exceeds the budget of {VoxelLodBatchAnalyzer.FormatBytes(estimate.MemoryBudgetBytes)}.";
                 if (!string.IsNullOrEmpty(preflightError))
                 {
                     var rejected = new VoxelLodBatchConversionOutcome(default, preflightError);
@@ -286,7 +284,7 @@ namespace LocalModels.VoxelBridge
                         plan.ConversionSource, profile, effectiveOptions, (progress, message) =>
                             cancelProgress != null && cancelProgress(
                                 progressBase + progress / plans.Length,
-                                $"Modelo {sourceIndex + 1} de {plans.Length} · {current.name}: {message}"),
+                                $"Model {sourceIndex + 1} of {plans.Length} · {current.name}: {message}"),
                         estimate.InitialVoxelMultiplier,
                         batchOptions.MaximumImportedVoxelCount,
                         batchOptions.AdaptInitialVoxelSize
@@ -460,16 +458,16 @@ namespace LocalModels.VoxelBridge
             if (initialVoxelMultiplier < 1 ||
                 (initialVoxelMultiplier & (initialVoxelMultiplier - 1)) != 0)
                 throw new ArgumentOutOfRangeException(nameof(initialVoxelMultiplier),
-                    "El multiplicador voxel inicial debe ser una potencia de dos mayor o igual que uno.");
+                    "The initial voxel multiplier must be a power of two greater than or equal to one.");
             if (maximumImportedVoxelCount < 0)
                 throw new ArgumentOutOfRangeException(nameof(maximumImportedVoxelCount),
-                    "El límite de vóxeles importados no puede ser negativo.");
+                    "The imported voxel limit cannot be negative.");
             if (maximumInitialVoxelMultiplier == 0)
                 maximumInitialVoxelMultiplier = initialVoxelMultiplier;
             if (!IsPowerOfTwo(maximumInitialVoxelMultiplier) ||
                 maximumInitialVoxelMultiplier < initialVoxelMultiplier)
                 throw new ArgumentOutOfRangeException(nameof(maximumInitialVoxelMultiplier),
-                    "La base voxel máxima debe ser una potencia de dos no menor que la base inicial.");
+                    "The maximum voxel multiplier must be a power of two no smaller than the initial multiplier.");
 
             VoxelizationResult validatedLod0 = VoxelizeAutomaticLod(
                 source, profile, options, 0, initialVoxelMultiplier, cancelProgress);
@@ -484,15 +482,15 @@ namespace LocalModels.VoxelBridge
                     validatedLod0 = null;
                     CollectRejectedVoxelGrid();
                     throw new InvalidOperationException(
-                        $"El LOD0 contiene {rejectedVoxelCount:N0} vóxeles, por encima del límite " +
-                        $"de importación de {maximumImportedVoxelCount:N0}. No existe otra base " +
-                        $"permitida después de ×{initialVoxelMultiplier}.");
+                        $"LOD0 contains {rejectedVoxelCount:N0} voxels, exceeding the import limit " +
+                        $"of {maximumImportedVoxelCount:N0}. No further multiplier " +
+                        $"is allowed beyond ×{initialVoxelMultiplier}.");
                 }
 
                 if (cancelProgress != null && cancelProgress(0f,
-                        $"LOD0 contiene {rejectedVoxelCount:N0} vóxeles; " +
-                        $"reintentando con base ×{nextMultiplier}"))
-                    throw new OperationCanceledException("Voxelización cancelada.");
+                        $"LOD0 contains {rejectedVoxelCount:N0} voxels; " +
+                        $"retrying with multiplier ×{nextMultiplier}"))
+                    throw new OperationCanceledException("Voxelization cancelled.");
 
                 validatedLod0 = null;
                 CollectRejectedVoxelGrid();
@@ -625,20 +623,22 @@ namespace LocalModels.VoxelBridge
         {
             ValidateProfileAndOptions(profile, options);
             if (mode == VoxelLodGenerationMode.SourceMesh)
-                throw new ArgumentException("El modo manual debe duplicar o reducir el LOD anterior.", nameof(mode));
+                throw new ArgumentException("Manual mode must duplicate or reduce the previous LOD.", nameof(mode));
             if (!VoxelImporterIntegration.TryLoadMetadata(parentVoxAssetPath,
                     out VoxelBridgeMetadata parent, out string error))
                 throw new InvalidDataException(error);
             if (targetLodIndex <= parent.lodIndex || targetLodIndex >= profile.LodCount)
                 throw new ArgumentOutOfRangeException(nameof(targetLodIndex),
-                    "El LOD de destino debe ser posterior al LOD padre y existir en el perfil.");
+                    "The target LOD must follow the parent LOD and exist in the profile.");
 
             string manifestPath = parent.lodSetAssetPath;
             VoxelLodSetManifest manifest;
-            if (!string.IsNullOrWhiteSpace(manifestPath) && TryReadJsonAsset(manifestPath, out manifest))
+            if (!string.IsNullOrWhiteSpace(manifestPath))
             {
+                if (!TryReadManifest(manifestPath, out manifest))
+                    throw new InvalidDataException("The LOD manifest is missing or unsupported. Regenerate the family before creating a manual LOD.");
                 if (manifest.familyId != parent.familyId)
-                    throw new InvalidDataException("El manifiesto no pertenece a la misma familia LOD.");
+                    throw new InvalidDataException("The manifest does not belong to the same LOD family.");
             }
             else
             {
@@ -711,7 +711,6 @@ namespace LocalModels.VoxelBridge
                 voxAssetPath = targetPath
             });
             entries.Sort((a, b) => a.lodIndex.CompareTo(b.lodIndex));
-            manifest.formatVersion = Mathf.Max(4, manifest.formatVersion);
             manifest.initialVoxelMultiplier = initialVoxelMultiplier;
             manifest.lods = entries.ToArray();
             manifest.profileAssetPath = AssetDatabase.GetAssetPath(profile);
@@ -729,23 +728,8 @@ namespace LocalModels.VoxelBridge
             VoxelLodSetManifest manifest, VoxelStyleProfile profile,
             VoxelBridgeMetadata metadata)
         {
-            if (manifest != null && IsPowerOfTwo(manifest.initialVoxelMultiplier))
+            if (manifest != null)
                 return manifest.initialVoxelMultiplier;
-
-            VoxelLodEntry firstEntry = manifest?.lods?
-                .Where(entry => entry != null)
-                .OrderBy(entry => entry.lodIndex)
-                .FirstOrDefault();
-            if (firstEntry != null)
-            {
-                int localMultiplier = profile.GetLodMultiplier(firstEntry.lodIndex);
-                if (firstEntry.multiplier >= localMultiplier &&
-                    firstEntry.multiplier % localMultiplier == 0)
-                {
-                    int derived = firstEntry.multiplier / localMultiplier;
-                    if (IsPowerOfTwo(derived)) return derived;
-                }
-            }
 
             if (metadata != null && metadata.lodIndex >= 0 &&
                 metadata.lodIndex < profile.LodCount)
@@ -766,13 +750,13 @@ namespace LocalModels.VoxelBridge
 
         public static string RebuildPrefab(string manifestAssetPath)
         {
-            if (!TryReadJsonAsset(manifestAssetPath, out VoxelLodSetManifest manifest))
-                throw new InvalidDataException("El manifiesto LOD no es válido.");
+            if (!TryReadManifest(manifestAssetPath, out VoxelLodSetManifest manifest))
+                throw new InvalidDataException("The LOD manifest is invalid or unsupported. Regenerate the family.");
             foreach (VoxelLodEntry entry in manifest.lods ?? Array.Empty<VoxelLodEntry>())
             {
                 if (!VoxelImporterIntegration.ApplyAndReimport(
                         entry.voxAssetPath, out string message, forceReimport: true))
-                    Debug.LogWarning($"Voxel Bridge no pudo resincronizar '{entry.voxAssetPath}': {message}");
+                    Debug.LogWarning($"Voxel Bridge could not resynchronize '{entry.voxAssetPath}': {message}");
             }
             string familyFolder = Path.GetDirectoryName(manifestAssetPath)?.Replace('\\', '/') ?? "Assets";
             string prefabPath = BuildPrefab(manifest, familyFolder);
@@ -792,7 +776,7 @@ namespace LocalModels.VoxelBridge
 
             if (assetPath.EndsWith(".voxset.json", StringComparison.OrdinalIgnoreCase))
             {
-                if (!TryReadJsonAsset(assetPath, out manifest)) return false;
+                if (!TryReadManifest(assetPath, out manifest)) return false;
                 manifestAssetPath = assetPath;
                 return true;
             }
@@ -800,7 +784,7 @@ namespace LocalModels.VoxelBridge
             if (assetPath.EndsWith(".vox", StringComparison.OrdinalIgnoreCase) &&
                 VoxelImporterIntegration.TryLoadMetadata(assetPath,
                     out VoxelBridgeMetadata metadata, out _) &&
-                TryReadJsonAsset(metadata.lodSetAssetPath, out manifest))
+                TryReadManifest(metadata.lodSetAssetPath, out manifest))
             {
                 manifestAssetPath = NormalizeAssetPath(metadata.lodSetAssetPath);
                 return true;
@@ -816,7 +800,7 @@ namespace LocalModels.VoxelBridge
             {
                 string candidate = NormalizeAssetPath(AssetDatabase.GUIDToAssetPath(guid));
                 if (!candidate.EndsWith(".voxset.json", StringComparison.OrdinalIgnoreCase) ||
-                    !TryReadJsonAsset(candidate, out VoxelLodSetManifest candidateManifest))
+                    !TryReadManifest(candidate, out VoxelLodSetManifest candidateManifest))
                     continue;
 
                 bool isPrefab = NormalizeAssetPath(candidateManifest.prefabAssetPath)
@@ -846,7 +830,7 @@ namespace LocalModels.VoxelBridge
             {
                 if (semanticSource?.semantic == null)
                     throw new InvalidDataException(
-                        "El LOD semántico no referencia metadata semántica de origen.");
+                        "The semantic LOD references no source semantic metadata.");
                 if (!VoxelSemanticTransport.TryLoadPalettes(semanticSource.semantic,
                         out VoxelColorPalette colorPalette,
                         out VoxelSurfacePalette surfacePalette, out string paletteError))
@@ -910,7 +894,7 @@ namespace LocalModels.VoxelBridge
             foreach (string path in voxPaths)
             {
                 if (!VoxelImporterIntegration.ApplyAndReimport(path, out string message, forceReimport: true))
-                    Debug.LogWarning($"Voxel Bridge no pudo configurar '{path}': {message}");
+                    Debug.LogWarning($"Voxel Bridge could not configure '{path}': {message}");
             }
             AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
         }
@@ -922,11 +906,15 @@ namespace LocalModels.VoxelBridge
                 .Where(entry => !string.IsNullOrWhiteSpace(entry.voxAssetPath))
                 .OrderBy(entry => entry.lodIndex)
                 .ToArray();
-            if (entries.Length == 0) throw new InvalidDataException("El manifiesto no contiene niveles LOD.");
+            if (entries.Length == 0) throw new InvalidDataException("The manifest contains no LOD levels.");
 
             VoxelStyleProfile profile = string.IsNullOrEmpty(manifest.profileAssetPath)
                 ? null
                 : AssetDatabase.LoadAssetAtPath<VoxelStyleProfile>(manifest.profileAssetPath);
+            if (profile == null)
+                throw new InvalidDataException("The LOD style profile is missing. Assign a valid profile and regenerate the family.");
+            if (!profile.TryValidate(out string profileError))
+                throw new InvalidDataException(profileError);
             string modelName = MakeSafeFileName(manifest.sourceName);
             var root = new GameObject(modelName);
             try
@@ -937,18 +925,14 @@ namespace LocalModels.VoxelBridge
                     VoxelLodEntry entry = entries[i];
                     GameObject imported = AssetDatabase.LoadAssetAtPath<GameObject>(entry.voxAssetPath);
                     if (imported == null)
-                        throw new InvalidDataException($"'{entry.voxAssetPath}' no produjo un GameObject importado.");
+                        throw new InvalidDataException($"'{entry.voxAssetPath}' did not produce an imported GameObject.");
                     GameObject child = Object.Instantiate(imported);
                     child.name = $"LOD{entry.lodIndex}_x{entry.multiplier}";
                     child.transform.SetParent(root.transform, false);
                     Renderer[] renderers = child.GetComponentsInChildren<Renderer>(true);
                     if (renderers.Length == 0)
-                        throw new InvalidDataException($"El LOD {entry.lodIndex} no contiene renderers.");
-                    float height = profile != null
-                        ? profile.GetLodScreenHeight(entry.lodIndex)
-                        : entry.screenRelativeTransitionHeight > 0f
-                            ? Mathf.Clamp01(entry.screenRelativeTransitionHeight)
-                            : Mathf.Max(0.01f, 0.6f * Mathf.Pow(0.5f, entry.lodIndex));
+                        throw new InvalidDataException($"LOD {entry.lodIndex} contains no renderers.");
+                    float height = profile.GetLodScreenHeight(entry.lodIndex);
                     lods[i] = new LOD(height, renderers);
                 }
                 var group = root.AddComponent<LODGroup>();
@@ -957,41 +941,28 @@ namespace LocalModels.VoxelBridge
                 group.RecalculateBounds();
 
                 manifest.lodGroupSize = group.size;
-                if (profile != null)
+                for (int i = 0; i < entries.Length; i++)
                 {
-                    for (int i = 0; i < entries.Length; i++)
-                    {
-                        float height = profile.GetLodScreenHeight(
-                            entries[i].lodIndex, manifest.lodGroupSize);
-                        entries[i].screenRelativeTransitionHeight = height;
-                        lods[i].screenRelativeTransitionHeight = height;
-                    }
-                    group.SetLODs(lods);
-                    group.RecalculateBounds();
+                    float height = profile.GetLodScreenHeight(
+                        entries[i].lodIndex, manifest.lodGroupSize);
+                    entries[i].screenRelativeTransitionHeight = height;
+                    lods[i].screenRelativeTransitionHeight = height;
                 }
-                else
-                {
-                    for (int i = 0; i < entries.Length; i++)
-                        entries[i].screenRelativeTransitionHeight =
-                            lods[i].screenRelativeTransitionHeight;
-                }
-                manifest.formatVersion = Mathf.Max(4, manifest.formatVersion);
+                group.SetLODs(lods);
+                group.RecalculateBounds();
 
                 if (manifest.impostor != null &&
                     !string.IsNullOrWhiteSpace(manifest.impostor.assetPath) &&
                     !AmplifyImpostorIntegration.TryAppendExistingImpostor(
                         root, group, manifest.impostor,
-                        profile != null
-                            ? profile.GetLargeModelLodRangeBlend(manifest.lodGroupSize)
-                            : 0f,
+                        profile.GetLargeModelLodRangeBlend(manifest.lodGroupSize),
                         out string impostorError))
-                    Debug.LogWarning($"Voxel Bridge omitió el impostor de '{modelName}': {impostorError}");
+                    Debug.LogWarning($"Voxel Bridge skipped the impostor for '{modelName}': {impostorError}");
 
                 string path = ResolvePrefabAssetPath(manifest, familyFolder, modelName);
                 PrefabUtility.SaveAsPrefabAsset(root, path);
-                if (profile != null)
-                    ApplySavedPrefabShadowPolicy(
-                        path, profile, entries.Length, manifest.lodGroupSize);
+                ApplySavedPrefabShadowPolicy(
+                    path, profile, entries.Length, manifest.lodGroupSize);
                 return path;
             }
             finally
@@ -1011,7 +982,7 @@ namespace LocalModels.VoxelBridge
             {
                 LODGroup group = prefabRoot.GetComponent<LODGroup>();
                 if (group == null)
-                    throw new InvalidDataException("El prefab guardado no contiene un LODGroup.");
+                    throw new InvalidDataException("The saved prefab contains no LODGroup.");
                 ApplyLodShadowPolicy(profile, group, voxelLodCount, modelSize);
                 PrefabUtility.SaveAsPrefabAsset(prefabRoot, prefabPath);
             }
@@ -1064,7 +1035,7 @@ namespace LocalModels.VoxelBridge
                 min = Vector3Int.Min(min, position);
                 max = Vector3Int.Max(max, position);
             }
-            if (min.x == int.MaxValue) throw new InvalidOperationException("La rejilla no contiene vóxeles.");
+            if (min.x == int.MaxValue) throw new InvalidOperationException("The grid contains no voxels.");
             size = max - min + Vector3Int.one;
         }
 
@@ -1072,23 +1043,37 @@ namespace LocalModels.VoxelBridge
         {
             if (profile == null) throw new ArgumentNullException(nameof(profile));
             if (!profile.TryValidate(out string error)) throw new InvalidOperationException(error);
+            if (!AssetDatabase.Contains(profile) ||
+                string.IsNullOrWhiteSpace(AssetDatabase.GetAssetPath(profile)))
+                throw new InvalidOperationException(
+                    "Save the LOD style profile as an asset before generating a family. " +
+                    "The manifest requires a persistent profile to rebuild its prefab.");
             if (options == null) throw new ArgumentNullException(nameof(options));
             if (!IsAssetFolder(options.ExportFolder))
-                throw new ArgumentException("La carpeta de salida debe estar dentro de Assets.");
+                throw new ArgumentException("The output folder must be inside Assets.");
         }
 
-        private static bool TryReadJsonAsset<T>(string assetPath, out T value) where T : class
+        internal static bool TryReadManifest(string assetPath, out VoxelLodSetManifest manifest)
         {
-            value = null;
+            manifest = null;
             if (string.IsNullOrWhiteSpace(assetPath)) return false;
             string absolute = AssetPathToAbsolute(assetPath);
             if (!File.Exists(absolute)) return false;
-            value = JsonUtility.FromJson<T>(File.ReadAllText(absolute));
-            return value != null;
+            VoxelLodSetManifest candidate;
+            try
+            {
+                candidate = JsonUtility.FromJson<VoxelLodSetManifest>(File.ReadAllText(absolute));
+            }
+            catch (ArgumentException)
+            {
+                return false;
+            }
+            if (candidate == null || candidate.formatVersion != 4 ||
+                !IsPowerOfTwo(candidate.initialVoxelMultiplier))
+                return false;
+            manifest = candidate;
+            return true;
         }
-
-        internal static bool TryReadManifest(string assetPath, out VoxelLodSetManifest manifest) =>
-            TryReadJsonAsset(assetPath, out manifest);
 
         internal static void SaveManifest(string assetPath, VoxelLodSetManifest manifest)
         {
@@ -1107,7 +1092,7 @@ namespace LocalModels.VoxelBridge
         internal static void EnsureAssetFolder(string path)
         {
             path = NormalizeAssetPath(path);
-            if (!IsAssetFolder(path)) throw new ArgumentException("La carpeta debe estar dentro de Assets.");
+            if (!IsAssetFolder(path)) throw new ArgumentException("The folder must be inside Assets.");
             if (AssetDatabase.IsValidFolder(path)) return;
             string[] parts = path.Split('/');
             string current = parts[0];
@@ -1122,7 +1107,7 @@ namespace LocalModels.VoxelBridge
         internal static string AssetPathToAbsolute(string assetPath)
         {
             string projectRoot = Directory.GetParent(Application.dataPath)?.FullName
-                                 ?? throw new InvalidOperationException("No se encontró la raíz del proyecto.");
+                                 ?? throw new InvalidOperationException("The project root could not be found.");
             return Path.GetFullPath(Path.Combine(projectRoot, assetPath));
         }
 
@@ -1150,18 +1135,7 @@ namespace LocalModels.VoxelBridge
             string desiredPath = $"{familyFolder}/{prefabName}.prefab";
             if (IsReusablePrefabPath(manifest.prefabAssetPath) &&
                 AssetDatabase.LoadMainAssetAtPath(manifest.prefabAssetPath) != null)
-            {
-                string existingPath = NormalizeAssetPath(manifest.prefabAssetPath);
-                if (existingPath.Equals(desiredPath, StringComparison.Ordinal)) return existingPath;
-
-                if (AssetDatabase.LoadMainAssetAtPath(desiredPath) != null)
-                    desiredPath = AssetDatabase.GenerateUniqueAssetPath(desiredPath);
-                string moveError = AssetDatabase.MoveAsset(existingPath, desiredPath);
-                if (!string.IsNullOrEmpty(moveError))
-                    throw new IOException(
-                        $"No se pudo mover el prefab a la carpeta de su familia: {moveError}");
-                return desiredPath;
-            }
+                return NormalizeAssetPath(manifest.prefabAssetPath);
 
             return AssetDatabase.GenerateUniqueAssetPath(desiredPath);
         }

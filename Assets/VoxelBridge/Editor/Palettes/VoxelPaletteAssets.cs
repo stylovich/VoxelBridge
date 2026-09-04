@@ -14,13 +14,10 @@ namespace LocalModels.VoxelBridge
 
     public enum VoxelSurfaceRenderClass
     {
-        [InspectorName("Opaco estándar")]
+        [InspectorName("Standard Opaque")]
         Opaque,
-        [InspectorName("Follaje")]
         Foliage,
-        [InspectorName("Transparente")]
         Transparent,
-        [InspectorName("Especial")]
         Special
     }
 
@@ -87,7 +84,7 @@ namespace LocalModels.VoxelBridge
         {
             if (palette == null)
             {
-                error = "La paleta de colores no está asignada.";
+                error = "The color palette is not assigned.";
                 return false;
             }
 
@@ -102,7 +99,7 @@ namespace LocalModels.VoxelBridge
                 if (!IsUnit(color.r) || !IsUnit(color.g) ||
                     !IsUnit(color.b) || !IsUnit(color.a))
                 {
-                    error = $"El ColorID {entry.Id} contiene componentes fuera del rango 0..1.";
+                    error = $"ColorID {entry.Id} contains components outside the 0..1 range.";
                     return false;
                 }
             }
@@ -115,26 +112,26 @@ namespace LocalModels.VoxelBridge
         {
             if (palette == null)
             {
-                error = "La paleta de superficies no está asignada.";
+                error = "The surface palette is not assigned.";
                 return false;
             }
 
             if (!TryValidateShared(palette.Entries, palette.RetiredIds,
                     entry => entry?.Id ?? -1, entry => entry?.DisplayName,
-                    "superficie", out error))
+                    "surface", out error))
                 return false;
 
             foreach (VoxelSurfaceDefinition entry in palette.Entries)
             {
                 if (!Enum.IsDefined(typeof(VoxelSurfaceRenderClass), entry.RenderClass))
                 {
-                    error = $"El SurfaceID {entry.Id} contiene una clase de render desconocida.";
+                    error = $"SurfaceID {entry.Id} has an unknown render class.";
                     return false;
                 }
                 if (!IsUnit(entry.Metallic) || !IsUnit(entry.Smoothness) ||
                     !IsUnit(entry.Emission) || !IsUnit(entry.OcclusionMultiplier))
                 {
-                    error = $"El SurfaceID {entry.Id} contiene propiedades PBR fuera del rango 0..1.";
+                    error = $"SurfaceID {entry.Id} contains PBR properties outside the 0..1 range.";
                     return false;
                 }
             }
@@ -150,7 +147,7 @@ namespace LocalModels.VoxelBridge
         {
             if (entries == null || entries.Count == 0 || entries.Count > VoxelPaletteConstants.EntryCount)
             {
-                error = $"La paleta debe contener entre 1 y {VoxelPaletteConstants.EntryCount} entradas de {kind}.";
+                error = $"The palette must contain between 1 and {VoxelPaletteConstants.EntryCount} {kind} entries.";
                 return false;
             }
 
@@ -162,31 +159,31 @@ namespace LocalModels.VoxelBridge
                 T entry = entries[i];
                 if (entry == null)
                 {
-                    error = $"La entrada de {kind} en la posición {i} está vacía.";
+                    error = $"The {kind} entry at index {i} is empty.";
                     return false;
                 }
 
                 int id = getId(entry);
                 if (id < VoxelPaletteConstants.MinimumId || id > VoxelPaletteConstants.MaximumId)
                 {
-                    error = $"El ID de {kind} {id} está fuera del rango 0..255.";
+                    error = $"The {kind} ID {id} is outside the 0..255 range.";
                     return false;
                 }
                 if (!activeIds.Add(id))
                 {
-                    error = $"El ID de {kind} {id} está duplicado.";
+                    error = $"The {kind} ID {id} is duplicated.";
                     return false;
                 }
 
                 string displayName = getName(entry);
                 if (string.IsNullOrWhiteSpace(displayName))
                 {
-                    error = $"El ID de {kind} {id} no tiene nombre.";
+                    error = $"The {kind} ID {id} has no name.";
                     return false;
                 }
                 if (!names.Add(displayName.Trim()))
                 {
-                    error = $"El nombre de {kind} '{displayName}' está duplicado.";
+                    error = $"The {kind} name '{displayName}' is duplicated.";
                     return false;
                 }
 
@@ -195,7 +192,7 @@ namespace LocalModels.VoxelBridge
 
             if (!hasDefault)
             {
-                error = $"La paleta requiere una entrada {kind} con ID 0 para los valores predeterminados.";
+                error = $"The palette requires a default {kind} entry with ID 0.";
                 return false;
             }
 
@@ -206,17 +203,17 @@ namespace LocalModels.VoxelBridge
                 {
                     if (id <= VoxelPaletteConstants.DefaultId || id > VoxelPaletteConstants.MaximumId)
                     {
-                        error = $"El ID retirado {id} está fuera del rango permitido 1..255.";
+                        error = $"Retired ID {id} is outside the allowed 1..255 range.";
                         return false;
                     }
                     if (!seenRetired.Add(id))
                     {
-                        error = $"El ID retirado {id} aparece más de una vez.";
+                        error = $"Retired ID {id} appears more than once.";
                         return false;
                     }
                     if (activeIds.Contains(id))
                     {
-                        error = $"El ID {id} no puede estar activo y retirado al mismo tiempo.";
+                        error = $"ID {id} cannot be both active and retired.";
                         return false;
                     }
                 }

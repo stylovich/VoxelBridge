@@ -1,23 +1,26 @@
-# Dynamic GI and Voxel Bridge tools for Unity
+# Herramientas Dynamic GI y Voxel Bridge para Unity
 
-This repository intentionally contains only the portable source of the Dynamic GI
-prototype and the Voxel Bridge editor tool. The local Polygon test environment,
-scenes, imported packages, `Library`, voxel exports, and generated lighting data are
-excluded from version control.
+Este repositorio contiene el código portable del prototipo Dynamic GI y las
+herramientas de Editor Voxel Bridge. El entorno local de pruebas Polygon, las
+escenas, los paquetes importados, `Library`, los exports voxel y los datos de
+iluminación generados quedan excluidos del control de versiones.
 
-## Tracked module
+## Módulos
 
-Copy `Assets/DynamicGI` and `Assets/DynamicGI.meta` into another Unity project to move
-the prototype. The current implementation targets Unity 6000.3.21f1 with HDRP 17.3.0.
-See `Assets/DynamicGI/README.md` for setup, architecture, validation, and limitations.
+Copiar `Assets/DynamicGI` y `Assets/DynamicGI.meta` a otro proyecto para trasladar el
+prototipo. La implementación utiliza Unity 6000.3.21f1 con HDRP 17.3.0. Consultar
+[la guía de Dynamic GI](Assets/DynamicGI/README.md) para instalación, arquitectura,
+validación y limitaciones.
 
-Copy `Assets/VoxelBridge` and `Assets/VoxelBridge.meta` to reuse the mesh-to-MagicaVoxel
-workflow. Its optional Voxel Importer compatibility patch is stored as source
-transformation code; the Asset Store package itself is deliberately not tracked.
-See `Assets/VoxelBridge/README.md` for usage and maintenance.
+Copiar `Assets/VoxelBridge` y `Assets/VoxelBridge.meta` para reutilizar el flujo de
+conversión de mallas a MagicaVoxel. Los parches opcionales de integración se
+distribuyen como transformaciones de código; los paquetes comerciales se instalan
+por separado. Consultar [la guía de Voxel Bridge](Assets/VoxelBridge/README.md) para
+uso y mantenimiento.
 
-The Test3-specific editor commands remain useful as examples, but the runtime Geometry
-Field, tiled Sky Visibility field, six-direction local Radiance Field, contributors,
-camera-centred Radiance Clipmap, bounded diffuse propagation, compute shaders, shader
-sampling/provider APIs, the optional HDRP stock-material bridge, and debug renderers do
-not depend on the Polygon assets or APV bake data.
+Los comandos de Editor específicos de Test3 sirven como ejemplos. El Geometry Field,
+el Sky Visibility por tiles, el Radiance Field local de seis direcciones, los
+contributors, el Radiance Clipmap centrado en cámara, la propagación difusa acotada,
+los compute shaders, las APIs de muestreo y proveedores, la integración opcional con
+materiales HDRP y los renderers de depuración no dependen de Polygon ni de los datos
+de horneado APV.

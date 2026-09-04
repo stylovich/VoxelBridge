@@ -9,11 +9,11 @@ namespace LocalModels.VoxelBridge
     {
         private const string ProfileSummary =
             "Esta configuración central contiene los cuatro perfiles que aparecen en la ventana de Voxel Bridge. " +
-            "Cada familia recuerda el nivel elegido; no necesitas crear ni intercambiar archivos de perfil.\n\n" +
-            "BAJO · Atlas 512 · 8×8 vistas · HemiOctahedron.\n" +
-            "MEDIO · Atlas 1024 · 12×12 vistas · Octahedron.\n" +
-            "ALTO · Atlas 2048 · 16×16 vistas · Octahedron.\n" +
-            "ARQUITECTURA · Atlas 2048 · 16×16 vistas · HemiOctahedron.";
+            "Cada familia conserva el perfil elegido dentro de esta configuración compartida.\n\n" +
+            "Low · Atlas 512 · 8×8 vistas · HemiOctahedron.\n" +
+            "Medium · Atlas 1024 · 12×12 vistas · Octahedron.\n" +
+            "High · Atlas 2048 · 16×16 vistas · Octahedron.\n" +
+            "Architecture · Atlas 2048 · 16×16 vistas · HemiOctahedron.";
 
         private void OnEnable()
         {
@@ -29,15 +29,15 @@ namespace LocalModels.VoxelBridge
         {
             EditorGUILayout.HelpBox(ProfileSummary, MessageType.Info);
             EditorGUILayout.HelpBox(
-                "Regla importante: al aumentar Vistas por eje también debes considerar aumentar el atlas. " +
+                "Al aumentar Views per Axis, considerar también el tamaño del atlas. " +
                 "Por ejemplo, 1024/16 deja aproximadamente 64 píxeles por vista, mientras que 1024/8 deja 128.",
                 MessageType.None);
             DrawDefaultInspector();
 
             EditorGUILayout.Space(8);
-            if (!GUILayout.Button("Restaurar los cuatro perfiles recomendados")) return;
+            if (!GUILayout.Button("Restore Four Recommended Profiles")) return;
 
-            Undo.RecordObjects(targets, "Restaurar perfiles de impostor");
+            Undo.RecordObjects(targets, "Restore Impostor Profiles");
             foreach (UnityEngine.Object value in targets)
             {
                 var profile = (VoxelImpostorProfile)value;

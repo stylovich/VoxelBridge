@@ -12,7 +12,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ae3f7485f9118954d811f9ec61290429, type: 3}
   m_Name: VoxelColorPalette
   m_EditorClassIdentifier: VoxelBridge.Editor::LocalModels.VoxelBridge.VoxelColorPalette
-  dataVersion: 1
   entries:
   - id: 0
     displayName: Default

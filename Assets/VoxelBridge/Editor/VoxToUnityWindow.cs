@@ -22,42 +22,42 @@ namespace LocalModels.VoxelBridge
         private string status;
         private Vector2 scroll;
 
-        [MenuItem("Tools/Voxel Bridge/VOX a Unity", false, 120)]
+        [MenuItem("Tools/Voxel Bridge/VOX to Unity", false, 120)]
         private static void OpenWindow()
         {
             var window = GetWindow<VoxToUnityWindow>();
-            window.titleContent = new GUIContent("VOX a Unity");
+            window.titleContent = new GUIContent("VOX to Unity");
             window.minSize = new Vector2(440, 430);
             if (VoxelImporterIntegration.IsVoxAsset(Selection.activeObject))
                 window.voxAsset = Selection.activeObject;
             window.Show();
         }
 
-        [MenuItem("Assets/Voxel Bridge/Abrir conversor VOX a Unity", false, 2110)]
+        [MenuItem("Assets/Voxel Bridge/Open VOX to Unity Converter", false, 2110)]
         private static void OpenFromSelection() => OpenWindow();
 
-        [MenuItem("Assets/Voxel Bridge/Abrir conversor VOX a Unity", true)]
+        [MenuItem("Assets/Voxel Bridge/Open VOX to Unity Converter", true)]
         private static bool ValidateOpenFromSelection() =>
             VoxelImporterIntegration.IsVoxAsset(Selection.activeObject);
 
-        [MenuItem("Assets/Voxel Bridge/Aplicar metadatos al .vox", false, 2111)]
+        [MenuItem("Assets/Voxel Bridge/Apply Metadata to .vox", false, 2111)]
         private static void ApplyFromSelection()
         {
             string path = AssetDatabase.GetAssetPath(Selection.activeObject);
             bool success = VoxelImporterIntegration.ApplyAndReimport(path, out string message);
             if (success) Debug.Log($"Voxel Bridge: {message} ({path})", Selection.activeObject);
-            else EditorUtility.DisplayDialog("Voxel Bridge", message, "Cerrar");
+            else EditorUtility.DisplayDialog("Voxel Bridge", message, "Close");
         }
 
-        [MenuItem("Assets/Voxel Bridge/Aplicar metadatos al .vox", true)]
+        [MenuItem("Assets/Voxel Bridge/Apply Metadata to .vox", true)]
         private static bool ValidateApplyFromSelection() =>
             VoxelImporterIntegration.IsVoxAsset(Selection.activeObject);
 
-        [MenuItem("Assets/Voxel Bridge/Abrir en MagicaVoxel", false, 2112)]
+        [MenuItem("Assets/Voxel Bridge/Open in MagicaVoxel", false, 2112)]
         private static void OpenSelectedInMagicaVoxel() =>
             MagicaVoxelLauncher.OpenAsset(Selection.activeObject);
 
-        [MenuItem("Assets/Voxel Bridge/Abrir en MagicaVoxel", true)]
+        [MenuItem("Assets/Voxel Bridge/Open in MagicaVoxel", true)]
         private static bool ValidateOpenInMagicaVoxel() =>
             VoxelImporterIntegration.IsVoxAsset(Selection.activeObject);
 
@@ -70,7 +70,7 @@ namespace LocalModels.VoxelBridge
         private void OnGUI()
         {
             scroll = EditorGUILayout.BeginScrollView(scroll);
-            EditorGUILayout.LabelField("VOX a Unity", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("VOX to Unity", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox(
                 "Voxel Importer convierte el archivo .vox en mallas de Unity durante la importación. El asset sigue siendo físicamente un .vox aunque Project lo muestre como GameObject.",
                 MessageType.Info);
@@ -83,10 +83,10 @@ namespace LocalModels.VoxelBridge
 
         private void DrawDirectImport()
         {
-            EditorGUILayout.LabelField("1. Importación directa .vox", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("1. Direct .vox Import", EditorStyles.boldLabel);
             if (!VoxelImporterIntegration.IsInstalled)
                 EditorGUILayout.HelpBox("AloneSoft Voxel Importer no está cargado.", MessageType.Warning);
-            voxAsset = EditorGUILayout.ObjectField("Archivo .vox", voxAsset, typeof(Object), false);
+            voxAsset = EditorGUILayout.ObjectField(".vox File", voxAsset, typeof(Object), false);
             if (VoxelImporterIntegration.IsVoxAsset(voxAsset))
             {
                 string path = AssetDatabase.GetAssetPath(voxAsset);
@@ -98,47 +98,52 @@ namespace LocalModels.VoxelBridge
             using (new EditorGUI.DisabledScope(!VoxelImporterIntegration.IsInstalled ||
                                                !VoxelImporterIntegration.IsVoxAsset(voxAsset)))
             {
-                if (GUILayout.Button("Aplicar escala, pivote y reimportar", GUILayout.Height(30)))
+                if (GUILayout.Button("Apply Scale and Pivot, then Reimport", GUILayout.Height(30)))
                 {
                     bool success = VoxelImporterIntegration.ApplyAndReimport(
                         AssetDatabase.GetAssetPath(voxAsset), out status);
-                    if (!success) EditorUtility.DisplayDialog("Voxel Bridge", status, "Cerrar");
+                    if (!success) EditorUtility.DisplayDialog("Voxel Bridge", status, "Close");
                 }
             }
             using (new EditorGUI.DisabledScope(!VoxelImporterIntegration.IsVoxAsset(voxAsset)))
             {
                 EditorGUILayout.BeginHorizontal();
-                if (GUILayout.Button("Seleccionar modelo importado"))
+                if (GUILayout.Button("Select Imported Model"))
                 {
                     Selection.activeObject = voxAsset;
                     EditorGUIUtility.PingObject(voxAsset);
                 }
-                if (GUILayout.Button("Mostrar archivo .vox"))
+                if (GUILayout.Button("Reveal .vox File"))
                     EditorUtility.RevealInFinder(VoxelLodPipeline.AssetPathToAbsolute(
                         AssetDatabase.GetAssetPath(voxAsset)));
-                if (GUILayout.Button("Abrir en MagicaVoxel")) MagicaVoxelLauncher.OpenAsset(voxAsset);
+                if (GUILayout.Button("Open in MagicaVoxel")) MagicaVoxelLauncher.OpenAsset(voxAsset);
                 EditorGUILayout.EndHorizontal();
             }
         }
 
         private void DrawObjAlternative()
         {
-            EditorGUILayout.LabelField("2. OBJ exportado por MagicaVoxel (alternativa)", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("2. MagicaVoxel OBJ Export (Alternative)", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox(
                 "Flujo alternativo para importar un OBJ exportado desde MagicaVoxel. El sidecar original recupera la escala y el pivote.",
                 MessageType.None);
-            returnedObj = (GameObject)EditorGUILayout.ObjectField("OBJ exportado", returnedObj,
+            EditorGUILayout.HelpBox(
+                "Este flujo admite sidecars RGB v3. Los OBJ exportados no conservan el contrato " +
+                "ColorID + SurfaceID de los archivos semánticos v4; conservar el .vox y su sidecar " +
+                "para editar y generar sus LOD sin perder esa información.",
+                MessageType.None);
+            returnedObj = (GameObject)EditorGUILayout.ObjectField("Exported OBJ", returnedObj,
                 typeof(GameObject), false);
-            metadataAsset = (TextAsset)EditorGUILayout.ObjectField("Metadatos", metadataAsset,
+            metadataAsset = (TextAsset)EditorGUILayout.ObjectField("Metadata", metadataAsset,
                 typeof(TextAsset), false);
-            returnAxis = (ReturnAxis)EditorGUILayout.Popup(new GUIContent("Ejes del OBJ",
+            returnAxis = (ReturnAxis)EditorGUILayout.Popup(new GUIContent("OBJ Axes",
                     "El valor predeterminado compensa la conversión Z-up de MagicaVoxel al OBJ Y-up"),
-                (int)returnAxis, new[] { "MagicaVoxel predeterminado", "Ya alineado con Unity" });
-            VoxelBridgeFolderPicker.Draw("Carpeta de prefabs", ref prefabFolder);
+                (int)returnAxis, new[] { "MagicaVoxel Default", "Already Unity-Aligned" });
+            VoxelBridgeFolderPicker.Draw("Prefab Folder", ref prefabFolder);
             using (new EditorGUI.DisabledScope(returnedObj == null || metadataAsset == null ||
                                                !VoxelLodPipeline.IsAssetFolder(prefabFolder)))
             {
-                if (GUILayout.Button("Crear prefab desde OBJ", GUILayout.Height(30))) CreateRoundTripPrefab();
+                if (GUILayout.Button("Create Prefab from OBJ", GUILayout.Height(30))) CreateRoundTripPrefab();
             }
         }
 
@@ -148,10 +153,11 @@ namespace LocalModels.VoxelBridge
             try
             {
                 VoxelBridgeMetadata metadata = JsonUtility.FromJson<VoxelBridgeMetadata>(metadataAsset.text);
-                if (metadata == null || metadata.formatVersion < 1 || metadata.formatVersion > 3 ||
-                    metadata.voxelSize <= 0f)
+                if (metadata == null || metadata.formatVersion != 3 ||
+                    !float.IsFinite(metadata.voxelSize) || metadata.voxelSize <= 0f)
                     throw new InvalidDataException(
-                        "El archivo de metadatos no es válido o no corresponde a Voxel Bridge.");
+                        "OBJ conversion requires valid Voxel Bridge RGB metadata (version 3). " +
+                        "Semantic metadata cannot be restored from an exported OBJ.");
                 VoxelLodPipeline.EnsureAssetFolder(prefabFolder);
                 root = new GameObject(metadata.sourceName + "_Voxel");
                 GameObject child = Instantiate(returnedObj);
@@ -168,13 +174,13 @@ namespace LocalModels.VoxelBridge
                 GameObject prefab = PrefabUtility.SaveAsPrefabAsset(root, path);
                 Selection.activeObject = prefab;
                 EditorGUIUtility.PingObject(prefab);
-                status = $"Prefab creado: {path}";
+                status = $"Prefab created: {path}";
             }
             catch (Exception exception)
             {
                 Debug.LogException(exception);
-                status = "No se pudo crear el prefab: " + exception.Message;
-                EditorUtility.DisplayDialog("Voxel Bridge", status, "Cerrar");
+                status = "Could not create prefab: " + exception.Message;
+                EditorUtility.DisplayDialog("Voxel Bridge", status, "Close");
             }
             finally
             {

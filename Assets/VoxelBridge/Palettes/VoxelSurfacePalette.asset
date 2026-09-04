@@ -12,7 +12,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 1a4ae63f5bb6de94cbbeae83a35c181f, type: 3}
   m_Name: VoxelSurfacePalette
   m_EditorClassIdentifier: VoxelBridge.Editor::LocalModels.VoxelBridge.VoxelSurfacePalette
-  dataVersion: 1
   entries:
   - id: 0
     displayName: Default

@@ -4,12 +4,9 @@ using UnityEngine;
 namespace LocalModels.VoxelBridge
 {
     [CreateAssetMenu(fileName = "VoxelSurfacePalette",
-        menuName = "Voxel Bridge/Paleta global de superficies")]
+        menuName = "Voxel Bridge/Global Surface Palette")]
     public sealed class VoxelSurfacePalette : ScriptableObject
     {
-        private const int CurrentDataVersion = 1;
-
-        [SerializeField] private int dataVersion = CurrentDataVersion;
         [SerializeField] private List<VoxelSurfaceDefinition> entries = CreateRecommendedEntries();
         [SerializeField, HideInInspector] private List<int> retiredIds = new();
         [SerializeField, HideInInspector] private Texture2D generatedLut;
@@ -42,17 +39,6 @@ namespace LocalModels.VoxelBridge
         public bool TryValidate(out string error) =>
             VoxelPaletteValidation.TryValidate(this, out error);
 
-        internal bool EnsureInitialized()
-        {
-            if (dataVersion >= CurrentDataVersion) return false;
-            dataVersion = CurrentDataVersion;
-            entries = CreateRecommendedEntries();
-            retiredIds = new List<int>();
-            generatedLut = null;
-            generatedContentHash = null;
-            return true;
-        }
-
         internal bool TryAddEntry(out int addedId, out string error)
         {
             EnsureCollections();
@@ -69,7 +55,7 @@ namespace LocalModels.VoxelBridge
             }
 
             addedId = -1;
-            error = "No quedan IDs de superficie disponibles. Los IDs retirados no se reutilizan automáticamente.";
+            error = "No surface IDs are available. Retired IDs are not automatically reused.";
             return false;
         }
 
@@ -78,14 +64,14 @@ namespace LocalModels.VoxelBridge
             EnsureCollections();
             if (index < 0 || index >= entries.Count || entries[index] == null)
             {
-                error = "La entrada seleccionada no es válida.";
+                error = "The selected entry is invalid.";
                 return false;
             }
 
             int id = entries[index].Id;
             if (id == VoxelPaletteConstants.DefaultId)
             {
-                error = "El SurfaceID 0 es la entrada predeterminada y no se puede eliminar.";
+                error = "SurfaceID 0 is the default entry and cannot be removed.";
                 return false;
             }
 
@@ -101,7 +87,6 @@ namespace LocalModels.VoxelBridge
 
         internal void ResetRecommendedProfiles()
         {
-            dataVersion = CurrentDataVersion;
             entries = CreateRecommendedEntries();
             retiredIds = new List<int>();
             generatedContentHash = null;

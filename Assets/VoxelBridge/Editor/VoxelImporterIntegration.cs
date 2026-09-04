@@ -56,7 +56,7 @@ namespace LocalModels.VoxelBridge
             if (string.IsNullOrWhiteSpace(voxAssetPath) ||
                 !voxAssetPath.EndsWith(".vox", StringComparison.OrdinalIgnoreCase))
             {
-                error = "El asset seleccionado no es un archivo .vox.";
+                error = "The selected asset is not a .vox file.";
                 return false;
             }
 
@@ -64,13 +64,13 @@ namespace LocalModels.VoxelBridge
             string projectRoot = Directory.GetParent(Application.dataPath)?.FullName;
             if (string.IsNullOrEmpty(projectRoot))
             {
-                error = "No se encontró la raíz del proyecto.";
+                error = "Could not find the project root.";
                 return false;
             }
             string absolutePath = Path.GetFullPath(Path.Combine(projectRoot, metadataAssetPath));
             if (!File.Exists(absolutePath))
             {
-                error = $"Falta el sidecar '{metadataAssetPath}'.";
+                error = $"Missing sidecar '{metadataAssetPath}'.";
                 return false;
             }
 
@@ -80,23 +80,23 @@ namespace LocalModels.VoxelBridge
             }
             catch (Exception exception)
             {
-                error = "No se pudieron leer los metadatos: " + exception.Message;
+                error = "Could not read metadata: " + exception.Message;
                 return false;
             }
 
-            if (metadata == null || metadata.formatVersion < 1 || metadata.formatVersion > 4 ||
+            if (metadata == null || (metadata.formatVersion != 3 && metadata.formatVersion != 4) ||
                 metadata.voxelSize <= 0f || float.IsNaN(metadata.voxelSize) || float.IsInfinity(metadata.voxelSize) ||
                 metadata.unityGridSize.x <= 0 || metadata.unityGridSize.y <= 0 || metadata.unityGridSize.z <= 0)
             {
-                error = "El sidecar de Voxel Bridge no es válido o usa una versión no compatible.";
+                error = "The Voxel Bridge sidecar is invalid or unsupported. Expected RGB v3 or semantic v4; regenerate the VOX export.";
                 metadata = null;
                 return false;
             }
-            if (metadata.formatVersion >= 4 &&
+            if (metadata.formatVersion == 4 &&
                 (metadata.semantic == null || metadata.semantic.formatVersion != 1 ||
                  metadata.semantic.slots == null || metadata.semantic.slots.Length == 0))
             {
-                error = "El sidecar semántico no contiene una tabla ColorID + SurfaceID compatible.";
+                error = "The semantic sidecar does not contain a supported ColorID + SurfaceID table.";
                 metadata = null;
                 return false;
             }
@@ -108,16 +108,16 @@ namespace LocalModels.VoxelBridge
             if (metadata == null) throw new ArgumentNullException(nameof(metadata));
             float voxelSize = metadata.voxelSize;
             bool usesSceneGraph = UsesSceneGraph(metadata);
-            Vector3Int size = metadata.formatVersion >= 3 && metadata.importGridSize.x > 0 &&
+            Vector3Int size = metadata.importGridSize.x > 0 &&
                               metadata.importGridSize.y > 0 && metadata.importGridSize.z > 0
                 ? metadata.importGridSize
                 : metadata.unityGridSize;
-            Vector3 origin = metadata.formatVersion >= 3 && metadata.importGridSize.x > 0 &&
+            Vector3 origin = metadata.importGridSize.x > 0 &&
                              metadata.importGridSize.y > 0 && metadata.importGridSize.z > 0
                 ? metadata.importGridOrigin
                 : metadata.gridOrigin;
             if (voxelSize <= 0f || size.x <= 0 || size.y <= 0 || size.z <= 0)
-                throw new ArgumentException("Los metadatos no contienen una rejilla válida.", nameof(metadata));
+                throw new ArgumentException("The metadata does not contain a valid grid.", nameof(metadata));
 
             // Voxel Importer converts VOX coordinates to Unity by swapping Y/Z, inverting X/Z,
             // and centering those two axes for a single model. Scene graphs instead derive
@@ -138,7 +138,7 @@ namespace LocalModels.VoxelBridge
 
         internal static bool UsesSceneGraph(VoxelBridgeMetadata metadata)
         {
-            if (metadata == null || metadata.formatVersion < 3) return false;
+            if (metadata == null) return false;
             if (metadata.unityGridSize.x > 256 || metadata.unityGridSize.y > 256 ||
                 metadata.unityGridSize.z > 256)
                 return true;
@@ -147,30 +147,25 @@ namespace LocalModels.VoxelBridge
             return chunks.Length > 1 || chunks[0].gridOffset != Vector3Int.zero;
         }
 
-        internal static bool ShouldIgnoreCavity(VoxelBridgeMetadata metadata)
-        {
-            // Version 1 did not expose this option; preserve the desired Voxel Bridge behavior.
-            return metadata.formatVersion < 2 || metadata.hideInternalCavities;
-        }
-
         public static bool ApplyAndReimport(string voxAssetPath, out string message, bool forceReimport = false)
         {
             message = null;
             AssetImporter importer = AssetImporter.GetAtPath(voxAssetPath);
             if (importer == null)
             {
-                message = "Unity todavía no ha importado el archivo .vox.";
+                message = "Unity has not imported the .vox file yet.";
                 return false;
             }
             if (!TryLoadMetadata(voxAssetPath, out VoxelBridgeMetadata metadata, out message)) return false;
             if (!IsSupportedImporter(importer))
             {
-                message = "El .vox no está siendo manejado por AloneSoft Voxel Importer.";
+                message = "The .vox asset is not handled by AloneSoft Voxel Importer.";
                 return false;
             }
+            if (!TryValidateImporterApi(importer.GetType(), out message)) return false;
 
             if (!Application.isBatchMode)
-                Undo.RecordObject(importer, "Aplicar metadatos de Voxel Bridge");
+                Undo.RecordObject(importer, "Apply Voxel Bridge Metadata");
             bool changed = Apply(importer, metadata);
             if (changed || forceReimport)
             {
@@ -180,23 +175,50 @@ namespace LocalModels.VoxelBridge
                 importer.SaveAndReimport();
             }
             message = changed
-                ? "Escala, pivote, orientación y optimización aplicados al .vox."
+                ? "Applied scale, pivot, orientation, and optimization to the .vox asset."
                 : forceReimport
-                    ? "El .vox fue reimportado con la compatibilidad actual de Voxel Bridge."
-                    : "El .vox ya usa los metadatos correctos de Voxel Bridge.";
+                    ? "Reimported the .vox asset with the current Voxel Bridge settings."
+                    : "The .vox asset already uses the correct Voxel Bridge metadata.";
             return true;
         }
 
         internal static bool TryApplyDuringImport(AssetImporter importer, string voxAssetPath)
         {
             if (!IsSupportedImporter(importer)) return false;
-            if (!TryLoadMetadata(voxAssetPath, out VoxelBridgeMetadata metadata, out _)) return false;
+            if (!TryLoadMetadata(voxAssetPath, out VoxelBridgeMetadata metadata, out string metadataError))
+            {
+                string projectRoot = Directory.GetParent(Application.dataPath)?.FullName;
+                if (!string.IsNullOrEmpty(projectRoot) &&
+                    File.Exists(Path.Combine(projectRoot, GetMetadataAssetPath(voxAssetPath))))
+                    Debug.LogWarning($"Voxel Bridge could not configure '{voxAssetPath}': {metadataError}");
+                return false;
+            }
+            if (!TryValidateImporterApi(importer.GetType(), out string error))
+            {
+                Debug.LogWarning($"Voxel Bridge could not configure '{voxAssetPath}': {error}");
+                return false;
+            }
             return Apply(importer, metadata);
         }
 
         private static bool IsSupportedImporter(AssetImporter importer)
         {
             return importer != null && importer.GetType().FullName == ImporterTypeName;
+        }
+
+        private static bool TryValidateImporterApi(Type type, out string error)
+        {
+            FieldInfo meshMode = type.GetField("meshMode", PublicInstance);
+            bool valid = type.GetField("importScale", PublicInstance)?.FieldType == typeof(Vector3) &&
+                         type.GetField("importOffset", PublicInstance)?.FieldType == typeof(Vector3) &&
+                         type.GetField("combineFaces", PublicInstance)?.FieldType == typeof(bool) &&
+                         type.GetField("shareSameFace", PublicInstance)?.FieldType == typeof(bool) &&
+                         type.GetField("ignoreCavity", PublicInstance)?.FieldType == typeof(bool) &&
+                         meshMode?.FieldType.IsEnum == true &&
+                         Enum.IsDefined(meshMode.FieldType, 0) && Enum.IsDefined(meshMode.FieldType, 1);
+            error = valid ? null : "The installed Voxel Importer API does not match the expected import settings. " +
+                                  "No settings were changed; update the Voxel Bridge adapter before importing.";
+            return valid;
         }
 
         private static bool Apply(AssetImporter importer, VoxelBridgeMetadata metadata)
@@ -208,10 +230,9 @@ namespace LocalModels.VoxelBridge
             changed |= SetField(type, importer, "importOffset", transform.ImportOffset);
             changed |= SetField(type, importer, "combineFaces", true);
             changed |= SetField(type, importer, "shareSameFace", true);
-            changed |= SetField(type, importer, "ignoreCavity", ShouldIgnoreCavity(metadata));
-            if (metadata.formatVersion >= 3)
-                changed |= SetEnumField(type, importer, "meshMode",
-                    metadata.chunks != null && metadata.chunks.Length > 1 ? 1 : 0);
+            changed |= SetField(type, importer, "ignoreCavity", metadata.hideInternalCavities);
+            changed |= SetEnumField(type, importer, "meshMode",
+                metadata.chunks != null && metadata.chunks.Length > 1 ? 1 : 0);
             return changed;
         }
 
@@ -239,7 +260,7 @@ namespace LocalModels.VoxelBridge
 
     public static class VoxelBridgeBatch
     {
-        [MenuItem("Tools/Voxel Bridge/Sincronizar todos los .vox")]
+        [MenuItem("Tools/Voxel Bridge/Sync All Generated VOX Assets")]
         public static void SyncAllGeneratedVoxAssets()
         {
             SyncAllGeneratedVoxAssets(true);
@@ -250,6 +271,7 @@ namespace LocalModels.VoxelBridge
             string[] files = Directory.GetFiles(Application.dataPath, "*.vox", SearchOption.AllDirectories);
             int synchronized = 0;
             int skipped = 0;
+            int failed = 0;
             foreach (string file in files)
             {
                 string assetPath = "Assets" + file.Substring(Application.dataPath.Length).Replace('\\', '/');
@@ -263,13 +285,17 @@ namespace LocalModels.VoxelBridge
                         assetPath, out string message, forceReimport: true))
                     synchronized++;
                 else
-                    Debug.LogWarning($"Voxel Bridge no pudo sincronizar '{assetPath}': {message}");
+                {
+                    failed++;
+                    Debug.LogWarning($"Voxel Bridge could not synchronize '{assetPath}': {message}");
+                }
             }
 
-            string result = $"Voxel Bridge sincronizó {synchronized} archivo(s) .vox; omitió {skipped} sin sidecar.";
+            string result = $"Voxel Bridge synchronized {synchronized} .vox file(s); failed {failed}; " +
+                            $"skipped {skipped} without a sidecar.";
             Debug.Log(result);
             if (showDialog && !Application.isBatchMode)
-                EditorUtility.DisplayDialog("Voxel Bridge", result, "Aceptar");
+                EditorUtility.DisplayDialog("Voxel Bridge", result, "OK");
         }
     }
 
@@ -278,8 +304,7 @@ namespace LocalModels.VoxelBridge
         private void OnPreprocessAsset()
         {
             if (!assetPath.EndsWith(".vox", StringComparison.OrdinalIgnoreCase)) return;
-            if (VoxelImporterIntegration.TryApplyDuringImport(assetImporter, assetPath))
-                Debug.Log($"Voxel Bridge sincronizó escala y optimización de '{assetPath}'.");
+            VoxelImporterIntegration.TryApplyDuringImport(assetImporter, assetPath);
         }
     }
 }

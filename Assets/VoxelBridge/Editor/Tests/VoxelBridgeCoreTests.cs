@@ -31,6 +31,108 @@ namespace LocalModels.VoxelBridge.Tests
         }
 
         [Test]
+        public void StyleProfile_RejectsMissingAndNonFiniteLodTransitions()
+        {
+            VoxelStyleProfile profile = ScriptableObject.CreateInstance<VoxelStyleProfile>();
+            try
+            {
+                var serialized = new SerializedObject(profile);
+                SerializedProperty heights = serialized.FindProperty("lodScreenHeights");
+                heights.arraySize = 1;
+                serialized.ApplyModifiedPropertiesWithoutUndo();
+                Assert.That(profile.TryValidate(out _), Is.False);
+                Assert.Throws<System.ArgumentOutOfRangeException>(() => profile.GetLodScreenHeight(1));
+
+                heights.arraySize = 3;
+                heights.GetArrayElementAtIndex(1).floatValue = 0.3f;
+                heights.GetArrayElementAtIndex(2).floatValue = 0.1f;
+                foreach (float invalid in new[] { float.NaN, float.PositiveInfinity, float.NegativeInfinity })
+                {
+                    heights.GetArrayElementAtIndex(0).floatValue = invalid;
+                    serialized.ApplyModifiedPropertiesWithoutUndo();
+                    Assert.That(profile.TryValidate(out _), Is.False);
+                }
+            }
+            finally
+            {
+                Object.DestroyImmediate(profile);
+            }
+        }
+
+        [Test]
+        public void AutomaticGeneration_RejectsUnsavedProfileBeforeCreatingFiles()
+        {
+            VoxelStyleProfile profile = ScriptableObject.CreateInstance<VoxelStyleProfile>();
+            var source = new GameObject("UnsavedProfileSource");
+            string output = "Assets/VoxelUnsavedProfile_" + System.Guid.NewGuid().ToString("N");
+            try
+            {
+                var options = new VoxelLodBuildOptions { ExportFolder = output };
+                var exception = Assert.Throws<System.InvalidOperationException>(() =>
+                    VoxelLodPipeline.GenerateAutomatic(source, profile, options));
+                Assert.That(exception.Message, Does.Contain("Save the LOD style profile"));
+                Assert.That(Directory.Exists(VoxelLodPipeline.AssetPathToAbsolute(output)), Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(source);
+                Object.DestroyImmediate(profile);
+            }
+        }
+
+        [TestCase(1, false)]
+        [TestCase(3, false)]
+        [TestCase(4, true)]
+        [TestCase(5, false)]
+        public void ManifestReader_RequiresCurrentSchema(int version, bool expected)
+        {
+            string path = Path.Combine(Path.GetTempPath(),
+                "VoxelManifest_" + System.Guid.NewGuid().ToString("N") + ".voxset.json");
+            try
+            {
+                File.WriteAllText(path, JsonUtility.ToJson(new VoxelLodSetManifest { formatVersion = version }));
+                Assert.That(VoxelLodPipeline.TryReadManifest(path, out VoxelLodSetManifest manifest),
+                    Is.EqualTo(expected));
+                if (!expected) Assert.That(manifest, Is.Null);
+            }
+            finally
+            {
+                if (File.Exists(path)) File.Delete(path);
+            }
+        }
+
+        [Test]
+        public void ImpostorProfile_RejectsNonFiniteCaptureSettings()
+        {
+            VoxelImpostorProfile profile = ScriptableObject.CreateInstance<VoxelImpostorProfile>();
+            try
+            {
+                foreach (string field in new[] { "silhouetteTolerance", "normalScale", "cullScreenHeight" })
+                {
+                    var serialized = new SerializedObject(profile);
+                    SerializedProperty property = serialized.FindProperty("medium").FindPropertyRelative(field);
+                    float original = property.floatValue;
+                    foreach (float invalid in new[] { float.NaN, float.PositiveInfinity, float.NegativeInfinity })
+                    {
+                        property.floatValue = invalid;
+                        serialized.ApplyModifiedPropertiesWithoutUndo();
+                        Assert.That(profile.TryValidate(VoxelImpostorQuality.Medium, 0.1f, out _),
+                            Is.False, field);
+                    }
+                    property.floatValue = original;
+                    serialized.ApplyModifiedPropertiesWithoutUndo();
+                }
+                Assert.That(profile.TryValidate(VoxelImpostorQuality.Medium, float.NaN, out _), Is.False);
+                Assert.That(profile.TryValidate(VoxelImpostorQuality.Medium, 0.1f, out string error),
+                    Is.True, error);
+            }
+            finally
+            {
+                Object.DestroyImmediate(profile);
+            }
+        }
+
+        [Test]
         public void Window_DisablesImpostorGenerationByDefault()
         {
             VoxelBridgeWindow window = ScriptableObject.CreateInstance<VoxelBridgeWindow>();
@@ -48,14 +150,17 @@ namespace LocalModels.VoxelBridge.Tests
         }
 
         [Test]
-        public void Window_MigratesPersistedImpostorGenerationToOptIn()
+        public void Window_ReopeningPreservesConversionPreferences()
         {
             VoxelBridgeWindow window = ScriptableObject.CreateInstance<VoxelBridgeWindow>();
             try
             {
                 SetWindowField(window, "individualGenerateImpostor", true);
                 SetWindowField(window, "batchGenerateImpostors", true);
-                SetWindowField(window, "windowStateVersion", 0);
+                SetWindowField(window, "individualMemoryBudgetMb", 768);
+                SetWindowField(window, "individualAdaptInitialVoxelSize", false);
+                SetWindowField(window, "individualMaximumInitialLodIndex", 1);
+                SetWindowField(window, "individualMaximumImportedVoxelCount", 2000000);
 
                 MethodInfo onEnable = typeof(VoxelBridgeWindow).GetMethod(
                     "OnEnable", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -63,18 +168,17 @@ namespace LocalModels.VoxelBridge.Tests
                 onEnable.Invoke(window, null);
 
                 Assert.That(GetWindowField<bool>(window, "individualGenerateImpostor"),
-                    Is.False);
-                Assert.That(GetWindowField<bool>(window, "batchGenerateImpostors"),
-                    Is.False);
-                Assert.That(GetWindowField<int>(window, "windowStateVersion"), Is.EqualTo(2));
-                Assert.That(GetWindowField<int>(window, "individualMemoryBudgetMb"),
-                    Is.EqualTo(1024));
-                Assert.That(GetWindowField<bool>(window, "individualAdaptInitialVoxelSize"),
                     Is.True);
+                Assert.That(GetWindowField<bool>(window, "batchGenerateImpostors"),
+                    Is.True);
+                Assert.That(GetWindowField<int>(window, "individualMemoryBudgetMb"),
+                    Is.EqualTo(768));
+                Assert.That(GetWindowField<bool>(window, "individualAdaptInitialVoxelSize"),
+                    Is.False);
                 Assert.That(GetWindowField<int>(window, "individualMaximumInitialLodIndex"),
-                    Is.EqualTo(2));
+                    Is.EqualTo(1));
                 Assert.That(GetWindowField<int>(window, "individualMaximumImportedVoxelCount"),
-                    Is.EqualTo(VoxelLodBatchOptions.DefaultMaximumImportedVoxelCount));
+                    Is.EqualTo(2000000));
             }
             finally
             {
@@ -308,7 +412,7 @@ namespace LocalModels.VoxelBridge.Tests
 
                 Assert.That(profile.TryValidate(
                     VoxelImpostorQuality.Medium, 0.05f, out string error), Is.False);
-                Assert.That(error, Does.Contain("menor que la transición"));
+                Assert.That(error, Does.Contain("below the final voxel LOD transition"));
             }
             finally
             {
@@ -328,12 +432,29 @@ namespace LocalModels.VoxelBridge.Tests
 
                 Assert.That(unspecified, Is.SameAs(medium));
                 Assert.That(VoxelImpostorProfile.GetQualityName(
-                    VoxelImpostorQuality.Unspecified), Is.EqualTo("Medio · Equilibrado"));
+                    VoxelImpostorQuality.Unspecified), Is.EqualTo("Medium · Balanced"));
             }
             finally
             {
                 Object.DestroyImmediate(profile);
             }
+        }
+
+        [Test]
+        public void ImpostorTransition_RequiresFinitePersistedConfiguration()
+        {
+            var manifest = new VoxelLodSetManifest
+            {
+                lods = new VoxelLodEntry[] { null }
+            };
+            Assert.That(AmplifyImpostorIntegration.TryGetLastVoxelTransition(manifest, out _), Is.False);
+            manifest.lods = new[] { new VoxelLodEntry { lodIndex = 0 } };
+            Assert.That(AmplifyImpostorIntegration.TryGetLastVoxelTransition(manifest, out _), Is.False);
+            manifest.lods[0].screenRelativeTransitionHeight = float.NaN;
+            Assert.That(AmplifyImpostorIntegration.TryGetLastVoxelTransition(manifest, out _), Is.False);
+            manifest.lods[0].screenRelativeTransitionHeight = 0.15f;
+            Assert.That(AmplifyImpostorIntegration.TryGetLastVoxelTransition(manifest, out float transition), Is.True);
+            Assert.That(transition, Is.EqualTo(0.15f));
         }
 
         [Test]
@@ -438,7 +559,7 @@ namespace LocalModels.VoxelBridge.Tests
                         {
                             calls++;
                             if (path.EndsWith("B.voxset.json"))
-                                throw new System.InvalidOperationException("Fallo controlado");
+                                throw new System.InvalidOperationException("Controlled failure");
                             return new VoxelImpostorBuildResult(
                                 path + ".asset", path + ".prefab");
                         });
@@ -456,7 +577,7 @@ namespace LocalModels.VoxelBridge.Tests
                         new[] { "Assets/C.voxset.json" }, profile,
                         VoxelImpostorQuality.Low, (progress, message) => true,
                         (path, unusedProfile, unusedQuality) => throw new AssertionException(
-                            "El generador no debe ejecutarse después de cancelar."));
+                            "The generator must not run after cancellation."));
                 Assert.That(cancelled.Cancelled, Is.True);
                 Assert.That(cancelled.GeneratedCount, Is.Zero);
                 Assert.That(cancelled.RemainingCount, Is.EqualTo(1));
@@ -471,7 +592,7 @@ namespace LocalModels.VoxelBridge.Tests
         public void ImpostorBatch_BakesAmplifyAssetAndAppendsFinalLod()
         {
             if (!VoxelImporterIntegration.IsInstalled)
-                Assert.Ignore("Voxel Importer es opcional y no está instalado.");
+                Assert.Ignore("Voxel Importer is optional and is not installed.");
             AmplifyImpostorCompatibility compatibility =
                 AmplifyImpostorIntegration.GetCompatibility();
             if (!compatibility.CanBake)
@@ -498,6 +619,8 @@ namespace LocalModels.VoxelBridge.Tests
                 transitions.arraySize = 1;
                 transitions.GetArrayElementAtIndex(0).floatValue = 0.05f;
                 serializedProfile.ApplyModifiedPropertiesWithoutUndo();
+                VoxelLodPipeline.EnsureAssetFolder(testRoot);
+                AssetDatabase.CreateAsset(voxelProfile, testRoot + "/VoxelStyleProfile.asset");
                 impostorProfile = ScriptableObject.CreateInstance<VoxelImpostorProfile>();
 
                 VoxelLodBuildResult build = VoxelLodPipeline.GenerateAutomatic(
@@ -551,7 +674,7 @@ namespace LocalModels.VoxelBridge.Tests
                      GraphicsSettings.defaultRenderPipeline)?.GetType().Name
                     .Contains("HDRenderPipeline") == true)
                     Assert.That(impostorMaterial.shader.name, Does.EndWith(" HDRP"),
-                        "El material horneado debe usar el shader runtime de HDRP.");
+                        "The baked material must use the HDRP runtime shader.");
                 string impostorFolder = VoxelLodPipeline.NormalizeAssetPath(
                     Path.GetDirectoryName(batch.Builds[0].ImpostorAssetPath));
                 string[] texturePaths = AssetDatabase.FindAssets(
@@ -576,7 +699,7 @@ namespace LocalModels.VoxelBridge.Tests
                 Assert.That(albedoPixels.Any(pixel => pixel.a > 0), Is.True);
                 Assert.That(albedoPixels.Any(pixel => pixel.a > 0 &&
                     !(pixel.r > 250 && pixel.g < 5 && pixel.b > 250)), Is.True,
-                    "El atlas no debe capturar el color de error magenta.");
+                    "The atlas must not capture the magenta error color.");
                 Assert.That(VoxelLodPipeline.TryReadManifest(
                     build.ManifestAssetPath, out VoxelLodSetManifest manifest), Is.True);
                 Assert.That(manifest.impostor, Is.Not.Null);
@@ -592,7 +715,7 @@ namespace LocalModels.VoxelBridge.Tests
             finally
             {
                 if (source != null) Object.DestroyImmediate(source);
-                if (voxelProfile != null) Object.DestroyImmediate(voxelProfile);
+                if (voxelProfile != null && !AssetDatabase.Contains(voxelProfile)) Object.DestroyImmediate(voxelProfile);
                 if (impostorProfile != null) Object.DestroyImmediate(impostorProfile);
                 AssetDatabase.DeleteAsset(testRoot);
             }
@@ -602,7 +725,7 @@ namespace LocalModels.VoxelBridge.Tests
         public void IndividualGeneration_BakesImpostorAndUpdatesPrefab()
         {
             if (!VoxelImporterIntegration.IsInstalled)
-                Assert.Ignore("Voxel Importer es opcional y no está instalado.");
+                Assert.Ignore("Voxel Importer is optional and is not installed.");
             AmplifyImpostorCompatibility compatibility =
                 AmplifyImpostorIntegration.GetCompatibility();
             if (!compatibility.CanBake)
@@ -635,6 +758,8 @@ namespace LocalModels.VoxelBridge.Tests
                 transitions.arraySize = 1;
                 transitions.GetArrayElementAtIndex(0).floatValue = 0.05f;
                 serializedProfile.ApplyModifiedPropertiesWithoutUndo();
+                VoxelLodPipeline.EnsureAssetFolder(testRoot);
+                AssetDatabase.CreateAsset(voxelProfile, testRoot + "/VoxelStyleProfile.asset");
                 impostorProfile = ScriptableObject.CreateInstance<VoxelImpostorProfile>();
 
                 window = ScriptableObject.CreateInstance<VoxelBridgeWindow>();
@@ -666,7 +791,7 @@ namespace LocalModels.VoxelBridge.Tests
                 Selection.activeObject = previousSelection;
                 if (source != null) Object.DestroyImmediate(source);
                 if (window != null) Object.DestroyImmediate(window);
-                if (voxelProfile != null) Object.DestroyImmediate(voxelProfile);
+                if (voxelProfile != null && !AssetDatabase.Contains(voxelProfile)) Object.DestroyImmediate(voxelProfile);
                 if (impostorProfile != null) Object.DestroyImmediate(impostorProfile);
                 AssetDatabase.DeleteAsset(testRoot);
                 if (testScene.IsValid() && testScene.isLoaded)
@@ -746,7 +871,7 @@ namespace LocalModels.VoxelBridge.Tests
         {
             var metadata = new VoxelBridgeMetadata
             {
-                formatVersion = 2,
+                formatVersion = 3,
                 voxelSize = 0.125f,
                 gridOrigin = new Vector3(-2.25f, -0.5f, 1.75f),
                 unityGridSize = new Vector3Int(11, 7, 13)
@@ -776,9 +901,9 @@ namespace LocalModels.VoxelBridge.Tests
                 Vector3 expectedMin = metadata.gridOrigin + (Vector3)source * metadata.voxelSize;
                 Vector3 expectedMax = expectedMin + Vector3.one * metadata.voxelSize;
                 Assert.That((actualMin - expectedMin).sqrMagnitude, Is.LessThan(1e-10f),
-                    $"La esquina mínima de la celda {source} perdió su transformación de ida y vuelta.");
+                    $"The minimum corner of cell {source} failed its round-trip transform.");
                 Assert.That((actualMax - expectedMax).sqrMagnitude, Is.LessThan(1e-10f),
-                    $"La esquina máxima de la celda {source} perdió su transformación de ida y vuelta.");
+                    $"The maximum corner of cell {source} failed its round-trip transform.");
             }
         }
 
@@ -808,15 +933,34 @@ namespace LocalModels.VoxelBridge.Tests
             Assert.That(transform.ImportOffset.z, Is.EqualTo(74f).Within(1e-4f));
         }
 
-        [Test]
-        public void CavitySetting_IsEnabledForLegacyMetadataAndRespectsVersionTwo()
+        [TestCase(1, false)]
+        [TestCase(2, false)]
+        [TestCase(3, true)]
+        [TestCase(5, false)]
+        public void MetadataLoader_AcceptsCurrentRgbAndRejectsUnsupportedFormats(int version, bool expected)
         {
-            Assert.That(VoxelImporterIntegration.ShouldIgnoreCavity(
-                new VoxelBridgeMetadata { formatVersion = 1, hideInternalCavities = false }), Is.True);
-            Assert.That(VoxelImporterIntegration.ShouldIgnoreCavity(
-                new VoxelBridgeMetadata { formatVersion = 2, hideInternalCavities = false }), Is.False);
-            Assert.That(VoxelImporterIntegration.ShouldIgnoreCavity(
-                new VoxelBridgeMetadata { formatVersion = 2, hideInternalCavities = true }), Is.True);
+            string voxPath = Path.Combine(Path.GetTempPath(),
+                "VoxelMetadataVersion_" + System.Guid.NewGuid().ToString("N") + ".vox");
+            string metadataPath = VoxelImporterIntegration.GetMetadataAssetPath(voxPath);
+            try
+            {
+                var metadata = new VoxelBridgeMetadata
+                {
+                    formatVersion = version,
+                    voxelSize = 1f,
+                    unityGridSize = Vector3Int.one,
+                    hideInternalCavities = false
+                };
+                File.WriteAllText(metadataPath, JsonUtility.ToJson(metadata));
+                Assert.That(VoxelImporterIntegration.TryLoadMetadata(
+                    voxPath, out VoxelBridgeMetadata loaded, out _), Is.EqualTo(expected));
+                if (expected) Assert.That(loaded.hideInternalCavities, Is.False);
+                else Assert.That(loaded, Is.Null);
+            }
+            finally
+            {
+                if (File.Exists(metadataPath)) File.Delete(metadataPath);
+            }
         }
 
         [Test]
@@ -918,6 +1062,11 @@ namespace LocalModels.VoxelBridge.Tests
                 Is.EqualTo(2));
             Assert.That(CountOccurrences(patched, "Vector3.Scale(desc.Normal, importScaleSign)"),
                 Is.EqualTo(2));
+
+            string tampered = patched.Replace("Vector3.Scale(desc.Normal, importScaleSign)", "desc.Normal");
+            Assert.That(VoxelImporterCompatibilityPatcher.TryPatchSource(
+                tampered, out string rejected, out _), Is.EqualTo(VoxelImporterPatchResult.Conflict));
+            Assert.That(rejected, Is.EqualTo(tampered));
         }
 
         [Test]
@@ -935,7 +1084,7 @@ namespace LocalModels.VoxelBridge.Tests
 
             Assert.That(result, Is.EqualTo(VoxelImporterPatchResult.Conflict));
             Assert.That(output, Is.EqualTo(source));
-            Assert.That(detail, Does.Contain("Firma esperada"));
+            Assert.That(detail, Does.Contain("Expected signature"));
         }
 
         [Test]
@@ -961,8 +1110,14 @@ namespace LocalModels.VoxelBridge.Tests
                 secondDetail);
             Assert.That(unchanged, Is.EqualTo(patched));
             Assert.That(conflict, Is.EqualTo(AmplifyPipelinePatchResult.Conflict));
-            Assert.That(conflictDetail, Does.Contain("Firma esperada"));
+            Assert.That(conflictDetail, Does.Contain("Expected signature"));
             Assert.That(rejected, Is.EqualTo(changed));
+
+            string tampered = patched.Replace("activePipeline", "alteredPipeline");
+            Assert.That(tampered, Is.Not.EqualTo(patched));
+            Assert.That(AmplifyImpostorPipelinePatcher.TryPatchSource(
+                tampered, out string rejectedPatch, out _), Is.EqualTo(AmplifyPipelinePatchResult.Conflict));
+            Assert.That(rejectedPatch, Is.EqualTo(tampered));
         }
 
         [Test]
@@ -996,14 +1151,14 @@ namespace LocalModels.VoxelBridge.Tests
                         Assert.That(importedNormal.sqrMagnitude, Is.GreaterThan(1e-12f), assetPath);
                         float alignment = Vector3.Dot(geometricNormal.normalized, importedNormal.normalized);
                         Assert.That(alignment, Is.GreaterThan(0.999f),
-                            $"{assetPath}: la normal del triángulo {i / 3} apunta hacia el interior.");
+                            $"{assetPath}: triangle {i / 3} has an inward normal.");
                         checkedTriangles++;
                     }
                 }
             }
 
             if (checkedTriangles == 0)
-                Assert.Ignore("No hay mallas .vox generadas; Voxel Importer es una integración opcional.");
+                Assert.Ignore("No generated .vox meshes are available; Voxel Importer is optional.");
         }
 
         [Test]
@@ -1162,7 +1317,7 @@ namespace LocalModels.VoxelBridge.Tests
         public void AutomaticBatch_ReusesPrefabSourceContinuesAfterFailureAndPlacesSceneInstances()
         {
             if (!VoxelImporterIntegration.IsInstalled)
-                Assert.Ignore("Voxel Importer es opcional y no está instalado.");
+                Assert.Ignore("Voxel Importer is optional and is not installed.");
 
             const string testRoot = "Assets/VoxelBridgeBatchTestOutput";
             GameObject parent = null;
@@ -1235,6 +1390,8 @@ namespace LocalModels.VoxelBridge.Tests
                 multipliers.arraySize = 1;
                 multipliers.GetArrayElementAtIndex(0).intValue = 1;
                 serializedProfile.ApplyModifiedPropertiesWithoutUndo();
+                VoxelLodPipeline.EnsureAssetFolder(testRoot);
+                AssetDatabase.CreateAsset(profile, testRoot + "/VoxelStyleProfile.asset");
 
                 var options = new VoxelLodBuildOptions
                 {
@@ -1256,7 +1413,7 @@ namespace LocalModels.VoxelBridge.Tests
                 Assert.That(batch.ReusedCount, Is.EqualTo(1));
                 Assert.That(batch.Items[0].Source, Is.EqualTo(invalid));
                 Assert.That(batch.Items[0].Succeeded, Is.False);
-                Assert.That(batch.Items[0].Error, Does.Contain("vértices"));
+                Assert.That(batch.Items[0].Error, Does.Contain("vertices"));
                 Assert.That(batch.Items[1].Source, Is.EqualTo(firstInstance));
                 Assert.That(batch.Items[1].Succeeded, Is.True);
                 Assert.That(batch.Items[1].Reused, Is.False);
@@ -1273,7 +1430,7 @@ namespace LocalModels.VoxelBridge.Tests
                 Assert.That(Directory.GetDirectories(
                     VoxelLodPipeline.AssetPathToAbsolute(options.ExportFolder)),
                     Has.Length.EqualTo(1),
-                    "La fuente inválida no debe dejar una carpeta de familia vacía.");
+                    "An invalid source must not leave an empty family folder.");
 
                 VoxelLodBatchPlacementResult incompletePlacement =
                     VoxelLodBatchScenePlacement.Place(parent, batch, profile, true);
@@ -1325,7 +1482,7 @@ namespace LocalModels.VoxelBridge.Tests
                 if (parent != null) Object.DestroyImmediate(parent);
                 if (sourceObject != null) Object.DestroyImmediate(sourceObject);
                 if (invalidMesh != null) Object.DestroyImmediate(invalidMesh);
-                if (profile != null) Object.DestroyImmediate(profile);
+                if (profile != null && !AssetDatabase.Contains(profile)) Object.DestroyImmediate(profile);
                 AssetDatabase.DeleteAsset(testRoot);
             }
         }
@@ -1640,7 +1797,7 @@ namespace LocalModels.VoxelBridge.Tests
         public void AutomaticBatch_ResumesCompletedFamiliesFromCheckpoint()
         {
             if (!VoxelImporterIntegration.IsInstalled)
-                Assert.Ignore("Voxel Importer es opcional y no está instalado.");
+                Assert.Ignore("Voxel Importer is optional and is not installed.");
 
             const string testRoot = "Assets/VoxelBridgeCheckpointTestOutput";
             GameObject firstSource = null;
@@ -1677,6 +1834,8 @@ namespace LocalModels.VoxelBridge.Tests
                 multipliers.arraySize = 1;
                 multipliers.GetArrayElementAtIndex(0).intValue = 1;
                 serializedProfile.ApplyModifiedPropertiesWithoutUndo();
+                VoxelLodPipeline.EnsureAssetFolder(testRoot);
+                AssetDatabase.CreateAsset(profile, testRoot + "/VoxelStyleProfile.asset");
 
                 var lodOptions = new VoxelLodBuildOptions
                 {
@@ -1698,7 +1857,7 @@ namespace LocalModels.VoxelBridge.Tests
                 VoxelLodBatchBuildResult interrupted =
                     VoxelLodPipeline.GenerateAutomaticBatch(
                         parent, profile, lodOptions,
-                        (_, message) => message.StartsWith("Modelo 2 de 2: preparando"),
+                        (_, message) => message.StartsWith("Model 2 of 2: preparing"),
                         batchOptions);
                 Assert.That(interrupted.Cancelled, Is.True);
                 Assert.That(interrupted.CreatedFamilyCount, Is.EqualTo(1));
@@ -1720,7 +1879,7 @@ namespace LocalModels.VoxelBridge.Tests
                 if (parent != null) Object.DestroyImmediate(parent);
                 if (firstSource != null) Object.DestroyImmediate(firstSource);
                 if (secondSource != null) Object.DestroyImmediate(secondSource);
-                if (profile != null) Object.DestroyImmediate(profile);
+                if (profile != null && !AssetDatabase.Contains(profile)) Object.DestroyImmediate(profile);
                 AssetDatabase.DeleteAsset(testRoot);
             }
         }
@@ -1729,7 +1888,7 @@ namespace LocalModels.VoxelBridge.Tests
         public void AutomaticLodPipeline_CreatesChunkedVoxFamilyAndLodPrefab()
         {
             if (!VoxelImporterIntegration.IsInstalled)
-                Assert.Ignore("Voxel Importer es opcional y no está instalado.");
+                Assert.Ignore("Voxel Importer is optional and is not installed.");
 
             const string testRoot = "Assets/VoxelBridgeTestOutput";
             GameObject root = null;
@@ -1930,11 +2089,11 @@ namespace LocalModels.VoxelBridge.Tests
                 File.WriteAllText(manifestAbsolute, JsonUtility.ToJson(looseManifest, true));
                 AssetDatabase.ImportAsset(build.ManifestAssetPath, ImportAssetOptions.ForceSynchronousImport);
                 string organizedPrefabPath = VoxelLodPipeline.RebuildPrefab(build.ManifestAssetPath);
-                Assert.That(organizedPrefabPath, Is.Not.EqualTo(separatePrefabPath));
+                Assert.That(organizedPrefabPath, Is.EqualTo(separatePrefabPath));
                 Assert.That(VoxelLodPipeline.NormalizeAssetPath(Path.GetDirectoryName(organizedPrefabPath)),
-                    Is.EqualTo(familyFolder));
+                    Is.EqualTo(separatePrefabFolder));
                 Assert.That(AssetDatabase.AssetPathToGUID(organizedPrefabPath), Is.EqualTo(prefabGuid));
-                Assert.That(AssetDatabase.LoadMainAssetAtPath(separatePrefabPath), Is.Null);
+                Assert.That(AssetDatabase.LoadMainAssetAtPath(separatePrefabPath), Is.Not.Null);
 
                 VoxelLodBuildResult duplicate = VoxelLodPipeline.GenerateManual(
                     build.VoxAssetPaths[0], profile, 1, VoxelLodGenerationMode.DuplicateParent, options);
@@ -1967,7 +2126,7 @@ namespace LocalModels.VoxelBridge.Tests
                     removedManifest), Is.False);
                 Assert.That(removedManifest.impostorDisabled, Is.True);
                 Assert.That(AssetDatabase.LoadMainAssetAtPath(impostorAssetPath), Is.Not.Null,
-                    "El atlas se conserva como caché para una regeneración posterior.");
+                    "The atlas is retained for subsequent regeneration.");
                 Assert.That(AmplifyImpostorIntegration.FindPendingManifestAssetPaths(testRoot),
                     Does.Not.Contain(build.ManifestAssetPath));
                 Assert.That(AssetDatabase.LoadAssetAtPath<GameObject>(organizedPrefabPath)
@@ -1987,7 +2146,7 @@ namespace LocalModels.VoxelBridge.Tests
         public void AutomaticLodPipeline_PersistsAdaptiveBaseForManualReduction()
         {
             if (!VoxelImporterIntegration.IsInstalled)
-                Assert.Ignore("Voxel Importer es opcional y no está instalado.");
+                Assert.Ignore("Voxel Importer is optional and is not installed.");
 
             const string testRoot = "Assets/VoxelBridgeAdaptiveLodTestOutput";
             GameObject root = null;
@@ -2007,6 +2166,8 @@ namespace LocalModels.VoxelBridge.Tests
                 multipliers.GetArrayElementAtIndex(0).intValue = 1;
                 multipliers.GetArrayElementAtIndex(1).intValue = 2;
                 serializedProfile.ApplyModifiedPropertiesWithoutUndo();
+                VoxelLodPipeline.EnsureAssetFolder(testRoot);
+                AssetDatabase.CreateAsset(profile, testRoot + "/VoxelStyleProfile.asset");
 
                 var options = new VoxelLodBuildOptions
                 {
@@ -2047,7 +2208,7 @@ namespace LocalModels.VoxelBridge.Tests
             finally
             {
                 if (root != null) Object.DestroyImmediate(root);
-                if (profile != null) Object.DestroyImmediate(profile);
+                if (profile != null && !AssetDatabase.Contains(profile)) Object.DestroyImmediate(profile);
                 AssetDatabase.DeleteAsset(testRoot);
             }
         }
@@ -2056,7 +2217,7 @@ namespace LocalModels.VoxelBridge.Tests
         public void AutomaticLodPipeline_AdaptsOccupiedVoxelCountBeforeImport()
         {
             if (!VoxelImporterIntegration.IsInstalled)
-                Assert.Ignore("Voxel Importer es opcional y no está instalado.");
+                Assert.Ignore("Voxel Importer is optional and is not installed.");
 
             const string testRoot = "Assets/VoxelBridgeImporterLimitTestOutput";
             GameObject root = null;
@@ -2077,6 +2238,8 @@ namespace LocalModels.VoxelBridge.Tests
                 multipliers.GetArrayElementAtIndex(1).intValue = 2;
                 multipliers.GetArrayElementAtIndex(2).intValue = 4;
                 serializedProfile.ApplyModifiedPropertiesWithoutUndo();
+                VoxelLodPipeline.EnsureAssetFolder(testRoot);
+                AssetDatabase.CreateAsset(profile, testRoot + "/VoxelStyleProfile.asset");
 
                 VoxelizationResult fine = MeshVoxelizer.Voxelize(root, new VoxelizationSettings
                 {
@@ -2125,13 +2288,13 @@ namespace LocalModels.VoxelBridge.Tests
                 System.InvalidOperationException exception = Assert.Throws<System.InvalidOperationException>(() =>
                     VoxelLodPipeline.GenerateAutomatic(
                         root, profile, rejectedOptions, null, 1, importerLimit, 1));
-                Assert.That(exception.Message, Does.Contain("por encima del límite de importación"));
+                Assert.That(exception.Message, Does.Contain("exceeding the import limit"));
                 Assert.That(AssetDatabase.IsValidFolder(rejectedOptions.ExportFolder), Is.False);
             }
             finally
             {
                 if (root != null) Object.DestroyImmediate(root);
-                if (profile != null) Object.DestroyImmediate(profile);
+                if (profile != null && !AssetDatabase.Contains(profile)) Object.DestroyImmediate(profile);
                 AssetDatabase.DeleteAsset(testRoot);
             }
         }
@@ -2241,7 +2404,7 @@ namespace LocalModels.VoxelBridge.Tests
         {
             FieldInfo field = typeof(VoxelBridgeWindow).GetField(
                 fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.That(field, Is.Not.Null, $"No se encontró el campo '{fieldName}'.");
+            Assert.That(field, Is.Not.Null, $"Field '{fieldName}' was not found.");
             field.SetValue(window, value);
         }
 
@@ -2249,7 +2412,7 @@ namespace LocalModels.VoxelBridge.Tests
         {
             FieldInfo field = typeof(VoxelBridgeWindow).GetField(
                 fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.That(field, Is.Not.Null, $"No se encontró el campo '{fieldName}'.");
+            Assert.That(field, Is.Not.Null, $"Field '{fieldName}' was not found.");
             return (T)field.GetValue(window);
         }
 
