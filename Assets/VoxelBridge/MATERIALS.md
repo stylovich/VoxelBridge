@@ -4,7 +4,7 @@
 
 El sistema de materiales voxel separa el color visible de las propiedades físicas de la superficie. Un modelo puede reutilizar el mismo color con perfiles PBR diferentes sin crear un Material de Unity por combinación.
 
-El sistema proporciona paletas globales, IDs estables, generación de LUT y transporte de `ColorID + SurfaceID` en volúmenes y archivos `.vox`. El mesh de producción y el shader compartido permanecen descritos en [ROADMAP.md](ROADMAP.md).
+El sistema proporciona paletas globales, IDs estables, generación de LUT, transporte de `ColorID + SurfaceID` en volúmenes y archivos `.vox`, y exportación independiente de un LOD0 opaco con material HDRP compartido. La integración con familias completas e impostores se describe en [ROADMAP.md](ROADMAP.md).
 
 ## Assets canónicos
 
@@ -152,17 +152,43 @@ Los chunks `NOTE` y `MATL` se conservan, pero no determinan los IDs. Cualquier `
 
 El mismo RGB puede ocupar dos slots locales cuando necesita superficies diferentes. Voxel Bridge conserva esos slots mientras controla la escritura. MagicaVoxel puede reordenar slots visualmente idénticos al volver a guardar; este caso no se considera certificado hasta completar una prueba controlada de round-trip.
 
-## Contrato previsto para meshes
+## Mesh semántico LOD0
 
-La integración de producción utilizará el siguiente contrato:
+`Tools > Voxel Bridge > VOX to Unity > Semantic LOD0 Production Mesh` genera una malla mediante greedy meshing. Las caras adyacentes se unen sólo si coinciden orientación, ColorID y SurfaceID. Las caras entre celdas ocupadas se eliminan, incluso en fronteras de modelos internos del `.vox`. El campo `hideInternalCavities` del sidecar controla la eliminación de caras orientadas hacia cavidades cerradas; las cavidades abiertas permanecen visibles.
+
+El contrato del mesh es:
 
 - `UV0.x`: `ColorID` crudo.
-- `UV1`: lightmaps horneados.
-- `UV2`: iluminación en tiempo real o reserva del pipeline.
+- `UV1`: reservado para lightmaps horneados, sin generar en esta exportación.
+- `UV2`: reservado, sin datos.
 - `UV3.x`: `SurfaceID` crudo.
 - Vertex Color: máscaras estilísticas futuras.
 
-El mesher de producción consumirá el volumen semántico directamente. El material actual de Voxel Importer no cambia durante esta fase.
+Cada cara dispone de vértices propios, normales planas y tangentes. Los canales de IDs son Vector2 y cada triángulo contiene un único par. El origen de la rejilla y la unidad física se incorporan a los vértices; el prefab conserva transform identidad y el pivote local de la fuente.
+
+### Exportación y material compartido
+
+1. Seleccionar un `.vox` LOD0 con sidecar semántico v4.
+2. Guardar sus asignaciones en `Bind Semantic IDs`.
+3. Comprobar ambas LUT en `Global Palettes`; regenerarlas si están desactualizadas.
+4. Abrir `VOX to Unity`, elegir `Production Folder` y ejecutar `Create Production LOD0 Prefab`.
+5. Colocar el prefab generado en una escena HDRP para comprobar color, superficies y escala.
+
+Cada ejecución crea una carpeta independiente `<LOD0>_Production` que contiene `LOD0.asset` y un prefab. Los nombres reciben un sufijo si existe otra exportación. La operación no sobrescribe fuentes ni resultados anteriores, no altera el manifiesto de la familia y no coloca objetos en escena. Cancelar el meshing no guarda resultados.
+
+El shader `Voxel Bridge/VoxelWorldOpaque` utiliza HDRP Lit y muestrea ambas LUT en el centro del texel, con LOD 0. La emisión es `BaseColor × SurfaceEmission × EmissionIntensity`; su intensidad global se ajusta en el material sin modificar meshes.
+
+`Assets/VoxelBridgeImports/SharedMaterials` almacena un material por pareja de GUID de paletas. Las exportaciones posteriores reutilizan ese material y conservan su intensidad de emisión. Las LUT mantienen sus referencias al regenerarse. Modificar una paleta afecta a todos los modelos que comparten su material. Una referencia de shader o LUT incompatible detiene la exportación en lugar de sobrescribir ajustes silenciosamente.
+
+Los prefabs generados sólo requieren sus mallas, material, shader y texturas en runtime. No necesitan el `.vox`, el sidecar, los ScriptableObjects de autoría ni Voxel Importer. La previsualización de Voxel Importer permanece independiente y puede diferir en propiedades PBR.
+
+### Límites de esta exportación
+
+- Sólo LOD0 semántico y superficies `Opaque`; otras clases producen un error explícito.
+- Una sola malla de salida, aunque la entrada contenga varios modelos internos. No sustituye al flujo de chunks y familias para edificios grandes.
+- Máximo de 8.000.000 de celdas, archivo `.vox` de 64 MiB y 500.000 quads. Estos límites acotan el trabajo de la exportación independiente; no son una garantía del consumo total de Unity. No modifican los presupuestos de voxelización ni reducen automáticamente la resolución.
+- Sin generación de LODGroup, colliders, impostores, UV de lightmap o actualización automática tras editar el `.vox`.
+- DOTS Instancing está habilitado en el graph; la validación de Entities Graphics, HTrace e impostores permanece pendiente para este shader de producción.
 
 ## Validaciones
 

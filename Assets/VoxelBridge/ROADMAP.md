@@ -133,6 +133,10 @@ La reducción manual de un volumen semántico selecciona la combinación mayorit
 
 ### Mesh de producción
 
+La exportación independiente LOD0 opaca está disponible en `VOX to Unity`, con greedy meshing, IDs en UV0/UV3 y material HDRP compartido. Su alcance y límites se describen en [MATERIALS.md](MATERIALS.md).
+
+La siguiente integración debe extender este contrato a familias completas: preservar los chunks para culling, consultar vecinos a través de sus fronteras, mantener la alineación entre niveles y reconstruir meshes y prefabs conservando GUIDs y referencias. La regeneración será primero explícita; la reimportación automática requerirá validación de dependencias y recuperación ante fallos.
+
 Voxel Bridge debe generar los meshes finales desde el volumen semántico y no depender del atlas local creado por Voxel Importer. El greedy mesher combina caras únicamente cuando coinciden color, superficie, orientación y clase de render.
 
 El resultado utiliza un submesh por comportamiento real de render, no por `SurfaceID`. Voxel Importer permanece disponible para previsualizar y editar `.vox`, pero no es la fuente definitiva del mesh de producción. Esta separación evita parches profundos al asset de terceros y proporciona un contrato estable para combinación, LODs y DOTS.

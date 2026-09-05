@@ -76,6 +76,8 @@ namespace LocalModels.VoxelBridge
                 MessageType.Info);
             DrawDirectImport();
             EditorGUILayout.Space(18);
+            DrawProductionExport();
+            EditorGUILayout.Space(18);
             DrawObjAlternative();
             if (!string.IsNullOrEmpty(status)) EditorGUILayout.HelpBox(status, MessageType.None);
             EditorGUILayout.EndScrollView();
@@ -121,9 +123,45 @@ namespace LocalModels.VoxelBridge
             }
         }
 
+        private void DrawProductionExport()
+        {
+            EditorGUILayout.LabelField("2. Semantic LOD0 Production Mesh", EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox(
+                "Genera un prefab independiente desde el .vox seleccionado y sus IDs guardados. " +
+                "Comparte un material HDRP por pareja de paletas, sin modificar la previsualización " +
+                "de Voxel Importer ni la familia LOD. Admite superficies opacas y una sola malla: " +
+                "máximo 8 millones de celdas y 500.000 quads. No genera impostores ni coloca objetos en escena.",
+                MessageType.Info);
+            VoxelBridgeFolderPicker.Draw("Production Folder", ref prefabFolder);
+            using (new EditorGUI.DisabledScope(!VoxelImporterIntegration.IsVoxAsset(voxAsset) ||
+                                               !VoxelLodPipeline.IsAssetFolder(prefabFolder)))
+            {
+                if (!GUILayout.Button("Create Production LOD0 Prefab", GUILayout.Height(30))) return;
+                try
+                {
+                    GameObject prefab = VoxelProductionExporter.Export(AssetDatabase.GetAssetPath(voxAsset),
+                        prefabFolder, value =>
+                        {
+                            if (EditorUtility.DisplayCancelableProgressBar("Voxel Bridge", "Building semantic LOD0", value))
+                                throw new OperationCanceledException();
+                        });
+                    Selection.activeObject = prefab;
+                    EditorGUIUtility.PingObject(prefab);
+                    status = "Production prefab created: " + AssetDatabase.GetAssetPath(prefab);
+                }
+                catch (OperationCanceledException) { status = "Production export cancelled. No output was saved."; }
+                catch (Exception exception)
+                {
+                    status = "Production export failed: " + exception.Message;
+                    EditorUtility.DisplayDialog("Voxel Bridge", status, "Close");
+                }
+                finally { EditorUtility.ClearProgressBar(); }
+            }
+        }
+
         private void DrawObjAlternative()
         {
-            EditorGUILayout.LabelField("2. MagicaVoxel OBJ Export (Alternative)", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("3. MagicaVoxel OBJ Export (Alternative)", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox(
                 "Flujo alternativo para importar un OBJ exportado desde MagicaVoxel. El sidecar original recupera la escala y el pivote.",
                 MessageType.None);

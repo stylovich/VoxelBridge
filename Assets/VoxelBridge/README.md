@@ -10,7 +10,7 @@ Copiar `Assets/VoxelBridge` junto con sus archivos `.meta` al proyecto. El módu
 
 La generación y la edición son procesos de autoría. Los prefabs contienen meshes y renderers convencionales; el módulo no implementa edición voxel en runtime.
 
-Las paletas y el transporte de `ColorID + SurfaceID` se describen en [MATERIALS.md](MATERIALS.md). El mesher semántico de producción, los materiales compartidos definitivos, la combinación de modelos y la validación DOTS figuran en [ROADMAP.md](ROADMAP.md).
+Las paletas, el transporte de `ColorID + SurfaceID` y la exportación semántica de un LOD0 opaco se describen en [MATERIALS.md](MATERIALS.md). La integración del mesher con familias completas, la combinación de modelos y la validación DOTS figuran en [ROADMAP.md](ROADMAP.md).
 
 ## Herramientas
 
@@ -18,7 +18,7 @@ Las paletas y el transporte de `ColorID + SurfaceID` se describen en [MATERIALS.
 |---|---|
 | `Physical Models and LODs` | Conversión con unidad física, familias LOD, lotes e impostores |
 | `Resolution-Based Conversion` | Conversión individual con una resolución explícita |
-| `VOX to Unity` | Sincronización de un `.vox` o retorno alternativo desde OBJ |
+| `VOX to Unity` | Sincronización de un `.vox`, exportación semántica LOD0 o retorno desde OBJ |
 | `Bind Semantic IDs` | Asignación de ColorID y SurfaceID a los slots de un `.vox` |
 | `Global Palettes` | Administración de las paletas globales y sus LUT |
 | `Sync All Generated VOX Assets` | Resincronización explícita de los `.vox` con sidecar |
