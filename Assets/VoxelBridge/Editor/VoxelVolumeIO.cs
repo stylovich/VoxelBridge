@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using UnityEngine;
 
@@ -274,6 +275,7 @@ namespace LocalModels.VoxelBridge
             }
 
             var models = new List<Model>();
+            var sceneGraph = new VoxelSceneGraph();
             var palette = new Color32[256];
             using var stream = File.OpenRead(path);
             using var reader = new BinaryReader(stream);
@@ -334,6 +336,8 @@ namespace LocalModels.VoxelBridge
                         palette[i] = new Color32(reader.ReadByte(), reader.ReadByte(), reader.ReadByte(), reader.ReadByte());
                     hasPalette = true;
                 }
+                else if (sceneGraph.ReadChunk(id, reader, contentStart + contentBytes) && childrenBytes != 0)
+                    throw new InvalidDataException("Nested scene node chunks are not supported.");
                 stream.Position = contentStart + contentBytes + childrenBytes;
             }
             if (pendingSize != Vector3Int.zero)
@@ -357,15 +361,13 @@ namespace LocalModels.VoxelBridge
                     }
                 };
             }
-            if (chunks.Length != models.Count)
-                throw new InvalidDataException("The sidecar model count does not match the VOX document. Re-export the model and its sidecar before generating LODs.");
-            var mappedModels = new HashSet<int>();
-            foreach (VoxelChunkMetadata chunk in chunks)
+            if (chunks.Any(c => c == null)) throw new InvalidDataException("Null chunk metadata.");
+            int[] modelMapping = sceneGraph.ResolveModels(metadata, chunks,
+                models.Select(m => m.Size).ToArray(), models.Select(m => m.Voxels.Count).ToArray());
+            for (int chunkIndex = 0; chunkIndex < chunks.Length; chunkIndex++)
             {
-                if (chunk == null || chunk.modelIndex < 0 || chunk.modelIndex >= models.Count ||
-                    !mappedModels.Add(chunk.modelIndex))
-                    throw new InvalidDataException("The chunk metadata does not match the VOX models.");
-                Model model = models[chunk.modelIndex];
+                VoxelChunkMetadata chunk = chunks[chunkIndex];
+                Model model = models[modelMapping[chunkIndex]];
                 foreach ((byte x, byte voxY, byte voxZ, byte paletteIndex) in model.Voxels)
                 {
                     if (x >= model.Size.x || voxZ >= model.Size.y || voxY >= model.Size.z)
