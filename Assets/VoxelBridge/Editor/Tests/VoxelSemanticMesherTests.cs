@@ -158,7 +158,7 @@ namespace LocalModels.VoxelBridge.Tests
         }
 
         [Test]
-        public void ProductionShader_HasHdrpPassesAndCompiles()
+        public void ProductionShader_HasHdrpPassesAndNoImportErrors()
         {
             Shader shader = AssetDatabase.LoadAssetAtPath<Shader>(VoxelProductionExporter.ShaderPath);
             Assert.That(shader, Is.Not.Null);
@@ -166,9 +166,18 @@ namespace LocalModels.VoxelBridge.Tests
             var material = new Material(shader);
             try
             {
-                Assert.That(material.FindPass("GBuffer"), Is.GreaterThanOrEqualTo(0));
-                Assert.That(material.FindPass("ShadowCaster"), Is.GreaterThanOrEqualTo(0));
-                Assert.That(material.FindPass("DepthOnly"), Is.GreaterThanOrEqualTo(0));
+                // Inspect the HDRP subshader without relying on a rendered camera to activate the pipeline in batch mode.
+                var data = ShaderUtil.GetShaderData(shader);
+                bool found = false;
+                for (int i = 0; i < shader.subshaderCount; i++)
+                {
+                    var subshader = data.GetSerializedSubshader(i);
+                    if (subshader.FindTagValue(new ShaderTagId("RenderPipeline")).name != "HDRenderPipeline") continue;
+                    var passes = new HashSet<string>();
+                    for (int j = 0; j < subshader.PassCount; j++) passes.Add(subshader.GetPass(j).Name);
+                    found |= passes.Contains("GBuffer") && passes.Contains("ShadowCaster") && passes.Contains("DepthOnly");
+                }
+                Assert.That(found, Is.True, "Missing HDRP subshader with GBuffer, ShadowCaster and DepthOnly passes.");
                 Assert.That(material.HasProperty("_PaletteColor"), Is.True);
                 Assert.That(material.HasProperty("_PaletteSurface"), Is.True);
             }
@@ -212,12 +221,65 @@ namespace LocalModels.VoxelBridge.Tests
                 Assert.That(second.GetComponent<MeshRenderer>().sharedMaterial, Is.EqualTo(shared));
                 Assert.That(first.GetComponent<MeshFilter>().sharedMesh.vertexCount, Is.EqualTo(24));
                 Assert.That(first.GetComponent<MeshFilter>().sharedMesh.bounds.min, Is.EqualTo(grid.Origin).Using(Vector3Comparer));
-                Assert.That(AssetDatabase.GetAssetPath(first), Is.Not.EqualTo(AssetDatabase.GetAssetPath(second)));
+                Assert.That(AssetDatabase.GetAssetPath(first), Is.EqualTo(AssetDatabase.GetAssetPath(second)));
                 string[] dependencies = AssetDatabase.GetDependencies(AssetDatabase.GetAssetPath(first));
                 Assert.That(dependencies.Any(path => path.EndsWith(".vox") || path.Contains("VoxelImporter") ||
                     (path.StartsWith("Assets/") && path.EndsWith(".cs"))), Is.False);
                 Assert.That(shared.GetTexture("_PaletteColor"), Is.EqualTo(colors.GeneratedLut));
                 Assert.That(shared.GetTexture("_PaletteSurface"), Is.EqualTo(surfaces.GeneratedLut));
+
+                string prefabPath = AssetDatabase.GetAssetPath(first);
+                Mesh mesh = first.GetComponent<MeshFilter>().sharedMesh;
+                string meshPath = AssetDatabase.GetAssetPath(mesh);
+                string prefabGuid = AssetDatabase.AssetPathToGUID(prefabPath);
+                Assert.That(AssetDatabase.TryGetGUIDAndLocalFileIdentifier(mesh, out string meshGuid, out long meshId), Is.True);
+                Assert.That(VoxelProductionLink.Load(prefabPath).SourcePath, Is.EqualTo(voxPath));
+                var instance = (GameObject)PrefabUtility.InstantiatePrefab(first);
+                try
+                {
+                    instance.transform.position = new Vector3(7, 8, 9);
+                    instance.transform.localScale = Vector3.one * 2;
+                    instance.AddComponent<BoxCollider>();
+                    PrefabUtility.RecordPrefabInstancePropertyModifications(instance.transform);
+                    grid.Occupied[0] = false;
+                    VoxelChunkedVoxWriter.Write(VoxelLodPipeline.AssetPathToAbsolute(voxPath), grid, quantized, 16);
+                    Undo.IncrementCurrentGroup();
+                    VoxelProductionExporter.Rebuild(prefabPath);
+                    Assert.That(mesh.vertexCount, Is.GreaterThan(24));
+                    Assert.That(instance.GetComponent<MeshFilter>().sharedMesh, Is.SameAs(mesh));
+                    Assert.That(instance.transform.position, Is.EqualTo(new Vector3(7, 8, 9)));
+                    Assert.That(instance.transform.localScale, Is.EqualTo(Vector3.one * 2));
+                    Assert.That(instance.GetComponent<BoxCollider>(), Is.Not.Null);
+                    Assert.That(AssetDatabase.AssetPathToGUID(prefabPath), Is.EqualTo(prefabGuid));
+                    Assert.That(AssetDatabase.TryGetGUIDAndLocalFileIdentifier(mesh, out string rebuiltGuid, out long rebuiltId), Is.True);
+                    Assert.That(rebuiltGuid, Is.EqualTo(meshGuid));
+                    Assert.That(rebuiltId, Is.EqualTo(meshId));
+                    Undo.FlushUndoRecordObjects();
+                    Undo.PerformUndo();
+                    Assert.That(mesh.vertexCount, Is.EqualTo(24));
+                    Undo.PerformRedo();
+                    Assert.That(mesh.vertexCount, Is.GreaterThan(24));
+                    Vector3[] savedVertices = mesh.vertices;
+                    Assert.Throws<OperationCanceledException>(() => VoxelProductionExporter.Rebuild(prefabPath, _ => throw new OperationCanceledException()));
+                    CollectionAssert.AreEqual(savedVertices, mesh.vertices);
+                    File.WriteAllBytes(VoxelLodPipeline.AssetPathToAbsolute(voxPath), new byte[20]);
+                    Assert.Throws<InvalidDataException>(() => VoxelProductionExporter.Rebuild(prefabPath));
+                    CollectionAssert.AreEqual(savedVertices, mesh.vertices);
+                    VoxelChunkedVoxWriter.Write(VoxelLodPipeline.AssetPathToAbsolute(voxPath), grid, quantized, 16);
+                    AssetDatabase.ImportAsset(voxPath, ImportAssetOptions.ForceSynchronousImport);
+                    Assert.That(AssetDatabase.MoveAsset(voxPath, folder + "/Renamed.vox"), Is.Empty);
+                    File.Move(VoxelLodPipeline.AssetPathToAbsolute(VoxelImporterIntegration.GetMetadataAssetPath(voxPath)),
+                        VoxelLodPipeline.AssetPathToAbsolute(folder + "/Renamed.voxelbridge.json"));
+                    Assert.That(AssetDatabase.MoveAsset(meshPath, folder + "/RenamedMesh.asset"), Is.Empty);
+                    Assert.That(AssetDatabase.MoveAsset(prefabPath, folder + "/Renamed.prefab"), Is.Empty);
+                    Assert.That(VoxelProductionLink.Load(folder + "/Renamed.prefab").SourcePath, Is.EqualTo(folder + "/Renamed.vox"));
+                    VoxelProductionExporter.Rebuild(folder + "/Renamed.prefab");
+                    Assert.That(AssetDatabase.TryGetGUIDAndLocalFileIdentifier(instance.GetComponent<MeshFilter>().sharedMesh,
+                        out string movedGuid, out long movedId), Is.True);
+                    Assert.That(movedGuid, Is.EqualTo(meshGuid));
+                    Assert.That(movedId, Is.EqualTo(meshId));
+                }
+                finally { Object.DestroyImmediate(instance); }
             }
             finally
             {

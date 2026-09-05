@@ -148,7 +148,9 @@ La reducción manual selecciona el par mayoritario dentro de cada nueva celda. L
 
 Voxel Bridge lee los índices directamente del binario `.vox`. El mesh y el atlas generados por Voxel Importer se utilizan como previsualización, no como fuente semántica, porque el importador puede compactar su paleta interna.
 
-Los chunks `NOTE` y `MATL` se conservan, pero no determinan los IDs. Cualquier `IMAP` se rechaza hasta disponer de un fixture que verifique su dirección y comportamiento en la versión de MagicaVoxel utilizada. La lectura del volumen comprueba la correspondencia de modelos, los tamaños de chunks y los límites de las celdas. Una edición que exceda la rejilla del sidecar requiere regenerar el volumen y sus metadatos antes de reducir LODs.
+Los chunks `NOTE` y `MATL` se conservan, pero no determinan los IDs. Cualquier `IMAP` se rechaza hasta disponer de un fixture que verifique su dirección y comportamiento en la versión de MagicaVoxel utilizada. La lectura del volumen utiliza el scene graph para localizar los chunks por tamaño y posición, aunque MagicaVoxel cambie sus índices internos o inserte modelos vacíos. Los modelos adicionales vacíos se ignoran; un modelo adicional con voxels produce un error.
+
+La edición admite pintar, añadir y eliminar voxels dentro de las cajas de los chunks exportados. Mover, rotar, reflejar, redimensionar o eliminar esas cajas requiere regenerar el volumen y sus metadatos. Las animaciones, las instancias de modelos internos y los chunks ocupados ocultos se rechazan. Estas validaciones también se aplican a la reducción manual de LODs y evitan reconstruir geometría desalineada o descartar contenido silenciosamente.
 
 El mismo RGB puede ocupar dos slots locales cuando necesita superficies diferentes. Voxel Bridge conserva esos slots mientras controla la escritura. MagicaVoxel puede reordenar slots visualmente idénticos al volver a guardar; este caso no se considera certificado hasta completar una prueba controlada de round-trip.
 
@@ -171,10 +173,26 @@ Cada cara dispone de vértices propios, normales planas y tangentes. Los canales
 1. Seleccionar un `.vox` LOD0 con sidecar semántico v4.
 2. Guardar sus asignaciones en `Bind Semantic IDs`.
 3. Comprobar ambas LUT en `Global Palettes`; regenerarlas si están desactualizadas.
-4. Abrir `VOX to Unity`, elegir `Production Folder` y ejecutar `Create Production LOD0 Prefab`.
+4. Abrir `VOX to Unity`, elegir `Production Folder` y ejecutar `Create or Rebuild Production LOD0`.
 5. Colocar el prefab generado en una escena HDRP para comprobar color, superficies y escala.
 
-Cada ejecución crea una carpeta independiente `<LOD0>_Production` que contiene `LOD0.asset` y un prefab. Los nombres reciben un sufijo si existe otra exportación. La operación no sobrescribe fuentes ni resultados anteriores, no altera el manifiesto de la familia y no coloca objetos en escena. Cancelar el meshing no guarda resultados.
+La primera ejecución crea una carpeta `<LOD0>_Production` con `LOD0.asset` y un prefab vinculado al `.vox`. Las ejecuciones posteriores buscan el vínculo dentro de `Production Folder` y reconstruyen la misma malla. Si existen varios prefabs vinculados a esa fuente, seleccionar el prefab concreto y utilizar `Rebuild`. La operación no modifica la fuente, el manifiesto de la familia ni la colocación en escena.
+
+### Edición desde el prefab
+
+El Inspector del GameObject y los menús contextuales `Assets > Voxel Bridge > Production` y `GameObject > Voxel Bridge > Production` ofrecen:
+
+- `Open in MagicaVoxel`: abrir el `.vox` vinculado.
+- `Select Source VOX`: localizar la fuente para editar sus asignaciones semánticas.
+- `Rebuild`: leer los cambios guardados y actualizar la malla compartida por todas las instancias.
+
+Guardar en MagicaVoxel actualiza su import de previsualización. El prefab de producción requiere ejecutar `Rebuild` explícitamente. Pintar con un slot existente conserva su par semántico; utilizar un slot nuevo exige asignarle IDs en `Bind Semantic IDs` antes de reconstruir.
+
+La reconstrucción conserva los GUIDs del mesh y prefab, los transforms, componentes y overrides de las instancias, y los ajustes compatibles del material. Admite Undo sobre la malla. Una fuente inválida o una cancelación durante el meshing deja intacto el resultado anterior. Los colliders y componentes añadidos manualmente no se regeneran.
+
+El vínculo de autoría reside en `userData` del importador del prefab, dentro de su `.meta`; no añade componentes ni dependencias de runtime. Identifica por GUID la fuente y la malla. Mover esos assets dentro de Unity conserva el vínculo. El `.vox` debe permanecer junto a su sidecar con el mismo nombre base. Conservar todos sus archivos `.meta` al moverlos fuera del Editor.
+
+Un prefab sin vínculo requiere crear una salida desde su `.vox`; no se infieren asociaciones por nombre. Duplicar un prefab vinculado no crea una fuente independiente: para editar otro modelo, duplicar el `.vox` y su sidecar y exportar esa nueva fuente.
 
 El shader `Voxel Bridge/VoxelWorldOpaque` utiliza HDRP Lit y muestrea ambas LUT en el centro del texel, con LOD 0. La emisión es `BaseColor × SurfaceEmission × EmissionIntensity`; su intensidad global se ajusta en el material sin modificar meshes.
 

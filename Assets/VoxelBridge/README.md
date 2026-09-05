@@ -134,6 +134,8 @@ La escala individual de una instancia no recalcula estas decisiones de autoría.
 
 `VOX to Unity` permite aplicar escala y pivote al import directo. El retorno alternativo desde OBJ requiere el sidecar RGB v3 de la conversión original para recuperar la escala y los ejes. El OBJ no conserva los IDs semánticos del volumen; el retorno v4 no está habilitado por esa ruta.
 
+Para un LOD0 con IDs asignados, `Create or Rebuild Production LOD0` genera un prefab con malla semántica propia y material HDRP compartido. Su Inspector y el menú contextual `Voxel Bridge > Production` permiten `Open in MagicaVoxel`, `Select Source VOX` y `Rebuild`. Guardar el `.vox` requiere una reconstrucción manual para actualizar la malla del prefab y todas sus instancias, conservando referencias y transforms. El flujo completo y sus límites se describen en [MATERIALS.md](MATERIALS.md#edición-desde-el-prefab).
+
 `Fill Interior` añade ocupación a volúmenes cerrados. `Hide Enclosed Cavities` controla la eliminación de caras que miran hacia cavidades cerradas mediante Voxel Importer. Son decisiones distintas.
 
 ## Integraciones y mantenimiento

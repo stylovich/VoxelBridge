@@ -15,7 +15,16 @@ namespace LocalModels.VoxelBridge
         {
             if (!VoxelLodPipeline.IsAssetFolder(outputFolder))
                 throw new ArgumentException("Choose an output folder under Assets.", nameof(outputFolder));
-            if (!VoxelImporterIntegration.TryLoadMetadata(voxAssetPath, out VoxelBridgeMetadata metadata, out string error))
+            string linked = VoxelProductionLink.FindOutput(voxAssetPath, outputFolder);
+            if (linked != null) return Rebuild(linked, progress);
+            return Create(voxAssetPath, outputFolder, progress);
+        }
+
+        private static Mesh BuildMesh(string voxAssetPath, Action<float> progress,
+            out VoxelBridgeMetadata metadata, out VoxelColorPalette colors,
+            out VoxelSurfacePalette surfaces, out Shader shader)
+        {
+            if (!VoxelImporterIntegration.TryLoadMetadata(voxAssetPath, out metadata, out string error))
                 throw new InvalidDataException(error);
             if (metadata.formatVersion != 4 || metadata.lodIndex != 0)
                 throw new InvalidDataException("Production export requires a semantic LOD0. Save its ColorID and SurfaceID bindings first.");
@@ -24,23 +33,28 @@ namespace LocalModels.VoxelBridge
             if (new FileInfo(absolutePath).Length > 64L * 1024 * 1024)
                 throw new InvalidDataException("The VOX file exceeds the standalone reader's 64 MiB safety limit.");
             if (!VoxelSemanticTransport.TryLoadPalettes(metadata.semantic,
-                    out VoxelColorPalette colors, out VoxelSurfacePalette surfaces, out error))
+                    out colors, out surfaces, out error))
                 throw new InvalidDataException(error);
             ValidatePalettes(colors, surfaces);
-            Shader shader = AssetDatabase.LoadAssetAtPath<Shader>(ShaderPath);
+            shader = AssetDatabase.LoadAssetAtPath<Shader>(ShaderPath);
             if (shader == null || !shader.isSupported || ShaderUtil.ShaderHasError(shader))
                 throw new InvalidOperationException("The Voxel Bridge HDRP shader is missing, unsupported, or has compilation errors.");
 
             VoxelGrid grid = VoxelVolumeReader.Read(absolutePath, metadata);
             ValidateSurfaces(grid, surfaces);
-            Mesh mesh = null;
+            return VoxelSemanticMesher.Build(grid, metadata.hideInternalCavities, progress);
+        }
+
+        private static GameObject Create(string voxAssetPath, string outputFolder, Action<float> progress)
+        {
+            Mesh mesh = BuildMesh(voxAssetPath, progress, out VoxelBridgeMetadata metadata,
+                out VoxelColorPalette colors, out VoxelSurfacePalette surfaces, out Shader shader);
             GameObject root = null;
             string createdFolder = null;
             string createdMaterial = null;
             bool saved = false;
             try
             {
-                mesh = VoxelSemanticMesher.Build(grid, metadata.hideInternalCavities, progress);
                 // All source validation and meshing complete before creating any output assets.
                 Material material = GetSharedMaterial(colors, surfaces, shader, out createdMaterial);
                 VoxelLodPipeline.EnsureAssetFolder(outputFolder);
@@ -54,6 +68,7 @@ namespace LocalModels.VoxelBridge
                 root.AddComponent<MeshRenderer>().sharedMaterial = material;
                 GameObject prefab = PrefabUtility.SaveAsPrefabAsset(root, createdFolder + "/" + name + ".prefab");
                 if (prefab == null) throw new IOException("Could not save the production prefab.");
+                VoxelProductionLink.Store(prefab, voxAssetPath, mesh);
                 AssetDatabase.SaveAssets();
                 saved = true;
                 return prefab;
@@ -67,6 +82,53 @@ namespace LocalModels.VoxelBridge
                     if (createdMaterial != null) AssetDatabase.DeleteAsset(createdMaterial);
                 }
                 if (mesh != null && !AssetDatabase.Contains(mesh)) Object.DestroyImmediate(mesh);
+            }
+        }
+
+        public static GameObject Rebuild(string prefabPath, Action<float> progress = null)
+        {
+            VoxelProductionLink link = VoxelProductionLink.Load(prefabPath);
+            string sourcePath = link.SourcePath;
+            GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
+            Mesh target = AssetDatabase.LoadAssetAtPath<Mesh>(AssetDatabase.GUIDToAssetPath(link.meshGuid));
+            MeshFilter filter = prefab != null ? prefab.GetComponent<MeshFilter>() : null;
+            MeshRenderer renderer = prefab != null ? prefab.GetComponent<MeshRenderer>() : null;
+            if (target == null || filter == null || filter.sharedMesh != target || renderer == null)
+                throw new InvalidDataException("The linked production mesh or renderer was removed/replaced. Restore the prefab references before rebuilding.");
+            Mesh generated = BuildMesh(sourcePath, progress, out _, out VoxelColorPalette colors,
+                out VoxelSurfacePalette surfaces, out Shader shader);
+            Mesh backup = null;
+            try
+            {
+                Material material = renderer.sharedMaterial;
+                if (material == null || material.shader != shader ||
+                    material.GetTexture("_PaletteColor") != colors.GeneratedLut ||
+                    material.GetTexture("_PaletteSurface") != surfaces.GeneratedLut)
+                    throw new InvalidDataException("The prefab material does not use the source's current palette pair. Assign a compatible production material before rebuilding.");
+                backup = Object.Instantiate(target);
+                generated.name = target.name;
+                Undo.RegisterCompleteObjectUndo(target, "Rebuild Voxel Production Mesh");
+                EditorUtility.CopySerialized(generated, target);
+                EditorUtility.SetDirty(target);
+                AssetDatabase.SaveAssetIfDirty(target);
+                SceneView.RepaintAll();
+                return prefab;
+            }
+            catch
+            {
+                if (backup != null)
+                {
+                    backup.name = target.name;
+                    EditorUtility.CopySerialized(backup, target);
+                    EditorUtility.SetDirty(target);
+                    AssetDatabase.SaveAssetIfDirty(target);
+                }
+                throw;
+            }
+            finally
+            {
+                Object.DestroyImmediate(generated);
+                if (backup != null) Object.DestroyImmediate(backup);
             }
         }
 

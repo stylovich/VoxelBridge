@@ -130,13 +130,14 @@ namespace LocalModels.VoxelBridge
                 "Genera un prefab independiente desde el .vox seleccionado y sus IDs guardados. " +
                 "Comparte un material HDRP por pareja de paletas, sin modificar la previsualización " +
                 "de Voxel Importer ni la familia LOD. Admite superficies opacas y una sola malla: " +
-                "máximo 8 millones de celdas y 500.000 quads. No genera impostores ni coloca objetos en escena.",
+                "máximo 8 millones de celdas y 500.000 quads. Si existe un prefab vinculado en la carpeta " +
+                "de salida, actualiza su malla. El prefab ofrece Open in MagicaVoxel, Select Source VOX y Rebuild.",
                 MessageType.Info);
             VoxelBridgeFolderPicker.Draw("Production Folder", ref prefabFolder);
             using (new EditorGUI.DisabledScope(!VoxelImporterIntegration.IsVoxAsset(voxAsset) ||
                                                !VoxelLodPipeline.IsAssetFolder(prefabFolder)))
             {
-                if (!GUILayout.Button("Create Production LOD0 Prefab", GUILayout.Height(30))) return;
+                if (!GUILayout.Button("Create or Rebuild Production LOD0", GUILayout.Height(30))) return;
                 try
                 {
                     GameObject prefab = VoxelProductionExporter.Export(AssetDatabase.GetAssetPath(voxAsset),
@@ -147,7 +148,7 @@ namespace LocalModels.VoxelBridge
                         });
                     Selection.activeObject = prefab;
                     EditorGUIUtility.PingObject(prefab);
-                    status = "Production prefab created: " + AssetDatabase.GetAssetPath(prefab);
+                    status = "Production prefab ready: " + AssetDatabase.GetAssetPath(prefab);
                 }
                 catch (OperationCanceledException) { status = "Production export cancelled. No output was saved."; }
                 catch (Exception exception)

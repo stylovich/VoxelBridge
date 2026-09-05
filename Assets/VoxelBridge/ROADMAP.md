@@ -133,7 +133,7 @@ La reducción manual de un volumen semántico selecciona la combinación mayorit
 
 ### Mesh de producción
 
-La exportación independiente LOD0 opaca está disponible en `VOX to Unity`, con greedy meshing, IDs en UV0/UV3 y material HDRP compartido. Su alcance y límites se describen en [MATERIALS.md](MATERIALS.md).
+La exportación independiente LOD0 opaca está disponible en `VOX to Unity`, con greedy meshing, IDs en UV0/UV3 y material HDRP compartido. El prefab mantiene un vínculo de autoría por GUID y permite abrir la fuente en MagicaVoxel y reconstruir explícitamente la misma malla. El lector localiza chunks por tamaño y posición después de un guardado externo, sin depender de sus índices internos ni descartar modelos adicionales ocupados. Su alcance y límites se describen en [MATERIALS.md](MATERIALS.md).
 
 La siguiente integración debe extender este contrato a familias completas: preservar los chunks para culling, consultar vecinos a través de sus fronteras, mantener la alineación entre niveles y reconstruir meshes y prefabs conservando GUIDs y referencias. La regeneración será primero explícita; la reimportación automática requerirá validación de dependencias y recuperación ante fallos.
 
