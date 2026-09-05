@@ -9,6 +9,7 @@ namespace LocalModels.VoxelBridge
 {
     internal sealed class VoxelSemanticBindingWindow : EditorWindow
     {
+        [Serializable]
         private sealed class BindingRow
         {
             public int Slot;
@@ -26,7 +27,8 @@ namespace LocalModels.VoxelBridge
         [SerializeField] private VoxelColorMappingProfile mappingProfile;
         [SerializeField] private Vector2 scroll;
 
-        private readonly List<BindingRow> rows = new();
+        [SerializeField] private List<BindingRow> rows = new();
+        private int bindingRevision;
         private string loadedPath;
         private string status;
         private MessageType statusType = MessageType.Info;
@@ -50,15 +52,30 @@ namespace LocalModels.VoxelBridge
 
         private void OnEnable()
         {
+            Undo.undoRedoPerformed += OnUndoRedo;
             LoadCanonicalPalettes();
             if (voxAsset == null) UseSelectedVox();
             Reload();
+        }
+
+        private void OnDisable()
+        {
+            Undo.undoRedoPerformed -= OnUndoRedo;
+            Undo.ClearUndo(this);
+        }
+
+        private void OnUndoRedo()
+        {
+            foreach (BindingRow row in rows) UpdateDistance(row);
+            RefreshStatus();
+            Repaint();
         }
 
         private void OnSelectionChange()
         {
             string path = AssetDatabase.GetAssetPath(Selection.activeObject);
             if (!IsVoxPath(path)) return;
+            if (path == loadedPath) return;
             voxAsset = Selection.activeObject;
             Reload();
             Repaint();
@@ -91,6 +108,8 @@ namespace LocalModels.VoxelBridge
                 mappingProfile, typeof(VoxelColorMappingProfile), false);
             if (EditorGUI.EndChangeCheck())
             {
+                Undo.ClearUndo(this);
+                bindingRevision++;
                 if (mappingProfile != null && mappingProfile.ColorPalette != null)
                     colorPalette = mappingProfile.ColorPalette;
                 ApplyProfileToUnmapped();
@@ -118,6 +137,10 @@ namespace LocalModels.VoxelBridge
                     "el remapeo aplicado por el editor que guardó el archivo.", MessageType.Error);
 
             if (rows.Count == 0) return;
+            EditorGUILayout.HelpBox(
+                "Edit > Undo / Redo permite deshacer y rehacer asignaciones pendientes (Ctrl+Z / Ctrl+Y). " +
+                "Guardar o cambiar de archivo, paleta o perfil reinicia este historial; no revierte archivos guardados.",
+                MessageType.Info);
             DrawBindings();
 
             bool profileValid = TryValidateSelectedProfile(out string profileError);
@@ -146,8 +169,6 @@ namespace LocalModels.VoxelBridge
             VoxelSurfaceDefinition[] surfaces = surfacePalette?.Entries?
                 .Where(entry => entry != null).OrderBy(entry => entry.Id).ToArray() ??
                 Array.Empty<VoxelSurfaceDefinition>();
-            string[] colorLabels = colors.Select(entry =>
-                $"{entry.Id:D3} · {entry.DisplayName}").Prepend("Unassigned").ToArray();
             string[] surfaceLabels = surfaces.Select(entry =>
                 $"{entry.Id:D3} · {entry.DisplayName}").Prepend("Unassigned").ToArray();
 
@@ -175,26 +196,56 @@ namespace LocalModels.VoxelBridge
                         : new Color32(32, 32, 32, 255);
                     DrawSwatch(mappedColor, 30f);
 
-                    int colorIndex = Array.FindIndex(colors, entry => entry.Id == row.ColorId) + 1;
-                    EditorGUI.BeginChangeCheck();
-                    int selectedColor = EditorGUILayout.Popup(
-                        Mathf.Max(0, colorIndex), colorLabels, GUILayout.MinWidth(190f));
-                    if (EditorGUI.EndChangeCheck())
+                    VoxelColorDefinition selected = colors.FirstOrDefault(entry => entry.Id == row.ColorId);
+                    string colorLabel = selected == null ? "Unassigned" : $"{selected.Id:D3} · {selected.DisplayName}";
+                    Rect colorRect = GUILayoutUtility.GetRect(new GUIContent(colorLabel),
+                        EditorStyles.popup, GUILayout.MinWidth(190f));
+                    if (GUI.Button(colorRect, colorLabel, EditorStyles.popup))
                     {
-                        row.ColorId = selectedColor == 0 ? -1 : colors[selectedColor - 1].Id;
-                        if (row.ColorId < 0) row.SuggestedColorId = -1;
-                        UpdateDistance(row);
+                        int revision = bindingRevision;
+                        int slot = row.Slot;
+                        PopupWindow.Show(colorRect, new ColorSelector(colors, row.ColorId, row.SourceColor,
+                            id =>
+                            {
+                                if (this != null && revision == bindingRevision) AssignColor(slot, id);
+                            }));
                     }
 
                     GUILayout.Label(BuildDistanceLabel(row), GUILayout.Width(76f));
 
                     int surfaceIndex = Array.FindIndex(surfaces, entry => entry.Id == row.SurfaceId) + 1;
+                    EditorGUI.BeginChangeCheck();
                     int selectedSurface = EditorGUILayout.Popup(
                         Mathf.Max(0, surfaceIndex), surfaceLabels, GUILayout.MinWidth(180f));
-                    row.SurfaceId = selectedSurface == 0 ? -1 : surfaces[selectedSurface - 1].Id;
+                    if (EditorGUI.EndChangeCheck())
+                        AssignSurface(row.Slot, selectedSurface == 0 ? -1 : surfaces[selectedSurface - 1].Id);
                 }
             }
             EditorGUILayout.EndScrollView();
+        }
+
+        internal void AssignColor(int slot, int colorId)
+        {
+            BindingRow row = rows.Find(entry => entry.Slot == slot);
+            if (row == null || row.ColorId == colorId) return;
+            if (colorId != -1 && (colorPalette == null || !colorPalette.TryGetColor(colorId, out _))) return;
+            Undo.IncrementCurrentGroup();
+            Undo.RecordObject(this, "Assign Voxel Color");
+            row.ColorId = colorId;
+            if (colorId < 0) row.SuggestedColorId = -1;
+            UpdateDistance(row);
+            RefreshStatus();
+        }
+
+        internal void AssignSurface(int slot, int surfaceId)
+        {
+            BindingRow row = rows.Find(entry => entry.Slot == slot);
+            if (row == null || row.SurfaceId == surfaceId) return;
+            if (surfaceId != -1 && (surfacePalette == null || !surfacePalette.TryGetSurface(surfaceId, out _))) return;
+            Undo.IncrementCurrentGroup();
+            Undo.RecordObject(this, "Assign Voxel Surface");
+            row.SurfaceId = surfaceId;
+            RefreshStatus();
         }
 
         private static void DrawSwatch(Color32 color, float size)
@@ -267,6 +318,8 @@ namespace LocalModels.VoxelBridge
 
         private void Reload()
         {
+            Undo.ClearUndo(this);
+            bindingRevision++;
             string nextPath = AssetDatabase.GetAssetPath(voxAsset);
             bool assetChanged = !string.Equals(loadedPath, nextPath, StringComparison.Ordinal);
             loadedPath = nextPath;
@@ -362,6 +415,11 @@ namespace LocalModels.VoxelBridge
                 return;
             }
 
+            if (rows.Any(row => row.ColorId < 0))
+            {
+                Undo.IncrementCurrentGroup();
+                Undo.RecordObject(this, "Map Unassigned Voxel Colors");
+            }
             foreach (BindingRow row in rows)
             {
                 if (row.ColorId >= 0) continue;
@@ -486,6 +544,8 @@ namespace LocalModels.VoxelBridge
             profile.Initialize(colorPalette);
             AssetDatabase.CreateAsset(profile, path);
             AssetDatabase.SaveAssets();
+            Undo.ClearUndo(this);
+            bindingRevision++;
             mappingProfile = profile;
             Selection.activeObject = profile;
             EditorGUIUtility.PingObject(profile);
@@ -527,5 +587,105 @@ namespace LocalModels.VoxelBridge
         private static bool IsVoxPath(string path) =>
             !string.IsNullOrWhiteSpace(path) &&
             path.EndsWith(".vox", StringComparison.OrdinalIgnoreCase);
+
+        private sealed class ColorSelector : PopupWindowContent
+        {
+            private const float RowHeight = 24f;
+            private readonly VoxelColorDefinition[] colors;
+            private readonly Action<int> select;
+            private readonly Color32 sourceColor;
+            private Vector2 listScroll;
+            private int highlighted;
+
+            public ColorSelector(VoxelColorDefinition[] colors, int selectedId,
+                Color32 sourceColor, Action<int> select)
+            {
+                this.colors = colors;
+                this.sourceColor = sourceColor;
+                this.select = select;
+                highlighted = Array.FindIndex(colors, entry => entry.Id == selectedId) + 1;
+                listScroll.y = Mathf.Max(0, highlighted * RowHeight - 120f);
+            }
+
+            public override Vector2 GetWindowSize() => new(340f, 392f);
+
+            public override void OnGUI(Rect rect)
+            {
+                Event current = Event.current;
+                if (current.type == EventType.KeyDown)
+                {
+                    if (current.keyCode == KeyCode.Escape)
+                    {
+                        editorWindow.Close();
+                        current.Use();
+                        return;
+                    }
+                    if (current.keyCode == KeyCode.Return || current.keyCode == KeyCode.KeypadEnter)
+                    {
+                        Choose(highlighted);
+                        current.Use();
+                        return;
+                    }
+                    if (current.keyCode == KeyCode.DownArrow || current.keyCode == KeyCode.UpArrow)
+                    {
+                        highlighted = Mathf.Clamp(highlighted +
+                            (current.keyCode == KeyCode.DownArrow ? 1 : -1), 0, colors.Length);
+                        listScroll.y = Mathf.Clamp(listScroll.y,
+                            (highlighted + 1) * RowHeight - 288f, highlighted * RowHeight);
+                        current.Use();
+                        editorWindow.Repaint();
+                    }
+                }
+
+                GUILayout.Label("Select Color", EditorStyles.boldLabel);
+                Rect viewport = GUILayoutUtility.GetRect(320f, 288f, GUILayout.ExpandWidth(true));
+                listScroll = GUI.BeginScrollView(viewport, listScroll,
+                    new Rect(0f, 0f, viewport.width - 16f, (colors.Length + 1) * RowHeight));
+                for (int index = 0; index <= colors.Length; index++)
+                {
+                    Rect row = new(0f, index * RowHeight, viewport.width - 16f, RowHeight);
+                    bool hovered = row.Contains(current.mousePosition) && viewport.Contains(
+                        current.mousePosition - listScroll + viewport.position);
+                    if (hovered && (current.type == EventType.MouseMove || current.type == EventType.MouseDown))
+                    {
+                        highlighted = index;
+                        editorWindow.Repaint();
+                    }
+                    if (index == highlighted) EditorGUI.DrawRect(row, new Color(0.22f, 0.45f, 0.7f, 0.4f));
+                    if (index > 0)
+                        EditorGUI.DrawRect(new Rect(5f, row.y + 3f, 28f, 18f), colors[index - 1].Color);
+                    GUI.Label(new Rect(40f, row.y, row.width - 40f, RowHeight),
+                        index == 0 ? "Unassigned" : $"{colors[index - 1].Id:D3} · {colors[index - 1].DisplayName}");
+                    if (hovered && current.type == EventType.MouseDown && current.button == 0)
+                    {
+                        Choose(index);
+                        current.Use();
+                        break;
+                    }
+                }
+                GUI.EndScrollView();
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    DrawSwatch(sourceColor, 42f);
+                    GUILayout.Label("→", GUILayout.Width(16f));
+                    if (highlighted > 0)
+                    {
+                        VoxelColorDefinition candidate = colors[highlighted - 1];
+                        DrawSwatch(candidate.Color, 42f);
+                        GUILayout.Label($"{candidate.Id:D3} · {candidate.DisplayName}\n" +
+                            $"#{ColorUtility.ToHtmlStringRGBA(candidate.Color)}");
+                    }
+                    else GUILayout.Label("Unassigned");
+                }
+            }
+
+            public override void OnOpen() => editorWindow.wantsMouseMove = true;
+
+            private void Choose(int index)
+            {
+                select(index == 0 ? -1 : colors[index - 1].Id);
+                editorWindow.Close();
+            }
+        }
     }
 }

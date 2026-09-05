@@ -76,6 +76,8 @@ Abrir `Tools > Voxel Bridge > Bind Semantic IDs` o utilizar `Assets > Voxel Brid
 
 La ventana muestra únicamente los slots utilizados por `XYZI`. Al guardar, los slots asignados al mismo par `ColorID + SurfaceID` se consolidan en el slot de menor índice. Se remapean los índices de todos los chunks `XYZI` y se actualiza el sidecar sin modificar la ocupación, las posiciones ni la escala. Las superficies diferentes permanecen separadas, aunque compartan color. Los chunks `NOTE` y `MATL` se conservan sin reinterpretarlos; las propiedades de producción proceden de la paleta global de superficies.
 
+El selector de ColorID muestra muestras de color, ID y nombre, y una comparación ampliada con el color original. Las flechas recorren las opciones, Enter confirma y Escape cierra sin modificar la asignación. `Edit > Undo / Redo` deshace o rehace cambios pendientes de color y superficie, incluido el mapeo automático como una sola operación. Guardar o cambiar de archivo, paleta o perfil reinicia este historial; los archivos guardados no se revierten mediante Undo.
+
 Cada slot debe tener:
 
 - un `ColorID` global;

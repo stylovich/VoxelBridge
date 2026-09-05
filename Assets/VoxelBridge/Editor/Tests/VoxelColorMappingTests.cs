@@ -10,6 +10,124 @@ namespace LocalModels.VoxelBridge.Tests
     public sealed class VoxelColorMappingTests
     {
         [Test]
+        public void BindingWindow_UndoRedoRestoresColorSurfaceAndDistance()
+        {
+            VoxelColorPalette colors = CreatePalette((0, Color.white), (1, Color.red), (2, Color.blue));
+            var surfaces = ScriptableObject.CreateInstance<VoxelSurfacePalette>();
+            surfaces.MutableEntries.Clear();
+            surfaces.MutableEntries.Add(new VoxelSurfaceDefinition(0, "Default",
+                VoxelSurfaceRenderClass.Opaque, 0f, 0f, 0f, 1f));
+            surfaces.MutableEntries.Add(new VoxelSurfaceDefinition(1, "Metal",
+                VoxelSurfaceRenderClass.Opaque, 1f, 0f, 0f, 1f));
+            var window = ScriptableObject.CreateInstance<VoxelSemanticBindingWindow>();
+            try
+            {
+                InitializeBindingWindow(window, colors, surfaces);
+                window.AssignColor(1, 1);
+                Undo.FlushUndoRecordObjects();
+                float redDistance = ReadBindingValue(window, "MatchDistance").floatValue;
+                Assert.That(redDistance, Is.GreaterThan(0f));
+                window.AssignColor(1, 2);
+                Undo.FlushUndoRecordObjects();
+                Undo.PerformUndo();
+                Assert.That(ReadBindingValue(window, "ColorId").intValue, Is.EqualTo(1));
+                Assert.That(ReadBindingValue(window, "MatchDistance").floatValue, Is.EqualTo(redDistance));
+                Undo.PerformUndo();
+                Assert.That(ReadBindingValue(window, "ColorId").intValue, Is.Zero);
+                Assert.That(ReadBindingValue(window, "MatchDistance").floatValue, Is.Zero);
+                Undo.PerformRedo();
+                Undo.PerformRedo();
+                Assert.That(ReadBindingValue(window, "ColorId").intValue, Is.EqualTo(2));
+                window.AssignSurface(1, 1);
+                Undo.FlushUndoRecordObjects();
+                Undo.PerformUndo();
+                Assert.That(ReadBindingValue(window, "SurfaceId").intValue, Is.Zero);
+                Assert.That(ReadBindingValue(window, "ColorId").intValue, Is.EqualTo(2));
+                Undo.PerformRedo();
+                Assert.That(ReadBindingValue(window, "SurfaceId").intValue, Is.EqualTo(1));
+                window.AssignColor(1, -1);
+                Undo.FlushUndoRecordObjects();
+                Assert.That(ReadBindingValue(window, "ColorId").intValue, Is.EqualTo(-1));
+                Undo.PerformUndo();
+                Assert.That(ReadBindingValue(window, "ColorId").intValue, Is.EqualTo(2));
+                window.AssignColor(1, 99);
+                Assert.That(ReadBindingValue(window, "ColorId").intValue, Is.EqualTo(2));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(window);
+                UnityEngine.Object.DestroyImmediate(colors);
+                UnityEngine.Object.DestroyImmediate(surfaces);
+            }
+        }
+
+        [Test]
+        public void BindingWindow_AutomaticMappingIsOneUndoStep()
+        {
+            VoxelColorPalette colors = CreatePalette((0, Color.white), (1, Color.red));
+            var surfaces = ScriptableObject.CreateInstance<VoxelSurfacePalette>();
+            var profile = ScriptableObject.CreateInstance<VoxelColorMappingProfile>();
+            profile.ConfigureForTests(colors, 8f, 20f);
+            var window = ScriptableObject.CreateInstance<VoxelSemanticBindingWindow>();
+            try
+            {
+                InitializeBindingWindow(window, colors, surfaces);
+                var serialized = new SerializedObject(window);
+                serialized.FindProperty("mappingProfile").objectReferenceValue = profile;
+                SerializedProperty rows = serialized.FindProperty("rows");
+                rows.arraySize = 2;
+                for (int index = 0; index < 2; index++)
+                {
+                    rows.GetArrayElementAtIndex(index).FindPropertyRelative("Slot").intValue = index + 1;
+                    rows.GetArrayElementAtIndex(index).FindPropertyRelative("ColorId").intValue = -1;
+                    rows.GetArrayElementAtIndex(index).FindPropertyRelative("SourceColor").colorValue = Color.white;
+                }
+                serialized.ApplyModifiedPropertiesWithoutUndo();
+                typeof(VoxelSemanticBindingWindow).GetMethod("ApplyProfileToUnmapped",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                    .Invoke(window, null);
+                Undo.FlushUndoRecordObjects();
+                Assert.That(ReadBindingValue(window, "ColorId", 0).intValue, Is.Zero);
+                Assert.That(ReadBindingValue(window, "ColorId", 1).intValue, Is.Zero);
+                Undo.PerformUndo();
+                Assert.That(ReadBindingValue(window, "ColorId", 0).intValue, Is.EqualTo(-1));
+                Assert.That(ReadBindingValue(window, "ColorId", 1).intValue, Is.EqualTo(-1));
+                Undo.PerformRedo();
+                Assert.That(ReadBindingValue(window, "ColorId", 0).intValue, Is.Zero);
+                Assert.That(ReadBindingValue(window, "ColorId", 1).intValue, Is.Zero);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(window);
+                UnityEngine.Object.DestroyImmediate(profile);
+                UnityEngine.Object.DestroyImmediate(colors);
+                UnityEngine.Object.DestroyImmediate(surfaces);
+            }
+        }
+
+        private static void InitializeBindingWindow(VoxelSemanticBindingWindow window,
+            VoxelColorPalette colors, VoxelSurfacePalette surfaces)
+        {
+            var serialized = new SerializedObject(window);
+            serialized.FindProperty("voxAsset").objectReferenceValue = null;
+            serialized.FindProperty("colorPalette").objectReferenceValue = colors;
+            serialized.FindProperty("surfacePalette").objectReferenceValue = surfaces;
+            serialized.FindProperty("mappingProfile").objectReferenceValue = null;
+            SerializedProperty rows = serialized.FindProperty("rows");
+            rows.arraySize = 1;
+            SerializedProperty row = rows.GetArrayElementAtIndex(0);
+            row.FindPropertyRelative("Slot").intValue = 1;
+            row.FindPropertyRelative("ColorId").intValue = 0;
+            row.FindPropertyRelative("SurfaceId").intValue = 0;
+            row.FindPropertyRelative("SourceColor").colorValue = Color.white;
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+        }
+
+        private static SerializedProperty ReadBindingValue(VoxelSemanticBindingWindow window,
+            string field, int index = 0) => new SerializedObject(window).FindProperty("rows")
+                .GetArrayElementAtIndex(index).FindPropertyRelative(field);
+
+        [Test]
         public void RecommendedProfileAssetsReferenceTheCanonicalMasterPalette()
         {
             VoxelColorPalette palette = AssetDatabase.LoadAssetAtPath<VoxelColorPalette>(
