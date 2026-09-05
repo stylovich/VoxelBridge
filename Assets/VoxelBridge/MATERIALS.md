@@ -74,7 +74,9 @@ El número de ID es de sólo lectura en el Inspector para evitar cambios acciden
 
 Abrir `Tools > Voxel Bridge > Bind Semantic IDs` o utilizar `Assets > Voxel Bridge > Bind Semantic IDs` sobre un archivo `.vox`.
 
-La ventana muestra únicamente los slots utilizados por `XYZI`. Cada slot debe tener:
+La ventana muestra únicamente los slots utilizados por `XYZI`. Al guardar, los slots asignados al mismo par `ColorID + SurfaceID` se consolidan en el slot de menor índice. Se remapean los índices de todos los chunks `XYZI` y se actualiza el sidecar sin modificar la ocupación, las posiciones ni la escala. Las superficies diferentes permanecen separadas, aunque compartan color. Los chunks `NOTE` y `MATL` se conservan sin reinterpretarlos; las propiedades de producción proceden de la paleta global de superficies.
+
+Cada slot debe tener:
 
 - un `ColorID` global;
 - un `SurfaceID` global;

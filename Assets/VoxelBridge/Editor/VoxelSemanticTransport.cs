@@ -158,9 +158,13 @@ namespace LocalModels.VoxelBridge
                 hasIndexMap);
         }
 
-        public byte[] BuildSemanticBytes(IReadOnlyList<VoxelSemanticSlotMetadata> semanticSlots)
+        public byte[] BuildSemanticBytes(IReadOnlyList<VoxelSemanticSlotMetadata> semanticSlots,
+            out VoxelSemanticSlotMetadata[] canonicalSlots)
         {
+            canonicalSlots = null;
             if (semanticSlots == null) throw new ArgumentNullException(nameof(semanticSlots));
+            if (HasUnsupportedIndexMap)
+                throw new InvalidDataException("Cannot remap a VOX document containing an unsupported IMAP.");
             var palette = (Color32[])Palette.Clone();
             var seenSlots = new HashSet<int>();
             foreach (VoxelSemanticSlotMetadata entry in semanticSlots)
@@ -169,8 +173,33 @@ namespace LocalModels.VoxelBridge
                     throw new InvalidDataException("The semantic table contains a slot outside 1..255.");
                 if (!seenSlots.Add(entry.slot))
                     throw new InvalidDataException($"Slot {entry.slot} is duplicated in the semantic table.");
-                palette[entry.slot - 1] = entry.displayColor;
+                VoxelSemanticEncoding.Pack(entry.colorId, entry.surfaceId);
             }
+            foreach (byte slot in UsedSlots)
+                if (!seenSlots.Contains(slot))
+                    throw new InvalidDataException($"Used slot {slot} has no semantic binding.");
+
+            // Keep the lowest source slot for each pair; never merge different surfaces.
+            var pairs = new Dictionary<ushort, VoxelSemanticSlotMetadata>();
+            var remap = new byte[256];
+            foreach (VoxelSemanticSlotMetadata entry in semanticSlots.OrderBy(entry => entry.slot))
+            {
+                ushort pair = VoxelSemanticEncoding.Pack(entry.colorId, entry.surfaceId);
+                if (!pairs.TryGetValue(pair, out VoxelSemanticSlotMetadata canonical))
+                {
+                    canonical = new VoxelSemanticSlotMetadata
+                    {
+                        slot = entry.slot, colorId = entry.colorId,
+                        surfaceId = entry.surfaceId, displayColor = entry.displayColor
+                    };
+                    pairs.Add(pair, canonical);
+                    palette[canonical.slot - 1] = canonical.displayColor;
+                }
+                else if (!canonical.displayColor.Equals(entry.displayColor))
+                    throw new InvalidDataException("Bindings for the same semantic pair have conflicting display colors.");
+                remap[entry.slot] = (byte)canonical.slot;
+            }
+            canonicalSlots = pairs.Values.OrderBy(entry => entry.slot).ToArray();
 
             byte[] rgba = BuildChunk("RGBA", writer =>
             {
@@ -184,7 +213,23 @@ namespace LocalModels.VoxelBridge
             });
             var outputChildren = new List<byte[]>(children.Count);
             foreach (RawChunk child in children)
-                outputChildren.Add(child.Id == "RGBA" ? rgba : child.Bytes);
+            {
+                byte[] bytes = child.Id == "RGBA" ? rgba : child.Bytes;
+                if (child.Id == "XYZI")
+                {
+                    bytes = (byte[])child.Bytes.Clone();
+                    using var voxelStream = new MemoryStream(bytes, writable: false);
+                    using var voxelReader = new BinaryReader(voxelStream);
+                    voxelStream.Position = 12; // Chunk header followed by voxel count.
+                    int count = voxelReader.ReadInt32();
+                    for (int i = 0; i < count; i++)
+                    {
+                        int slotOffset = 16 + i * 4 + 3;
+                        bytes[slotOffset] = remap[bytes[slotOffset]];
+                    }
+                }
+                outputChildren.Add(bytes);
+            }
 
             int childrenBytes = 0;
             foreach (byte[] child in outputChildren)
@@ -621,15 +666,16 @@ namespace LocalModels.VoxelBridge
                 originalVox = File.ReadAllBytes(absoluteVoxPath);
                 originalMetadata = File.ReadAllText(absoluteMetadataPath);
                 VoxelSemanticVoxDocument document = VoxelSemanticVoxDocument.Parse(originalVox);
-                if (!CoversUsedSlots(document.UsedSlots, bindings, out message)) return false;
+                byte[] updatedVox = document.BuildSemanticBytes(bindings,
+                    out VoxelSemanticSlotMetadata[] canonicalSlots);
                 if (!VoxelSemanticTransport.TryCreateMetadata(
-                        bindings, colorPalette, surfacePalette, mappingProfile,
+                        canonicalSlots, colorPalette, surfacePalette, mappingProfile,
                         out VoxelSemanticMetadata semantic, out message))
                     return false;
 
-                byte[] updatedVox = document.BuildSemanticBytes(semantic.slots);
                 metadata.formatVersion = 4;
                 metadata.semantic = semantic;
+                metadata.paletteColorCount = canonicalSlots.Length;
                 string updatedMetadata = JsonUtility.ToJson(metadata, true);
 
                 VoxelSemanticVoxDocument checkDocument = VoxelSemanticVoxDocument.Parse(updatedVox);
@@ -648,7 +694,7 @@ namespace LocalModels.VoxelBridge
                 if (VoxelImporterIntegration.IsInstalled)
                     VoxelImporterIntegration.ApplyAndReimport(
                         voxAssetPath, out importerMessage, forceReimport: true);
-                message = "Semantic binding saved.";
+                message = $"Semantic binding saved: {document.UsedSlots.Length} source slots, {canonicalSlots.Length} semantic slots.";
                 if (!string.IsNullOrEmpty(warning)) message += " Warning: " + warning + ".";
                 if (!string.IsNullOrEmpty(importerMessage)) message += " " + importerMessage;
                 return true;
@@ -672,23 +718,6 @@ namespace LocalModels.VoxelBridge
                 message = "Could not save semantic binding: " + exception.Message;
                 return false;
             }
-        }
-
-        private static bool CoversUsedSlots(IReadOnlyList<byte> usedSlots,
-            IReadOnlyList<VoxelSemanticSlotMetadata> bindings, out string error)
-        {
-            var bound = new HashSet<int>(
-                (bindings ?? Array.Empty<VoxelSemanticSlotMetadata>())
-                .Where(entry => entry != null)
-                .Select(entry => entry.slot));
-            foreach (byte slot in usedSlots)
-            {
-                if (bound.Contains(slot)) continue;
-                error = $"Used slot {slot} has no assigned ColorID and SurfaceID.";
-                return false;
-            }
-            error = null;
-            return true;
         }
 
         private static void WriteAtomic(string path, byte[] bytes)

@@ -158,7 +158,7 @@ namespace LocalModels.VoxelBridge.Tests
                 byte[] noteChunk = BuildChunk("NOTE", noteContent);
 
                 byte[] rewritten = VoxelSemanticVoxDocument.Parse(bytesWithNote)
-                    .BuildSemanticBytes(quantized.SemanticSlots);
+                    .BuildSemanticBytes(quantized.SemanticSlots, out _);
 
                 Assert.That(ContainsSequence(rewritten, noteChunk), Is.True);
             }
@@ -167,6 +167,107 @@ namespace LocalModels.VoxelBridge.Tests
                 if (File.Exists(path)) File.Delete(path);
                 UnityEngine.Object.DestroyImmediate(colors);
                 UnityEngine.Object.DestroyImmediate(surfaces);
+            }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void Binding_ConsolidatesPairsAcrossChunksAndPreservesGeometry(bool separateSurface)
+        {
+            string folderName = "VoxelSemanticMerge_" + Guid.NewGuid().ToString("N");
+            string folder = "Assets/" + folderName;
+            AssetDatabase.CreateFolder("Assets", folderName);
+            VoxelColorPalette colors = CreateColors(1);
+            VoxelSurfacePalette surfaces = CreateSurfaces(1);
+            AssetDatabase.CreateAsset(colors, folder + "/Colors.asset");
+            AssetDatabase.CreateAsset(surfaces, folder + "/Surfaces.asset");
+            string voxPath = folder + "/Model.vox";
+            string absolute = VoxelLodPipeline.AssetPathToAbsolute(voxPath);
+            try
+            {
+                var grid = new VoxelGrid(new Vector3Int(33, 1, 1), Vector3.zero, 0.032f);
+                int[] positions = { 0, 16, 32 };
+                Color32[] sourceColors = { Color.red, Color.green, Color.blue };
+                for (int i = 0; i < positions.Length; i++)
+                {
+                    grid.Occupied[positions[i]] = true;
+                    grid.Colors[positions[i]] = sourceColors[i];
+                }
+                QuantizedVoxels quantized = VoxelColorQuantizer.Quantize(grid);
+                VoxWriteResult write = VoxelChunkedVoxWriter.Write(absolute, grid, quantized, 16);
+                Assert.That(write.Chunks, Has.Length.EqualTo(3));
+                byte[] note = BuildNotes("Test palette row");
+                byte[] material = { 2, 0, 0, 0, 0, 0, 0, 0 };
+                byte[] original = AppendChunk(AppendChunk(File.ReadAllBytes(absolute),
+                    "NOTE", note), "MATL", material);
+                File.WriteAllBytes(absolute, original);
+                var metadata = new VoxelBridgeMetadata
+                {
+                    formatVersion = 3, voxelSize = grid.VoxelSize, unityGridSize = grid.Size,
+                    chunks = write.Chunks, voxelCount = 3, paletteColorCount = 3
+                };
+                string sidecar = VoxelImporterIntegration.GetMetadataAssetPath(voxPath);
+                File.WriteAllText(VoxelLodPipeline.AssetPathToAbsolute(sidecar), JsonUtility.ToJson(metadata));
+                colors.TryGetColor(1, out Color32 displayColor);
+                VoxelSemanticVoxDocument document = VoxelSemanticVoxDocument.Parse(original);
+                VoxelSemanticSlotMetadata[] bindings = document.UsedSlots.Select(slot =>
+                    new VoxelSemanticSlotMetadata
+                    {
+                        slot = slot, colorId = 1,
+                        surfaceId = separateSurface && slot == document.UsedSlots.Last() ? 1 : 0,
+                        displayColor = displayColor
+                    }).ToArray();
+                byte[] expected = document.BuildSemanticBytes(bindings, out var canonical);
+                CollectionAssert.AreEqual(expected,
+                    document.BuildSemanticBytes(bindings.Reverse().ToArray(), out _));
+                Assert.That(canonical.Length, Is.EqualTo(separateSurface ? 2 : 1));
+                Assert.That(canonical[0].slot, Is.EqualTo(document.UsedSlots[0]));
+                CollectionAssert.AreEqual(original, File.ReadAllBytes(absolute));
+                Assert.Throws<InvalidDataException>(() => document.BuildSemanticBytes(
+                    bindings.Concat(new[] { bindings[0] }).ToArray(), out _));
+                Assert.Throws<InvalidDataException>(() => document.BuildSemanticBytes(
+                    bindings.Skip(1).ToArray(), out _));
+                Assert.Throws<InvalidDataException>(() => VoxelSemanticVoxDocument.Parse(
+                    AppendChunk(original, "IMAP", new byte[256])).BuildSemanticBytes(bindings, out _));
+
+                int originalSurface = bindings[0].surfaceId;
+                bindings[0].surfaceId = 99;
+                Assert.That(VoxelSemanticBindingService.TryBind(voxPath, bindings,
+                    colors, surfaces, null, out string rejected), Is.False);
+                StringAssert.Contains("unknown SurfaceID", rejected);
+                CollectionAssert.AreEqual(original, File.ReadAllBytes(absolute));
+                Assert.That(JsonUtility.FromJson<VoxelBridgeMetadata>(File.ReadAllText(
+                    VoxelLodPipeline.AssetPathToAbsolute(sidecar))).formatVersion, Is.EqualTo(3));
+                bindings[0].surfaceId = originalSurface;
+
+                Assert.That(VoxelSemanticBindingService.TryBind(voxPath, bindings,
+                    colors, surfaces, null, out string error), Is.True, error);
+                Assert.That(VoxelImporterIntegration.TryLoadMetadata(voxPath,
+                    out VoxelBridgeMetadata saved, out error), Is.True, error);
+                Assert.That(saved.semantic.slots.Length, Is.EqualTo(canonical.Length));
+                Assert.That(saved.paletteColorCount, Is.EqualTo(canonical.Length));
+                byte[] result = File.ReadAllBytes(absolute);
+                CollectionAssert.AreEqual(expected, result);
+                Assert.That(ContainsSequence(result, BuildChunk("NOTE", note)), Is.True);
+                Assert.That(ContainsSequence(result, BuildChunk("MATL", material)), Is.True);
+                VoxelSemanticVoxDocument rewritten = VoxelSemanticVoxDocument.Parse(result);
+                Assert.That(rewritten.SlotUsageCounts.Sum(), Is.EqualTo(3));
+                Assert.That(rewritten.UsedSlots.Length, Is.EqualTo(canonical.Length));
+                VoxelGrid restored = VoxelVolumeReader.Read(absolute, saved);
+                CollectionAssert.AreEqual(grid.Occupied, restored.Occupied);
+                foreach (int position in positions)
+                {
+                    var binding = bindings.Single(entry => entry.slot == quantized.Indices[position]);
+                    Assert.That(restored.SemanticIds[position],
+                        Is.EqualTo(VoxelSemanticEncoding.Pack(binding.colorId, binding.surfaceId)));
+                }
+                Assert.That(VoxelSemanticBindingService.TryBind(voxPath, saved.semantic.slots,
+                    colors, surfaces, null, out error), Is.True, error);
+                CollectionAssert.AreEqual(result, File.ReadAllBytes(absolute));
+            }
+            finally
+            {
+                AssetDatabase.DeleteAsset(folder);
             }
         }
 

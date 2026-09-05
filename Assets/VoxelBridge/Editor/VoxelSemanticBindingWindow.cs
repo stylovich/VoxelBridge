@@ -248,7 +248,8 @@ namespace LocalModels.VoxelBridge
             if (distantMappings > 0)
                 risk += $"\n\n{distantMappings} asignación(es) superan el umbral de advertencia del perfil.";
             if (!EditorUtility.DisplayDialog("Save Semantic Bindings",
-                    "Se actualizará la paleta RGBA del .vox y su sidecar. " +
+                    "Se actualizará la paleta RGBA del .vox y su sidecar. Los slots con el mismo " +
+                    "ColorID y SurfaceID se consolidarán sin cambiar la posición de los voxels. " +
                     "Es recomendable mantener ambos archivos bajo control de versiones." + risk,
                     "Save", "Cancel"))
                 return;
