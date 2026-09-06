@@ -52,6 +52,7 @@ namespace LocalModels.VoxelBridge
         private VoxelImpostorProfile impostorProfile;
         [SerializeField] private VoxelImpostorQuality impostorQuality = VoxelImpostorQuality.Medium;
         private VoxelColorMode colorMode = VoxelColorMode.MaterialAndTexture;
+        [SerializeField] private VoxelConversionProfile conversionProfile;
         private Color singleColor = new Color32(180, 180, 180, 255);
         private float alphaCutoff = 0.1f;
         private string exportFolder = DefaultExportFolder;
@@ -733,6 +734,11 @@ namespace LocalModels.VoxelBridge
 
         private void DrawColorSettings()
         {
+            conversionProfile = (VoxelConversionProfile)EditorGUILayout.ObjectField(
+                new GUIContent("Conversion Profile", "Reglas por material, ColorID y SurfaceID durante la voxelización. Crear desde Assets > Create > Voxel Bridge > Conversion Profile."),
+                conversionProfile, typeof(VoxelConversionProfile), false);
+            if (conversionProfile != null)
+                EditorGUILayout.HelpBox("Las reglas se aplican antes del relleno. Keep Original conserva geometría estática fuera del .vox; sus materiales originales permanecen en el prefab.", MessageType.Info);
             colorMode = (VoxelColorMode)EditorGUILayout.Popup("Color Source", (int)colorMode,
                 new[] { "Material + Texture", "Material Only", "Single Color" });
             if (colorMode == VoxelColorMode.SingleColor)
@@ -1086,6 +1092,7 @@ namespace LocalModels.VoxelBridge
             SingleColor = singleColor,
             AlphaCutoff = alphaCutoff,
             GenerateLod0Only = generateLod0Only,
+            ConversionProfile = conversionProfile,
             ExportFolder = exportFolder
         };
 

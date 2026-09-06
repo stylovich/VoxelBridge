@@ -60,6 +60,7 @@ namespace LocalModels.VoxelBridge
         public Vector3Int importGridSize;
         public VoxelChunkMetadata[] chunks;
         public VoxelSemanticMetadata semantic;
+        public string retainedGeometryGuid;
     }
 
     [Serializable]
@@ -115,6 +116,7 @@ namespace LocalModels.VoxelBridge
     [Serializable]
     internal sealed class VoxelLodSetManifest
     {
+        public string retainedGeometryGuid;
         public int formatVersion = 4;
         public string familyId;
         public string sourceName;

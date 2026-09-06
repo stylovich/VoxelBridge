@@ -122,14 +122,16 @@ Debe existir una prueba de round-trip para la versión instalada de MagicaVoxel 
 
 La conversión desde FBX u OBJ resuelve `SurfaceID` con la siguiente precedencia:
 
-1. asignación explícita del Material de Unity a una superficie global;
-2. alias de Editor como `SURF_Concrete` o `SURF_PaintedMetal`;
-3. superficie predeterminada configurada por el usuario;
-4. error cuando el perfil exige asignación explícita.
+1. asignación explícita mediante el componente `Conversion Rule`;
+2. asignación explícita del Material de Unity en `Conversion Profile`;
+3. superficie emisiva cuando la muestra supera el umbral de detección;
+4. superficie predeterminada configurada por el usuario.
 
-Los nombres sólo se utilizan durante la importación y no forman parte del runtime. Un material temporal puede etiquetar caras en Blender o Unity y se elimina como dependencia después de transferir su ID al volumen voxel.
+Las reglas `Voxelize`, `Ignore` y `Keep Original` se aplican antes del cálculo de la rejilla y del relleno. La selección por material utiliza referencias estables, no nombres ni aliases. Un material temporal puede etiquetar caras en Blender o Unity y se elimina como dependencia del mesh semántico después de transferir su ID al volumen voxel. Las piezas `Keep Original` conservan sus materiales y una copia estática vinculada a la familia.
 
-La reducción manual de un volumen semántico selecciona la combinación mayoritaria con desempate estable. Duplicar un LOD conserva la tabla de slots sin reinterpretarla. La propagación automática desde FBX u OBJ requiere primero la asignación de superficies desde los materiales fuente.
+La reducción manual de un volumen semántico selecciona la combinación mayoritaria con desempate estable. Duplicar un LOD conserva la tabla de slots sin reinterpretarla. El alcance de detección de emisión y la conservación de piezas se describen en [MATERIALS.md](MATERIALS.md#superficies-durante-la-conversión) y [README.md](README.md#reglas-de-conversión).
+
+La pintura visual de SurfaceID por voxel requiere una fase de autoría específica. La selección entre una herramienta de Unity, un editor voxel adaptado o una integración de Blender permanece pendiente. El almacenamiento de los IDs debe conservar independencia respecto a esa elección. La emisión con color independiente del albedo y los shaders voxel transparentes quedan fuera de la conversión opaca inicial.
 
 ### Mesh de producción
 

@@ -1,0 +1,6 @@
+{
+  "name": "VoxelBridge.Authoring",
+  "rootNamespace": "LocalModels.VoxelBridge",
+  "references": [],
+  "autoReferenced": true
+}

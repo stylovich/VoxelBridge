@@ -17,6 +17,7 @@ namespace LocalModels.VoxelBridge
         public string ExportFolder;
         public bool IncludeInactiveObjects = true;
         public bool GenerateLod0Only;
+        public VoxelConversionProfile ConversionProfile;
     }
 
     internal readonly struct VoxelLodBuildResult
@@ -239,7 +240,7 @@ namespace LocalModels.VoxelBridge
                 if (cancelProgress != null && cancelProgress(progressBase,
                         $"Model {sourceIndex + 1} of {plans.Length}: preparing {current.name}"))
                 {
-                    VoxelLodBatchMemoryCleaner.ReleaseUnusedMemory(parent, profile);
+                    VoxelLodBatchMemoryCleaner.ReleaseUnusedMemory(parent, profile, effectiveOptions.ConversionProfile);
                     return new VoxelLodBatchBuildResult(
                         items, plans.Length, true, preflight, excludedInactiveDirectChildren);
                 }
@@ -275,7 +276,7 @@ namespace LocalModels.VoxelBridge
                     outcomes.Add(plan.ReuseKey, rejected);
                     items.Add(new VoxelLodBatchItemResult(plan, default, false, preflightError));
                     CleanupBatchMemoryIfNeeded(
-                        ++processedUniqueSources, batchOptions.CleanupInterval, parent, profile);
+                        ++processedUniqueSources, batchOptions.CleanupInterval, parent, profile, effectiveOptions.ConversionProfile);
                     continue;
                 }
 
@@ -299,11 +300,11 @@ namespace LocalModels.VoxelBridge
                         VoxelLodBatchCheckpointStore.Record(
                             checkpointSignature, plan, build);
                     CleanupBatchMemoryIfNeeded(
-                        ++processedUniqueSources, batchOptions.CleanupInterval, parent, profile);
+                        ++processedUniqueSources, batchOptions.CleanupInterval, parent, profile, effectiveOptions.ConversionProfile);
                 }
                 catch (OperationCanceledException)
                 {
-                    VoxelLodBatchMemoryCleaner.ReleaseUnusedMemory(parent, profile);
+                    VoxelLodBatchMemoryCleaner.ReleaseUnusedMemory(parent, profile, effectiveOptions.ConversionProfile);
                     return new VoxelLodBatchBuildResult(
                         items, plans.Length, true, preflight, excludedInactiveDirectChildren);
                 }
@@ -313,13 +314,13 @@ namespace LocalModels.VoxelBridge
                     outcomes.Add(plan.ReuseKey, outcome);
                     items.Add(new VoxelLodBatchItemResult(plan, default, false, exception.Message));
                     CleanupBatchMemoryIfNeeded(
-                        ++processedUniqueSources, batchOptions.CleanupInterval, parent, profile);
+                        ++processedUniqueSources, batchOptions.CleanupInterval, parent, profile, effectiveOptions.ConversionProfile);
                 }
             }
 
             if (batchOptions.EnableCheckpoint)
                 VoxelLodBatchCheckpointStore.Reset(checkpointSignature);
-            VoxelLodBatchMemoryCleaner.ReleaseUnusedMemory(parent, profile);
+            VoxelLodBatchMemoryCleaner.ReleaseUnusedMemory(parent, profile, effectiveOptions.ConversionProfile);
             return new VoxelLodBatchBuildResult(
                 items, plans.Length, false, preflight, excludedInactiveDirectChildren);
         }
@@ -344,6 +345,7 @@ namespace LocalModels.VoxelBridge
                 AlphaCutoff = source.AlphaCutoff,
                 ExportFolder = source.ExportFolder,
                 GenerateLod0Only = source.GenerateLod0Only,
+                ConversionProfile = source.ConversionProfile,
                 IncludeInactiveObjects = !batchOptions.IgnoreInactiveObjects
             };
         }
@@ -466,6 +468,7 @@ namespace LocalModels.VoxelBridge
                     "The imported voxel limit cannot be negative.");
             if (maximumInitialVoxelMultiplier == 0)
                 maximumInitialVoxelMultiplier = initialVoxelMultiplier;
+            options.ConversionProfile?.ValidateForExport();
             if (!IsPowerOfTwo(maximumInitialVoxelMultiplier) ||
                 maximumInitialVoxelMultiplier < initialVoxelMultiplier)
                 throw new ArgumentOutOfRangeException(nameof(maximumInitialVoxelMultiplier),
@@ -512,6 +515,8 @@ namespace LocalModels.VoxelBridge
             {
                 string manifestAssetPath = $"{familyFolder}/{safeName}.voxset.json";
                 string profilePath = AssetDatabase.GetAssetPath(profile);
+                string retainedGuid = MeshVoxelizer.ExportRetainedGeometry(source, options.IncludeInactiveObjects,
+                    options.ConversionProfile, familyFolder);
                 var entries = new List<VoxelLodEntry>();
                 var voxPaths = new List<string>();
 
@@ -534,7 +539,10 @@ namespace LocalModels.VoxelBridge
                     string voxPath = $"{familyFolder}/{safeName}_LOD{lodIndex}.vox";
                     WriteGrid(voxPath, result.Grid, result.SourceBounds, source.name,
                         AssetDatabase.GetAssetPath(source), familyId, manifestAssetPath, lodIndex, multiplier,
-                        VoxelLodGenerationMode.SourceMesh, null, profile);
+                        VoxelLodGenerationMode.SourceMesh, null, profile, conversionProfile: options.ConversionProfile,
+                        retainedGeometryGuid: retainedGuid);
+                    if (options.ConversionProfile != null && result.MaximumColorDistance > options.ConversionProfile.colorMapping.WarningDistance)
+                        Debug.LogWarning($"Voxel Bridge color mapping for '{source.name}' LOD{lodIndex} reached OKLab distance {result.MaximumColorDistance:0.00}. Review the mapped colors.");
                     entries.Add(new VoxelLodEntry
                     {
                         lodIndex = lodIndex,
@@ -550,6 +558,7 @@ namespace LocalModels.VoxelBridge
                     familyId = familyId,
                     sourceName = source.name,
                     sourceAssetPath = AssetDatabase.GetAssetPath(source),
+                    retainedGeometryGuid = retainedGuid,
                     baseVoxelSize = profile.BaseVoxelSize,
                     initialVoxelMultiplier = initialVoxelMultiplier,
                     chunkCellSize = profile.ChunkCellSize,
@@ -590,7 +599,8 @@ namespace LocalModels.VoxelBridge
                 IncludeInactiveObjects = options.IncludeInactiveObjects,
                 ColorMode = options.ColorMode,
                 SingleColor = options.SingleColor,
-                AlphaCutoff = options.AlphaCutoff
+                AlphaCutoff = options.AlphaCutoff,
+                ConversionProfile = options.ConversionProfile
             };
             return MeshVoxelizer.Voxelize(source, settings, (progress, message) =>
                 cancelProgress != null && cancelProgress(
@@ -660,6 +670,7 @@ namespace LocalModels.VoxelBridge
                     familyId = string.IsNullOrWhiteSpace(parent.familyId) ? Guid.NewGuid().ToString("N") : parent.familyId,
                     sourceName = parent.sourceName,
                     sourceAssetPath = parent.sourceAssetPath,
+                    retainedGeometryGuid = parent.retainedGeometryGuid,
                     baseVoxelSize = parent.baseVoxelSize > 0f ? parent.baseVoxelSize : profile.BaseVoxelSize,
                     initialVoxelMultiplier = ResolveInitialVoxelMultiplier(null, profile, parent),
                     chunkCellSize = parent.chunkCellSize > 0 ? parent.chunkCellSize : profile.ChunkCellSize,
@@ -837,18 +848,20 @@ namespace LocalModels.VoxelBridge
         internal static void WriteGrid(string voxAssetPath, VoxelGrid grid, Bounds sourceBounds,
             string sourceName, string sourceAssetPath, string familyId, string manifestAssetPath,
             int lodIndex, int lodMultiplier, VoxelLodGenerationMode mode, string parentVoxAssetPath,
-            VoxelStyleProfile profile, VoxelBridgeMetadata semanticSource = null)
+            VoxelStyleProfile profile, VoxelBridgeMetadata semanticSource = null,
+            VoxelConversionProfile conversionProfile = null, string retainedGeometryGuid = null)
         {
             VoxelSemanticMetadata semantic = null;
             QuantizedVoxels quantized;
             if (grid.IsSemantic)
             {
-                if (semanticSource?.semantic == null)
+                if (semanticSource?.semantic == null && conversionProfile == null)
                     throw new InvalidDataException(
                         "The semantic LOD references no source semantic metadata.");
-                if (!VoxelSemanticTransport.TryLoadPalettes(semanticSource.semantic,
-                        out VoxelColorPalette colorPalette,
-                        out VoxelSurfacePalette surfacePalette, out string paletteError))
+                VoxelColorPalette colorPalette = conversionProfile?.colorMapping.ColorPalette;
+                VoxelSurfacePalette surfacePalette = conversionProfile?.surfacePalette;
+                if (conversionProfile == null && !VoxelSemanticTransport.TryLoadPalettes(semanticSource.semantic,
+                        out colorPalette, out surfacePalette, out string paletteError))
                     throw new InvalidDataException(paletteError);
                 quantized = VoxelSemanticQuantizer.Quantize(grid, colorPalette, surfacePalette);
                 if (!VoxelSemanticTransport.TryCreateMetadata(
@@ -856,9 +869,9 @@ namespace LocalModels.VoxelBridge
                         out semantic, out string semanticError))
                     throw new InvalidDataException(semanticError);
                 semantic.colorMappingProfileGuid =
-                    semanticSource.semantic.colorMappingProfileGuid;
+                    conversionProfile != null ? AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(conversionProfile.colorMapping)) : semanticSource.semantic.colorMappingProfileGuid;
                 semantic.colorMappingProfileAssetPath =
-                    semanticSource.semantic.colorMappingProfileAssetPath;
+                    conversionProfile != null ? AssetDatabase.GetAssetPath(conversionProfile.colorMapping) : semanticSource.semantic.colorMappingProfileAssetPath;
             }
             else
             {
@@ -898,7 +911,8 @@ namespace LocalModels.VoxelBridge
                     : grid.Origin,
                 importGridSize = normalizedBySceneGraph ? occupiedSize : grid.Size,
                 chunks = writeResult.Chunks,
-                semantic = semantic
+                semantic = semantic,
+                retainedGeometryGuid = retainedGeometryGuid ?? semanticSource?.retainedGeometryGuid
             };
             WriteJsonAsset(VoxelImporterIntegration.GetMetadataAssetPath(voxAssetPath), metadata);
         }
@@ -944,6 +958,7 @@ namespace LocalModels.VoxelBridge
                     GameObject child = Object.Instantiate(imported);
                     child.name = $"LOD{entry.lodIndex}_x{entry.multiplier}";
                     child.transform.SetParent(root.transform, false);
+                    VoxelRetainedGeometry.Attach(child.transform, manifest.retainedGeometryGuid);
                     Renderer[] renderers = child.GetComponentsInChildren<Renderer>(true);
                     if (renderers.Length == 0)
                         throw new InvalidDataException($"LOD {entry.lodIndex} contains no renderers.");

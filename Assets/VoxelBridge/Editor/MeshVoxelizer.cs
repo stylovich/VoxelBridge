@@ -16,6 +16,7 @@ namespace LocalModels.VoxelBridge
         public VoxelColorMode ColorMode = VoxelColorMode.MaterialAndTexture;
         public Color32 SingleColor = new Color32(180, 180, 180, 255);
         public float AlphaCutoff = 0.1f;
+        public VoxelConversionProfile ConversionProfile;
     }
 
     internal sealed class VoxelizationResult
@@ -23,6 +24,7 @@ namespace LocalModels.VoxelBridge
         public VoxelGrid Grid;
         public Bounds SourceBounds;
         public int OccupiedVoxelCount;
+        public float MaximumColorDistance;
     }
 
     internal static class MeshVoxelizer
@@ -34,6 +36,9 @@ namespace LocalModels.VoxelBridge
             public Mesh Mesh;
             public Material[] Materials;
             public bool OwnsMesh;
+            public int[][] Triangles;
+            public VoxelResolvedRule[] Rules;
+            public Matrix4x4 Transform;
         }
 
         public static VoxelizationResult Voxelize(
@@ -49,9 +54,11 @@ namespace LocalModels.VoxelBridge
             if (!physicalSizeMode && settings.Resolution <= settings.Padding * 2)
                 throw new ArgumentException("Resolution must exceed the padding on both sides.");
 
-            List<MeshSource> sources = ExtractMeshes(source, settings.IncludeInactiveObjects);
+            settings.ConversionProfile?.Validate();
+            var mapper = settings.ConversionProfile != null ? new VoxelConversionColorMapper(settings.ConversionProfile) : null;
+            List<MeshSource> sources = ExtractMeshes(source, settings.IncludeInactiveObjects, settings.ConversionProfile);
             if (sources.Count == 0)
-                throw new InvalidOperationException("The selected object contains no MeshFilter or SkinnedMeshRenderer.");
+                throw new InvalidOperationException("No triangle submeshes remain to voxelize after applying conversion rules.");
 
             try
             {
@@ -81,14 +88,14 @@ namespace LocalModels.VoxelBridge
                         Mathf.Clamp(Mathf.CeilToInt(bounds.size.z / voxelSize - 1e-5f) + settings.Padding * 2, 1, 256));
                     origin = bounds.min - Vector3.one * (settings.Padding * voxelSize);
                 }
-                var grid = new VoxelGrid(size, origin, voxelSize);
+                var grid = new VoxelGrid(size, origin, voxelSize, mapper != null);
                 var bestDistances = new float[grid.Occupied.Length];
                 for (int i = 0; i < bestDistances.Length; i++) bestDistances[i] = float.PositiveInfinity;
 
                 int triangleTotal = 0;
                 foreach (MeshSource meshSource in sources)
                     for (int submesh = 0; submesh < meshSource.Mesh.subMeshCount; submesh++)
-                        triangleTotal += (int)(meshSource.Mesh.GetIndexCount(submesh) / 3);
+                        triangleTotal += meshSource.Triangles[submesh].Length / 3;
 
                 int triangleDone = 0;
                 using (var samplers = new MaterialSamplerCache(settings))
@@ -97,11 +104,13 @@ namespace LocalModels.VoxelBridge
                     {
                         for (int submesh = 0; submesh < meshSource.Mesh.subMeshCount; submesh++)
                         {
-                            int[] triangles = meshSource.Mesh.GetTriangles(submesh);
+                            int[] triangles = meshSource.Triangles[submesh];
+                            if (triangles.Length == 0) continue;
                             Material material = meshSource.Materials != null && submesh < meshSource.Materials.Length
                                 ? meshSource.Materials[submesh]
                                 : null;
-                            MaterialSampler sampler = samplers.Get(material);
+                            int surfaceId = meshSource.Rules[submesh].SurfaceId;
+                            MaterialSampler sampler = samplers.Get(material, surfaceId < 0);
                             for (int t = 0; t < triangles.Length; t += 3)
                             {
                                 if ((triangleDone & 127) == 0 && cancelProgress != null &&
@@ -117,7 +126,7 @@ namespace LocalModels.VoxelBridge
                                 Vector2 uv1 = i1 < meshSource.Uvs.Length ? meshSource.Uvs[i1] : Vector2.zero;
                                 Vector2 uv2 = i2 < meshSource.Uvs.Length ? meshSource.Uvs[i2] : Vector2.zero;
                                 RasterizeTriangle(grid, bestDistances, a, b, c, uv0, uv1, uv2,
-                                    sampler, settings.AlphaCutoff);
+                                    sampler, settings.AlphaCutoff, mapper, surfaceId, settings.ConversionProfile);
                                 triangleDone++;
                             }
                         }
@@ -144,7 +153,8 @@ namespace LocalModels.VoxelBridge
                 {
                     Grid = grid,
                     SourceBounds = bounds,
-                    OccupiedVoxelCount = occupiedVoxelCount
+                    OccupiedVoxelCount = occupiedVoxelCount,
+                    MaximumColorDistance = mapper?.MaximumDistance ?? 0
                 };
             }
             finally
@@ -156,14 +166,15 @@ namespace LocalModels.VoxelBridge
         }
 
         internal static Bounds GetSourceBounds(
-            UnityEngine.Object source, bool includeInactiveObjects = true)
+            UnityEngine.Object source, bool includeInactiveObjects = true, VoxelConversionProfile profile = null)
         {
             if (source == null) throw new ArgumentNullException(nameof(source));
-            List<MeshSource> sources = ExtractMeshes(source, includeInactiveObjects);
+            profile?.Validate();
+            List<MeshSource> sources = ExtractMeshes(source, includeInactiveObjects, profile);
             try
             {
                 if (sources.Count == 0)
-                    throw new InvalidOperationException("The selected object contains no meshes.");
+                    throw new InvalidOperationException("No triangle submeshes remain to voxelize after applying conversion rules.");
                 return CalculateBounds(sources);
             }
             finally
@@ -175,12 +186,17 @@ namespace LocalModels.VoxelBridge
         }
 
         private static List<MeshSource> ExtractMeshes(
-            UnityEngine.Object source, bool includeInactiveObjects)
+            UnityEngine.Object source, bool includeInactiveObjects, VoxelConversionProfile profile = null,
+            VoxelConversionAction action = VoxelConversionAction.Voxelize)
         {
             var result = new List<MeshSource>();
             if (source is Mesh mesh)
             {
-                result.Add(CreateMeshSource(mesh, Matrix4x4.identity, null, false));
+                if (action == VoxelConversionAction.Voxelize)
+                {
+                    var item = CreateMeshSource(mesh, Matrix4x4.identity, null, false, null, null, profile, action);
+                    if (item != null) result.Add(item);
+                }
                 return result;
             }
 
@@ -205,8 +221,10 @@ namespace LocalModels.VoxelBridge
                          !IsActiveWithinRoot(workingRoot.transform, filter.transform)))
                         continue;
                     var renderer = filter.GetComponent<MeshRenderer>();
-                    result.Add(CreateMeshSource(filter.sharedMesh, toRoot * filter.transform.localToWorldMatrix,
-                        renderer != null ? renderer.sharedMaterials : null, false));
+                    MeshSource item = CreateMeshSource(filter.sharedMesh, toRoot * filter.transform.localToWorldMatrix,
+                        renderer != null ? renderer.sharedMaterials : null, false,
+                        workingRoot.transform, filter.transform, profile, action);
+                    if (item != null) result.Add(item);
                 }
 
                 foreach (SkinnedMeshRenderer renderer in workingRoot.GetComponentsInChildren<SkinnedMeshRenderer>(true))
@@ -215,11 +233,29 @@ namespace LocalModels.VoxelBridge
                         (!includeInactiveObjects &&
                          !IsActiveWithinRoot(workingRoot.transform, renderer.transform)))
                         continue;
+                    bool selected = false;
+                    Material[] materials = renderer.sharedMaterials;
+                    for (int submesh = 0; submesh < renderer.sharedMesh.subMeshCount; submesh++)
+                        selected |= VoxelResolvedRule.Resolve(workingRoot.transform, renderer.transform,
+                            submesh < materials.Length ? materials[submesh] : null, profile).Action == action;
+                    if (!selected) continue;
                     var baked = new Mesh { name = renderer.sharedMesh.name + "_VoxelBake" };
-                    renderer.BakeMesh(baked);
-                    result.Add(CreateMeshSource(baked, toRoot * renderer.transform.localToWorldMatrix,
-                        renderer.sharedMaterials, true));
+                    try
+                    {
+                        renderer.BakeMesh(baked);
+                        MeshSource item = CreateMeshSource(baked, toRoot * renderer.transform.localToWorldMatrix,
+                            materials, true, workingRoot.transform, renderer.transform, profile, action);
+                        if (item != null) result.Add(item);
+                        else UnityEngine.Object.DestroyImmediate(baked);
+                    }
+                    catch { UnityEngine.Object.DestroyImmediate(baked); throw; }
                 }
+            }
+            catch
+            {
+                foreach (var item in result)
+                    if (item.OwnsMesh) UnityEngine.Object.DestroyImmediate(item.Mesh);
+                throw;
             }
             finally
             {
@@ -240,8 +276,24 @@ namespace LocalModels.VoxelBridge
             return false;
         }
 
-        private static MeshSource CreateMeshSource(Mesh mesh, Matrix4x4 transform, Material[] materials, bool ownsMesh)
+        private static MeshSource CreateMeshSource(Mesh mesh, Matrix4x4 transform, Material[] materials, bool ownsMesh,
+            Transform root, Transform current, VoxelConversionProfile profile, VoxelConversionAction action)
         {
+            var triangles = new int[mesh.subMeshCount][];
+            var rules = new VoxelResolvedRule[mesh.subMeshCount];
+            bool selected = false;
+            for (int i = 0; i < mesh.subMeshCount; i++)
+            {
+                rules[i] = VoxelResolvedRule.Resolve(root, current, materials != null && i < materials.Length ? materials[i] : null, profile);
+                if (rules[i].Action == action)
+                {
+                    if (mesh.GetTopology(i) != MeshTopology.Triangles) throw new InvalidOperationException("Conversion requires triangle submeshes.");
+                    triangles[i] = mesh.GetTriangles(i);
+                    selected |= triangles[i].Length > 0;
+                }
+                else triangles[i] = Array.Empty<int>();
+            }
+            if (!selected) return null;
             Vector3[] vertices;
             Vector2[] uvs;
             try
@@ -262,8 +314,54 @@ namespace LocalModels.VoxelBridge
                 Vertices = vertices,
                 Uvs = uvs ?? Array.Empty<Vector2>(),
                 Materials = materials,
-                OwnsMesh = ownsMesh
+                OwnsMesh = ownsMesh,
+                Triangles = triangles, Rules = rules, Transform = transform
             };
+        }
+
+        internal static string ExportRetainedGeometry(UnityEngine.Object source, bool includeInactiveObjects,
+            VoxelConversionProfile profile, string familyFolder)
+        {
+            List<MeshSource> sources = ExtractMeshes(source, includeInactiveObjects, profile, VoxelConversionAction.KeepOriginal);
+            GameObject root = null;
+            try
+            {
+                if (sources.Count == 0) return null;
+                root = new GameObject("Retained Geometry");
+                int index = 0;
+                foreach (var item in sources)
+                for (int submesh = 0; submesh < item.Triangles.Length; submesh++)
+                {
+                    if (item.Triangles[submesh].Length == 0) continue;
+                    Material material = item.Materials != null && submesh < item.Materials.Length ? item.Materials[submesh] : null;
+                    if (material == null || !AssetDatabase.Contains(material))
+                        throw new InvalidOperationException("Keep Original requires persistent material assets.");
+                    var mesh = new Mesh { name = "Retained_" + index, indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
+                    try
+                    {
+                        mesh.CombineMeshes(new[] { new CombineInstance { mesh = item.Mesh, subMeshIndex = submesh, transform = item.Transform } }, true, true);
+                        // CombineMeshes can retain unused vertices from other submeshes. Bounds must describe only drawn triangles.
+                        var bounds = new Bounds(item.Vertices[item.Triangles[submesh][0]], Vector3.zero);
+                        foreach (int vertex in item.Triangles[submesh]) bounds.Encapsulate(item.Vertices[vertex]);
+                        mesh.bounds = bounds;
+                        AssetDatabase.CreateAsset(mesh, familyFolder + $"/Retained_{index}.asset");
+                        var child = new GameObject(item.Mesh.name + "_Submesh" + submesh);
+                        child.transform.SetParent(root.transform, false);
+                        child.AddComponent<MeshFilter>().sharedMesh = mesh;
+                        child.AddComponent<MeshRenderer>().sharedMaterial = material;
+                    }
+                    finally { if (!AssetDatabase.Contains(mesh)) UnityEngine.Object.DestroyImmediate(mesh); }
+                    index++;
+                }
+                string path = familyFolder + "/RetainedGeometry.prefab";
+                if (PrefabUtility.SaveAsPrefabAsset(root, path) == null) throw new InvalidOperationException("Could not save retained geometry.");
+                return AssetDatabase.AssetPathToGUID(path);
+            }
+            finally
+            {
+                if (root != null) UnityEngine.Object.DestroyImmediate(root);
+                foreach (var item in sources) if (item.OwnsMesh) UnityEngine.Object.DestroyImmediate(item.Mesh);
+            }
         }
 
         private static Bounds CalculateBounds(List<MeshSource> sources)
@@ -272,8 +370,10 @@ namespace LocalModels.VoxelBridge
             Bounds bounds = default;
             foreach (MeshSource source in sources)
             {
-                foreach (Vector3 vertex in source.Vertices)
+                foreach (int[] triangles in source.Triangles)
+                foreach (int index in triangles)
                 {
+                    Vector3 vertex = source.Vertices[index];
                     if (!initialized) { bounds = new Bounds(vertex, Vector3.zero); initialized = true; }
                     else bounds.Encapsulate(vertex);
                 }
@@ -286,7 +386,8 @@ namespace LocalModels.VoxelBridge
             VoxelGrid grid, float[] bestDistances,
             Vector3 a, Vector3 b, Vector3 c,
             Vector2 uv0, Vector2 uv1, Vector2 uv2,
-            MaterialSampler sampler, float alphaCutoff)
+            MaterialSampler sampler, float alphaCutoff, VoxelConversionColorMapper mapper,
+            int surfaceId, VoxelConversionProfile profile)
         {
             Vector3 min = Vector3.Min(a, Vector3.Min(b, c));
             Vector3 max = Vector3.Max(a, Vector3.Max(b, c));
@@ -313,7 +414,14 @@ namespace LocalModels.VoxelBridge
                 if (color.a / 255f < alphaCutoff) continue;
                 color.a = 255;
                 grid.Occupied[index] = true;
-                grid.Colors[index] = color;
+                if (mapper != null)
+                {
+                    int resolvedSurface = surfaceId;
+                    if (surfaceId < 0 && profile.detectEmission && sampler.TrySampleEmission(uv, profile.emissionThreshold, out Color32 emission))
+                    { color = emission; resolvedSurface = profile.emissiveSurfaceId; }
+                    grid.SemanticIds[index] = mapper.Map(color, resolvedSurface);
+                }
+                else grid.Colors[index] = color;
                 bestDistances[index] = distance;
             }
         }
@@ -466,7 +574,8 @@ namespace LocalModels.VoxelBridge
                     int next = grid.Index(nx, ny, nz);
                     if (outside[next] || grid.Occupied[next]) continue;
                     grid.Occupied[next] = true;
-                    grid.Colors[next] = grid.Colors[index];
+                    if (grid.IsSemantic) grid.SemanticIds[next] = grid.SemanticIds[index];
+                    else grid.Colors[next] = grid.Colors[index];
                     queue.Enqueue(next);
                 }
             }
@@ -480,7 +589,7 @@ namespace LocalModels.VoxelBridge
 
             public MaterialSamplerCache(VoxelizationSettings settings) { this.settings = settings; }
 
-            public MaterialSampler Get(Material material)
+            public MaterialSampler Get(Material material, bool allowEmission)
             {
                 if (settings.ColorMode == VoxelColorMode.SingleColor)
                     return nullSampler ?? (nullSampler = new MaterialSampler(settings.SingleColor));
@@ -491,6 +600,8 @@ namespace LocalModels.VoxelBridge
                     sampler = new MaterialSampler(material, settings.ColorMode == VoxelColorMode.MaterialAndTexture);
                     cache.Add(material, sampler);
                 }
+                if (allowEmission && settings.ConversionProfile != null && settings.ConversionProfile.detectEmission)
+                    sampler.ConfigureEmission(material);
                 return sampler;
             }
 
@@ -512,15 +623,19 @@ namespace LocalModels.VoxelBridge
             private readonly Vector2 scale = Vector2.one;
             private readonly Vector2 offset = Vector2.zero;
             private readonly TextureWrapMode wrapMode = TextureWrapMode.Repeat;
+            private MaterialSampler emissionSampler;
+            private bool emissionConfigured;
 
             public MaterialSampler(Color32 color) { baseColor = color; }
 
-            public MaterialSampler(Material material, bool includeTexture)
+            public MaterialSampler(Material material, bool includeTexture, bool emission = false)
             {
-                baseColor = material.HasProperty("_BaseColor") ? material.GetColor("_BaseColor") :
+                baseColor = emission ? material.GetColor(material.shader.name == "HDRP/Lit" ? "_EmissiveColor" : "_EmissionColor") :
+                    material.HasProperty("_BaseColor") ? material.GetColor("_BaseColor") :
                     material.HasProperty("_Color") ? material.GetColor("_Color") : Color.white;
                 if (!includeTexture) return;
-                string property = material.HasProperty("_BaseColorMap") ? "_BaseColorMap" :
+                string property = emission ? (material.shader.name == "HDRP/Lit" ? "_EmissiveColorMap" : "_EmissionMap") :
+                    material.HasProperty("_BaseColorMap") ? "_BaseColorMap" :
                     material.HasProperty("_MainTex") ? "_MainTex" : null;
                 if (property == null || !(material.GetTexture(property) is Texture2D texture)) return;
                 scale = material.GetTextureScale(property);
@@ -529,14 +644,14 @@ namespace LocalModels.VoxelBridge
                 width = Mathf.Min(texture.width, 512);
                 height = Mathf.Min(texture.height, 512);
                 RenderTexture temporary = RenderTexture.GetTemporary(width, height, 0, RenderTextureFormat.ARGB32,
-                    RenderTextureReadWrite.Default);
+                    emission ? RenderTextureReadWrite.Linear : RenderTextureReadWrite.Default);
                 RenderTexture previous = RenderTexture.active;
                 Texture2D readable = null;
                 try
                 {
                     Graphics.Blit(texture, temporary);
                     RenderTexture.active = temporary;
-                    readable = new Texture2D(width, height, TextureFormat.RGBA32, false, false);
+                    readable = new Texture2D(width, height, TextureFormat.RGBA32, false, emission);
                     readable.ReadPixels(new Rect(0, 0, width, height), 0, 0, false);
                     readable.Apply(false, false);
                     pixels = readable.GetPixels32();
@@ -549,7 +664,47 @@ namespace LocalModels.VoxelBridge
                 }
             }
 
-            public Color32 Sample(Vector2 uv)
+            public void ConfigureEmission(Material material)
+            {
+                if (emissionConfigured) return;
+                emissionConfigured = true;
+                string shader = material.shader.name;
+                bool hdrp = shader == "HDRP/Lit";
+                bool standard = shader == "Standard" || shader == "Standard (Specular setup)";
+                if (!hdrp && !standard)
+                {
+                    Debug.LogWarning($"Voxel Bridge cannot infer emission from shader '{shader}' on '{material.name}'. Assign an explicit SurfaceID if needed.");
+                    return;
+                }
+                if (standard && !material.IsKeywordEnabled("_EMISSION")) return;
+                Color tint = material.GetColor(hdrp ? "_EmissiveColor" : "_EmissionColor");
+                if (Mathf.Max(tint.r, Mathf.Max(tint.g, tint.b)) <= 0) return;
+                bool sampleMap = !hdrp || material.IsKeywordEnabled("_EMISSIVE_COLOR_MAP");
+                if (hdrp && ((sampleMap && material.GetFloat("_UVEmissive") != 0) || material.GetFloat("_AlbedoAffectEmissive") != 0))
+                {
+                    Debug.LogWarning($"Voxel Bridge requires UV0 emission without Albedo Affect Emissive on '{material.name}'. Assign an explicit SurfaceID.");
+                    return;
+                }
+                emissionSampler = new MaterialSampler(material, sampleMap, true);
+            }
+
+            public bool TrySampleEmission(Vector2 uv, float threshold, out Color32 color)
+            {
+                color = default;
+                if (emissionSampler == null) return false;
+                Color emission = emissionSampler.SampleColor(uv);
+                float peak = Mathf.Max(emission.r, Mathf.Max(emission.g, emission.b));
+                if (!float.IsFinite(peak) || peak < threshold) return false;
+                // Preserve hue while discarding HDR intensity; production intensity belongs to the surface palette.
+                emission /= Mathf.Max(1f, peak);
+                emission.a = 1;
+                color = emission.gamma;
+                return true;
+            }
+
+            public Color32 Sample(Vector2 uv) => SampleColor(uv);
+
+            private Color SampleColor(Vector2 uv)
             {
                 Color sampled = Color.white;
                 if (pixels != null && pixels.Length > 0)
@@ -564,15 +719,21 @@ namespace LocalModels.VoxelBridge
                     Color c01 = pixels[x0 + y1 * width], c11 = pixels[x1 + y1 * width];
                     sampled = Color.Lerp(Color.Lerp(c00, c10, tx), Color.Lerp(c01, c11, tx), ty);
                 }
-                return (Color32)(sampled * baseColor);
+                return sampled * baseColor;
             }
 
             private float Wrap(float value)
             {
-                return wrapMode == TextureWrapMode.Clamp ? Mathf.Clamp01(value) : Mathf.Repeat(value, 1f);
+                return wrapMode switch
+                {
+                    TextureWrapMode.Clamp => Mathf.Clamp01(value),
+                    TextureWrapMode.Mirror => Mathf.PingPong(value, 1f),
+                    TextureWrapMode.MirrorOnce => Mathf.Clamp01(Mathf.Abs(value)),
+                    _ => Mathf.Repeat(value, 1f)
+                };
             }
 
-            public void Dispose() => pixels = null;
+            public void Dispose() { pixels = null; emissionSampler?.Dispose(); emissionSampler = null; }
         }
     }
 }

@@ -43,6 +43,7 @@ namespace LocalModels.VoxelBridge
                 {
                     productionMeshes = true, familyId = Guid.NewGuid().ToString("N"), sourceName = metadata.sourceName,
                     sourceAssetPath = metadata.sourceAssetPath, baseVoxelSize = metadata.voxelSize,
+                    retainedGeometryGuid = metadata.retainedGeometryGuid,
                     initialVoxelMultiplier = 1, chunkCellSize = profile.ChunkCellSize,
                     profileAssetPath = AssetDatabase.GetAssetPath(profile),
                     profileGuid = AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(profile)),
@@ -286,6 +287,7 @@ namespace LocalModels.VoxelBridge
                     if (renderer.sharedMaterial == null) renderer.sharedMaterial = material;
                 }
                 entry.meshGuids = saved.Select(mesh => AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(mesh))).ToArray();
+                VoxelRetainedGeometry.Attach(levelRoot, manifest.retainedGeometryGuid);
                 ConfigureGroup(root, manifest, profile);
                 foreach (Mesh mesh in saved) AssetDatabase.SaveAssetIfDirty(mesh);
                 if (PrefabUtility.SaveAsPrefabAsset(root, manifest.prefabAssetPath) == null) throw new IOException("Could not save the production prefab.");

@@ -36,6 +36,26 @@ Las paletas, el transporte de `ColorID + SurfaceID` y las familias semánticas d
 
 Cada LOD automático se voxeliza desde la malla fuente. Con multiplicadores `1, 2, 4`, las celdas utilizan `base`, `base × 2` y `base × 4`. Todas las rejillas comparten la alineación física.
 
+### Reglas de conversión
+
+Crear `Assets > Create > Voxel Bridge > Conversion Profile` y asignarlo en `Conversion Profile`, dentro de `Physical Models and LODs`. El perfil requiere un `Color Mapping Profile` y una paleta global de superficies guardados como assets. Las reglas se comparten entre la conversión individual y por lotes.
+
+| Acción | Resultado |
+|---|---|
+| `Voxelize` | Convertir el submesh y asignar sus ColorID y SurfaceID |
+| `Ignore` | Excluir la geometría de la rejilla y del resultado |
+| `Keep Original` | Excluir la geometría de la rejilla y conservar una copia estática con sus materiales originales en el prefab |
+
+`Material Rules` identifica los materiales por referencia, no por nombre. Para una excepción por objeto, utilizar `Add Component > Voxel Bridge > Conversion Rule`. La regla habilitada más cercana al renderer tiene prioridad; `Apply To Children` permite heredarlas dentro de la raíz de conversión. `Surface ID = -1` conserva la asignación del material o permite la detección automática.
+
+Las reglas de componentes aplicadas a instancias de prefabs se consideran overrides. Para utilizarlas sin modificar el prefab fuente, seleccionar `Modified Instances > Convert Instance Separately` en lotes. La opción de utilizar el prefab original descarta esos overrides de forma intencional.
+
+Los `.vox` generados con perfil contienen vinculaciones semánticas y pueden pasar directamente a una familia de producción. `Bind Semantic IDs` permite revisar o ajustar esas vinculaciones. Sin perfil, la conversión conserva el flujo RGB y permite reglas de componentes `Ignore` y `Keep Original`, pero no SurfaceID explícitos.
+
+Las ventanas requieren un objeto o submesh identificable. Excluirlas antes del relleno permite conservar el interior si la resolución mantiene una abertura real. La geometría retenida se almacena como `RetainedGeometry.prefab` y meshes en la carpeta de la familia; el sidecar y el manifiesto conservan su GUID. Cada LOD utiliza esa geometría sin simplificar y participa en su transición y descarte. No se copian scripts, colisiones ni animaciones; un renderer skinned se conserva en su pose horneada. Reconvertir la fuente para actualizar la selección de piezas retenidas.
+
+Una fuente debe contener al menos un submesh para voxelizar. `Resolution-Based Conversion` admite exclusión mediante componentes, pero remite al flujo físico para `Keep Original` y SurfaceID. La detección de emisión y sus límites se describen en [MATERIALS.md](MATERIALS.md#superficies-durante-la-conversión).
+
 ### Límites y modelos grandes
 
 La división en chunks ocurre después de calcular y voxelizar la rejilla completa. Evita superar las dimensiones de un modelo interno de MagicaVoxel, pero no elimina el coste de la rejilla global.

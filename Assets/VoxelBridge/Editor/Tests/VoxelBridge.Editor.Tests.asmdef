@@ -2,7 +2,8 @@
   "name": "VoxelBridge.Editor.Tests",
   "rootNamespace": "LocalModels.VoxelBridge.Tests",
   "references": [
-    "VoxelBridge.Editor"
+    "VoxelBridge.Editor",
+    "VoxelBridge.Authoring"
   ],
   "includePlatforms": [
     "Editor"

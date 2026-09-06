@@ -74,6 +74,8 @@ namespace LocalModels.VoxelBridge
                 AppendVector(builder, transform.localPosition);
                 AppendVector(builder, transform.localEulerAngles);
                 AppendVector(builder, transform.localScale);
+                var conversionRule = transform.GetComponent<VoxelConversionRule>();
+                if (conversionRule != null) builder.Append(':').Append(EditorJsonUtility.ToJson(conversionRule));
 
                 MeshFilter filter = transform.GetComponent<MeshFilter>();
                 if (filter != null) AppendAsset(builder, filter.sharedMesh);
@@ -108,6 +110,7 @@ namespace LocalModels.VoxelBridge
                     .Append(',').Append(lodOptions.SingleColor.a);
                 builder.Append('|').Append(lodOptions.AlphaCutoff.ToString("R"));
                 builder.Append('|').Append(lodOptions.GenerateLod0Only);
+                builder.Append('|').Append(VoxelConversionProfile.Fingerprint(lodOptions.ConversionProfile));
                 builder.Append('|').Append(batchOptions == null
                     ? lodOptions.IncludeInactiveObjects
                     : !batchOptions.IgnoreInactiveObjects);
@@ -272,6 +275,9 @@ namespace LocalModels.VoxelBridge
             if (!File.Exists(VoxelLodPipeline.AssetPathToAbsolute(entry.manifestAssetPath)) ||
                 !File.Exists(VoxelLodPipeline.AssetPathToAbsolute(entry.prefabAssetPath)))
                 return false;
+            if (!VoxelLodPipeline.TryReadManifest(entry.manifestAssetPath, out var manifest)) return false;
+            try { VoxelRetainedGeometry.Resolve(manifest.retainedGeometryGuid); }
+            catch (InvalidDataException) { return false; }
             return entry.voxAssetPaths.All(path =>
                 !string.IsNullOrWhiteSpace(path) &&
                 File.Exists(VoxelLodPipeline.AssetPathToAbsolute(path)) &&

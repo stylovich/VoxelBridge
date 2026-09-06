@@ -1,7 +1,7 @@
 {
   "name": "VoxelBridge.Editor",
   "rootNamespace": "LocalModels.VoxelBridge",
-  "references": [],
+  "references": ["VoxelBridge.Authoring"],
   "includePlatforms": [
     "Editor"
   ],

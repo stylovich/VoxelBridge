@@ -148,7 +148,7 @@ namespace LocalModels.VoxelBridge
             batchOptions ??= new VoxelLodBatchOptions();
             string sources = string.Join("|", plans.Select(plan =>
                 $"{plan.Source.GetInstanceID()}:{plan.ConversionSource?.GetInstanceID() ?? 0}:" +
-                $"{plan.ReuseKey?.GetInstanceID() ?? 0}:{plan.Ignored}"));
+                $"{plan.ReuseKey?.GetInstanceID() ?? 0}:{plan.Ignored}:{VoxelConversionProfile.RuleFingerprint(plan.ConversionSource)}"));
             string profileValues = profile == null
                 ? "none"
                 : $"{profile.GetInstanceID()}:{profile.BaseVoxelSize:R}:{profile.Padding}:" +
@@ -159,7 +159,7 @@ namespace LocalModels.VoxelBridge
             string options = lodOptions == null
                 ? "none"
                 : $"{lodOptions.ColorMode}:{lodOptions.AlphaCutoff:R}:{lodOptions.ExportFolder}:" +
-                  $"{includeInactiveObjects}:{lodOptions.GenerateLod0Only}";
+                  $"{includeInactiveObjects}:{lodOptions.GenerateLod0Only}:{VoxelConversionProfile.Fingerprint(lodOptions.ConversionProfile)}";
             return Hash128.Compute(
                 $"{sources}#{profileValues}#{options}#{batchOptions.MaximumEstimatedMemoryBytes}:" +
                 $"{batchOptions.SkipSourcesOverMemoryBudget}:{batchOptions.AdaptInitialVoxelSize}:" +
@@ -198,9 +198,9 @@ namespace LocalModels.VoxelBridge
             {
                 bool includeInactiveObjects = !batchOptions.IgnoreInactiveObjects;
                 bounds = MeshVoxelizer.GetSourceBounds(
-                    conversionSource, includeInactiveObjects);
+                    conversionSource, includeInactiveObjects, lodOptions.ConversionProfile);
                 sourceOverhead = EstimateSourceOverhead(
-                    conversionSource, lodOptions.ColorMode, includeInactiveObjects);
+                    conversionSource, lodOptions.ColorMode, includeInactiveObjects, lodOptions.ConversionProfile);
             }
             catch (Exception exception)
             {
@@ -283,10 +283,11 @@ namespace LocalModels.VoxelBridge
         }
 
         private static long EstimateSourceOverhead(
-            Object source, VoxelColorMode colorMode, bool includeInactiveObjects)
+            Object source, VoxelColorMode colorMode, bool includeInactiveObjects, VoxelConversionProfile profile)
         {
             var meshes = new HashSet<Mesh>();
             var materials = new HashSet<Material>();
+            long retainedBytes = 0;
             if (source is Mesh mesh)
             {
                 meshes.Add(mesh);
@@ -299,11 +300,8 @@ namespace LocalModels.VoxelBridge
                         (!includeInactiveObjects &&
                          !MeshVoxelizer.IsActiveWithinRoot(root.transform, filter.transform)))
                         continue;
-                    meshes.Add(filter.sharedMesh);
                     MeshRenderer renderer = filter.GetComponent<MeshRenderer>();
-                    if (renderer == null) continue;
-                    foreach (Material material in renderer.sharedMaterials)
-                        if (material != null) materials.Add(material);
+                    AddSource(root.transform, filter.transform, filter.sharedMesh, renderer != null ? renderer.sharedMaterials : null);
                 }
                 foreach (SkinnedMeshRenderer renderer in
                          root.GetComponentsInChildren<SkinnedMeshRenderer>(true))
@@ -312,13 +310,25 @@ namespace LocalModels.VoxelBridge
                         (!includeInactiveObjects &&
                          !MeshVoxelizer.IsActiveWithinRoot(root.transform, renderer.transform)))
                         continue;
-                    meshes.Add(renderer.sharedMesh);
-                    foreach (Material material in renderer.sharedMaterials)
-                        if (material != null) materials.Add(material);
+                    AddSource(root.transform, renderer.transform, renderer.sharedMesh, renderer.sharedMaterials);
                 }
             }
 
-            long bytes = 0;
+            void AddSource(Transform root, Transform current, Mesh sourceMesh, Material[] sourceMaterials)
+            {
+                for (int i = 0; i < sourceMesh.subMeshCount; i++)
+                {
+                    Material material = sourceMaterials != null && i < sourceMaterials.Length ? sourceMaterials[i] : null;
+                    var rule = VoxelResolvedRule.Resolve(root, current, material, profile);
+                    if (rule.Action == VoxelConversionAction.Ignore) continue;
+                    meshes.Add(sourceMesh);
+                    if (rule.Action == VoxelConversionAction.KeepOriginal)
+                        retainedBytes = checked(retainedBytes + sourceMesh.vertexCount * 64L + (long)sourceMesh.GetIndexCount(i) * 8L);
+                    if (rule.Action == VoxelConversionAction.Voxelize && material != null) materials.Add(material);
+                }
+            }
+
+            long bytes = retainedBytes;
             foreach (Mesh sourceMesh in meshes)
             {
                 bytes += sourceMesh.vertexCount * 32L;
@@ -327,14 +337,18 @@ namespace LocalModels.VoxelBridge
                     bytes += (long)sourceMesh.GetIndexCount(submesh) * sizeof(int);
             }
 
-            if (colorMode != VoxelColorMode.MaterialAndTexture) return bytes;
             foreach (Material material in materials)
             {
-                Texture texture = material.mainTexture;
-                if (texture == null) continue;
-                int width = Mathf.Min(512, Mathf.Max(1, texture.width));
-                int height = Mathf.Min(512, Mathf.Max(1, texture.height));
-                bytes += (long)width * height * 12L;
+                if (colorMode == VoxelColorMode.MaterialAndTexture) AddTexture(material.mainTexture);
+                if (profile != null && profile.detectEmission && colorMode != VoxelColorMode.SingleColor)
+                {
+                    if (material.HasProperty("_EmissiveColorMap")) AddTexture(material.GetTexture("_EmissiveColorMap"));
+                    else if (material.HasProperty("_EmissionMap")) AddTexture(material.GetTexture("_EmissionMap"));
+                }
+            }
+            void AddTexture(Texture texture)
+            {
+                if (texture != null) bytes += (long)Mathf.Min(512, Mathf.Max(1, texture.width)) * Mathf.Min(512, Mathf.Max(1, texture.height)) * 12L;
             }
             return bytes;
         }

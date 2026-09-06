@@ -63,6 +63,7 @@ namespace LocalModels.VoxelBridge
                 throw new InvalidDataException(error);
             if (metadata.formatVersion != 4)
                 throw new InvalidDataException("Production export requires semantic bindings. Save ColorID and SurfaceID first.");
+            VoxelRetainedGeometry.Resolve(metadata.retainedGeometryGuid);
             VoxelSemanticMesher.ValidateGrid(metadata.unityGridSize, metadata.gridOrigin, metadata.voxelSize);
             string absolutePath = VoxelLodPipeline.AssetPathToAbsolute(voxAssetPath);
             if (new FileInfo(absolutePath).Length > 64L * 1024 * 1024)
@@ -101,6 +102,7 @@ namespace LocalModels.VoxelBridge
                 root = new GameObject(string.IsNullOrWhiteSpace(metadata.sourceName) ? name : metadata.sourceName);
                 root.AddComponent<MeshFilter>().sharedMesh = mesh;
                 root.AddComponent<MeshRenderer>().sharedMaterial = material;
+                VoxelRetainedGeometry.Attach(root.transform, metadata.retainedGeometryGuid);
                 GameObject prefab = PrefabUtility.SaveAsPrefabAsset(root, createdFolder + "/" + name + ".prefab");
                 if (prefab == null) throw new IOException("Could not save the production prefab.");
                 VoxelProductionLink.Store(prefab, voxAssetPath, mesh);

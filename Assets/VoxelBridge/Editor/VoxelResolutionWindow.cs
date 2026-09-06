@@ -96,6 +96,10 @@ namespace LocalModels.VoxelBridge
         {
             try
             {
+                if (source is GameObject root)
+                    foreach (var marker in root.GetComponentsInChildren<VoxelConversionRule>(true))
+                        if (marker.enabled && (marker.Action == VoxelConversionAction.KeepOriginal || marker.SurfaceId >= 0))
+                            throw new InvalidOperationException("Keep Original and SurfaceID rules require Physical Models and LODs with a conversion profile.");
                 VoxelLodPipeline.EnsureAssetFolder(exportFolder);
                 var settings = new VoxelizationSettings
                 {
