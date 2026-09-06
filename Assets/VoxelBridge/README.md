@@ -12,7 +12,7 @@ La generación y la edición son procesos de autoría. Los prefabs contienen mes
 
 El diagnóstico de entidades requiere Entities 1.4 y Entities Graphics 1.4, incluidos en la configuración DOTS del proyecto.
 
-Las paletas, el transporte de `ColorID + SurfaceID` y las familias semánticas de producción se describen en [MATERIALS.md](MATERIALS.md). Los impostores semánticos y la validación DOTS figuran en [ROADMAP.md](ROADMAP.md).
+Las paletas, el transporte de `ColorID + SurfaceID` y las familias semánticas de producción se describen en [MATERIALS.md](MATERIALS.md). [ROADMAP.md](ROADMAP.md) distingue los sistemas disponibles de las fases pendientes: autoría visual de superficies, validación de producción, impostores semánticos y evaluación de HLOD y presupuestos.
 
 ## Herramientas
 
@@ -27,6 +27,8 @@ Las paletas, el transporte de `ColorID + SurfaceID` y las familias semánticas d
 | `Global Palettes` | Administración de las paletas globales y sus LUT |
 | `Sync All Generated VOX Assets` | Resincronización explícita de los `.vox` con sidecar |
 | `Compatibility` | Aplicación controlada de los parches de integración |
+
+`Bind Semantic IDs` edita slots completos. La selección y pintura de superficies sobre voxels individuales todavía no está implementada; su alcance se define en [Autoría visual de superficies en Unity](ROADMAP.md#autoría-visual-de-superficies-en-unity).
 
 ## Combinación de modelos voxel
 
@@ -227,6 +229,8 @@ El baker transfiere la configuración y la referencia al prefab. El sistema inic
 | `Inside / Outside Frustum` | Estimación por `WorldRenderBounds` respecto a la cámara seleccionada; no aplica selección de LOD ni oclusión y no representa draws efectivos. |
 | `Entities Graphics — All Views` | Contadores nativos de rendering y culling para todo el mundo y sus callbacks. No aíslan este spawner, Game View ni una cámara concreta. |
 | `Instance Data GPU Memory` | Memoria gestionada para datos de instancias, subidas y sincronización. No incluye toda la VRAM de texturas y meshes. |
+
+La captura de recursos y frustum conserva el frame indicado hasta pulsar nuevamente `Capture Resource and Frustum Snapshot`; los contadores inferiores de Entities Graphics se actualizan por separado. Una referencia a un material de vidrio en la captura no implica que su LOD esté dibujándose. `Culled = 0%` en el LODGroup evita el descarte por tamaño relativo, pero no desactiva el frustum. Descartar renderers fuera de cámara no libera automáticamente sus recursos residentes.
 
 Para comprobar el descarte, comparar la cámara mirando hacia el grupo y en dirección contraria, con idénticas condiciones. Evitar que Scene View u otras cámaras sigan mostrando el grupo. Los objetos fuera de Game View pueden seguir participando en sombras. Utilizar Profiler o Frame Debugger para confirmar los draws de la cámara y separar los pases de sombras. La captura de recursos sincroniza trabajos de ECS y puede alterar el tiempo de ese frame; no utilizar ese frame como medición de rendimiento.
 

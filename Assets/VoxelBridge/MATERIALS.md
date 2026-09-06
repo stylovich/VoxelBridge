@@ -165,7 +165,7 @@ El flujo RGB utiliza sidecars v3 y la vinculación semántica produce sidecars v
 
 Un volumen semántico almacena el par en 16 bits: ocho para `ColorID` y ocho para `SurfaceID`. Esta representación sustituye al array RGB de la rejilla y evita mantener ambas copias en memoria.
 
-La reducción manual selecciona el par mayoritario dentro de cada nueva celda. Los empates se resuelven por el valor estable menor. La duplicación manual copia el `.vox` y su sidecar sin reinterpretación. Las familias generadas automáticamente desde una malla utilizan RGB hasta vincular sus IDs; la asignación de superficies desde materiales fuente pertenece al desarrollo previsto del mesher.
+La reducción manual selecciona el par mayoritario dentro de cada nueva celda. Los empates se resuelven por el valor estable menor. La duplicación manual copia el `.vox` y su sidecar sin reinterpretación. La conversión física con `Conversion Profile` asigna los IDs desde las muestras y reglas de materiales antes de exportar; sin ese perfil, la ruta RGB requiere vincularlos posteriormente. `All Profile Levels` convierte cada nivel desde la malla fuente y no hereda retoques del LOD0.
 
 Voxel Bridge lee los índices directamente del binario `.vox`. El mesh y el atlas generados por Voxel Importer se utilizan como previsualización, no como fuente semántica, porque el importador puede compactar su paleta interna.
 
@@ -174,6 +174,12 @@ Los chunks `NOTE` y `MATL` se conservan, pero no determinan los IDs. Cualquier `
 La edición admite pintar, añadir y eliminar voxels dentro de las cajas de los chunks exportados. Mover, rotar, reflejar, redimensionar o eliminar esas cajas requiere regenerar el volumen y sus metadatos. Las animaciones, las instancias de modelos internos y los chunks ocupados ocultos se rechazan. Estas validaciones también se aplican a la reducción manual de LODs y evitan reconstruir geometría desalineada o descartar contenido silenciosamente.
 
 El mismo RGB puede ocupar dos slots locales cuando necesita superficies diferentes. Voxel Bridge conserva esos slots mientras controla la escritura. MagicaVoxel puede reordenar slots visualmente idénticos al volver a guardar; este caso no se considera certificado hasta completar una prueba controlada de round-trip.
+
+## Autoría visual de superficies planificada
+
+La asignación disponible en `Semantic Bindings` afecta a todos los voxels que utilizan un slot. Para cambiar la superficie de una parte de ellos conservando el mismo ColorID, se planifica `Surface Painter` dentro de Unity. Esta herramienta todavía no está implementada y no figura entre los menús disponibles.
+
+El [diseño de autoría visual](ROADMAP.md#autoría-visual-de-superficies-en-unity) define selección visible, previsualización, historial local, escritura por celda y recuperación. Reutiliza el `.vox`, el sidecar y el mesher existentes. La superficie pertenece al voxel completo, no a cada cara. Guardar no regenerará LODs descendientes ni modificará definiciones PBR globales. El intercambio externo de slots con RGB idéntico requiere certificación específica antes de considerarse seguro.
 
 ## Mesh semántico LOD0
 
@@ -227,7 +233,7 @@ Los prefabs generados sólo requieren sus mallas, material, shader y texturas en
 - Una sola malla de salida, aunque la entrada contenga varios modelos internos. No sustituye al flujo de chunks y familias para edificios grandes.
 - Máximo de 8.000.000 de celdas, archivo `.vox` de 64 MiB y 500.000 quads. Estos límites acotan el trabajo de la exportación independiente; no son una garantía del consumo total de Unity. No modifican los presupuestos de voxelización ni reducen automáticamente la resolución.
 - Sin generación de LODGroup, colliders, impostores, UV de lightmap o actualización automática tras editar el `.vox`.
-- DOTS Instancing está habilitado en el graph; la validación de Entities Graphics, HTrace e impostores permanece pendiente para este shader de producción.
+- DOTS Instancing está habilitado en el graph y existe un flujo de prueba con Entities Graphics. La comprobación funcional inicial en subescenas no certifica todas las configuraciones de iluminación, rendimiento o plataforma. El horneado de impostores semánticos requiere una captura compatible.
 
 ## Familias semánticas de producción
 
@@ -274,4 +280,4 @@ La herramienta comprueba:
 - sidecar semántico incompleto o con versión desconocida;
 - `IMAP` no compatible.
 
-Las fases posteriores deben añadir validación de vertex streams, HDRP, HTrace, SRP Batcher, Entities Graphics y Amplify Impostors.
+Las pruebas del mesher cubren los canales de IDs y las fronteras semánticas; las pruebas de producción y DOTS cubren referencias, baking e instanciación. La comprobación visual y de rendimiento de HDRP, HTrace, SRP Batcher y Entities Graphics debe ampliarse a escenas y plataformas representativas. La captura de Amplify Impostors y el round-trip externo con RGB duplicados siguen pendientes; consultar [ROADMAP.md](ROADMAP.md).

@@ -6,16 +6,88 @@ Voxel Bridge debe producir familias voxel físicamente coherentes y editables, i
 
 ## Orden de trabajo recomendado
 
-1. Validar la conversión individual y por lotes, los LODs y la ruta opcional de Amplify Impostors.
-2. Implementar las paletas globales de color y superficie, sus perfiles de selección, sus LUT y la validación de IDs estables.
-3. Incorporar `ColorID` y `SurfaceID` al volumen voxel y al intercambio con MagicaVoxel mediante metadata versionada.
-4. Incorporar los IDs al generador de meshes de producción y adaptar el shader compartido y el horneado de Amplify Impostors al muestreo de ambas paletas.
-5. Validar visualmente la combinación manual de familias voxel para grupos estáticos y espacialmente compactos.
-6. Validar la conversión a entidades, las subescenas, los LODs y el culling con el flujo DOTS previsto para producción.
-7. Implementar el análisis de visibilidad y presupuesto por zonas sobre la estructura real del mapa.
+1. Mantener la conversión individual y por lotes, las paletas globales, el transporte semántico y los prefabs de producción como base del flujo.
+2. Implementar la autoría visual de `SurfaceID` en Unity, con selección, previsualización, Undo y guardado seguro de la fuente.
+3. Verificar el intercambio con MagicaVoxel y la derivación de LODs después de editar superficies. Incorporar selección asistida únicamente cuando los casos artísticos la justifiquen.
+4. Completar las validaciones funcionales pendientes de materiales especiales, iluminación y carga/descarga de subescenas sobre assets representativos.
+5. Retomar las mediciones de rendimiento por LOD, sombras, transparencias, culling y streaming cuando exista una distribución representativa del mapa.
+6. Adaptar el horneado de impostores a las paletas semánticas antes de evaluar su calidad y coste. Comparar agrupación manual, HLOD e impostores sin imponer una técnica a todos los assets.
+7. Implementar el análisis de visibilidad y presupuesto por zonas, apoyado en las mediciones anteriores.
 8. Crear y hornear el plan final de impostores cuando la distribución del mapa y los materiales sean estables.
 
-La representación técnica de materiales debe estar disponible antes de combinar familias. De este modo, la combinación opera sobre IDs globales y no requiere reconstruirse al abandonar las paletas locales. La consolidación artística de las entradas puede continuar después, pero debe estabilizarse antes de validar DOTS y hornear impostores definitivos. Un cambio de shader, paleta o material compartido puede requerir regenerar los atlas.
+La consolidación artística de las paletas puede continuar durante la validación funcional de DOTS. Las paletas y los materiales deben estabilizarse antes de producir atlas definitivos: un cambio de shader, paleta o material compartido puede requerir regenerarlos.
+
+### Estado por bloque
+
+| Bloque | Estado y alcance pendiente |
+|---|---|
+| Conversión y reglas | Disponible: flujo físico individual y por lotes, exclusión, `Keep Original` y detección de emisión con superficie de respaldo. |
+| Materiales semánticos | Disponible: paletas, perfiles cromáticos, bindings por slot, LUT y mesher opaco compartido. |
+| Familias y combinación | Disponible: edición de fuentes, reconstrucción, derivación de LODs y unión exacta de conjuntos compactos. |
+| DOTS y subescenas | Integración y diagnóstico disponibles; validación funcional inicial de instancias, recursos compartidos y frustum. No equivale a certificar rendimiento, sombras, oclusión o streaming de producción. |
+| Autoría visual de superficies | Diseño definido en esta hoja de ruta; selección y pintura por voxel pendientes de implementación. |
+| Intercambio de RGB duplicados | Pendiente de certificar en MagicaVoxel; la escritura y lectura controladas por Voxel Bridge conservan los pares. |
+| Impostores semánticos | Horneado bloqueado hasta adaptar la captura a las LUT y los canales de IDs. La ruta RGB existente no demuestra compatibilidad semántica. |
+| Rendimiento, HLOD y presupuesto | Fase diferida; requiere escenas, cámaras y plataformas objetivo representativas. |
+
+## Autoría visual de superficies en Unity
+
+### Alcance de la primera versión
+
+La herramienta propuesta, `Surface Painter`, será una extensión de Editor para asignar superficies sobre una fuente semántica existente. No sustituye a MagicaVoxel para modelado ni a `Semantic Bindings` para asignaciones de slots completos. No requiere paquetes nuevos ni cambios en el shader de producción.
+
+- Entrada desde el Inspector del prefab de producción mediante `Edit Surfaces`, indicando fuente y LOD. LOD0 será la entrada recomendada; seleccionar otro nivel requerirá una elección explícita.
+- Una sola fuente por sesión, identificada por GUID y fijada aunque cambie la selección de la escena. Los prefabs combinados se editan sobre su propia fuente, no sobre los modelos utilizados para construirlos.
+- Vista aislada del volumen con órbita, zoom, encuadre y selección de voxels visibles mediante clic o trazo de selección. Añadir y quitar celdas de la selección antes de aplicar el cambio.
+- Selector de `SurfaceID` con ID, nombre y propiedades PBR de referencia. `Apply Surface` modifica únicamente la superficie de las celdas seleccionadas; no edita la definición global, el ColorID, la ocupación, la escala ni el pivote.
+- Previsualización con el material semántico y resaltado de selección. Una vista de diagnóstico por SurfaceID podrá distinguir superficies con apariencia similar sin modificar la paleta de color.
+- `Undo` y `Redo` para cambios pendientes; `Save Source` para persistirlos y `Discard Changes` para descartarlos. La reconstrucción del prefab continúa siendo explícita.
+
+La unidad de asignación es el voxel completo, no una cara: todas sus caras expuestas utilizan la misma superficie. La selección inicial no atraviesa geometría ni incluye automáticamente voxels interiores. Las piezas `Keep Original` no pertenecen al volumen editable y deben identificarse como excluidas. No se admite edición en Play Mode.
+
+### Integración y datos
+
+| Sistema existente | Uso previsto |
+|---|---|
+| `VoxelProductionLink` y `VoxelProductionFamily` | Resolver fuente y LOD por GUID y mantener los avisos de reconstrucción o derivación pendiente. |
+| `VoxelVolumeReader` y `VoxelSceneGraph` | Leer la rejilla y resolver la correspondencia espacial de chunks; no asumir que el índice interno de MagicaVoxel permanece estable. |
+| `VoxelGrid` y `VoxelSemanticEncoding` | Editar el par de 16 bits conservando los ocho bits de ColorID. |
+| `VoxelSemanticVoxDocument` y `VoxelSemanticTransport` | Extender la escritura de slots completos con una operación por celda y reutilizar la validación de IDs y metadatos. |
+| `VoxelSemanticMesher` y exportadores de producción | Previsualizar y reconstruir sin introducir otro mesher ni modificar assets durante un trazo. |
+
+El formato previsto continúa siendo sidecar v4 con bloque semántico v1. Si un subconjunto de voxels azules pasa de `Default` a `Aluminum`, la escritura utiliza otro slot local para el par azul + aluminio, mientras conserva el ColorID global. Un par existente reutiliza su slot; un par nuevo requiere un slot libre. No se modifica la superficie de todos los voxels que compartían el slot original.
+
+El escritor debe preservar posiciones, ocupación, scene graph y chunks ajenos a la edición. La correspondencia celda → registro `XYZI` debe proceder de la misma resolución espacial utilizada por el lector. Los slots de pares sin cambios deben conservarse cuando sea posible; no se debe reutilizar la ordenación por frecuencia del cuantizador para renumerar toda la paleta en cada guardado. Los chunks `MATL` y `NOTE` no definen la identidad semántica ni requieren nuevas propiedades para este editor.
+
+La previsualización debe utilizar recursos temporales aislados, sin crear GameObjects o colliders por voxel ni modificar materiales compartidos. La selección se calcula sobre la rejilla. Reconstruir la previsualización al confirmar una asignación, no por cada evento del ratón. Mantener límites explícitos de selección, historial y malla; no ampliar los límites actuales de lectura y meshing como parte de esta fase.
+
+### Guardado, Undo y recuperación
+
+1. Cargar una fuente válida, sus paletas y las huellas del `.vox` y sidecar. Bloquear fuentes RGB sin bindings, IDs desconocidos, superficies no opacas, `IMAP` y correspondencias espaciales ambiguas.
+2. Mantener cambios locales y un historial acotado de diferencias por operación. Evitar una copia completa de millones de celdas por cada trazo. Una operación sin cambios no crea entradas de historial.
+3. Antes de guardar, comprobar que fuente, sidecar y paletas no hayan cambiado externamente. Un conflicto exige recargar o resolver las asignaciones; no se intenta fusionar automáticamente con un guardado de MagicaVoxel o de `Semantic Bindings`.
+4. Validar el límite de 255 pares utilizados y releer los bytes candidatos para comprobar geometría, ColorID y SurfaceID antes de reemplazar archivos. El exceso de pares debe dejar intactos fuente y edición pendiente, sin aproximar superficies ni colores.
+5. Guardar `.vox` y sidecar como una operación recuperable, conservando sus `.meta`. Dos reemplazos de archivo no constituyen una transacción conjunta: se requieren copias de recuperación y detección de una escritura interrumpida antes de permitir importación o reconstrucción. Un fallo recuperable restaura ambos originales.
+6. Después de guardar, establecer una nueva base de edición y reiniciar el historial local. Undo no debe aparentar revertir archivos ya guardados. `Rebuild` actualiza únicamente el nivel editado; un fallo de meshing deja la fuente guardada y la malla anterior con su aviso de desactualización.
+
+Cerrar la ventana, cambiar de fuente o entrar en Play Mode debe ofrecer guardar, descartar o cancelar cuando sea posible. Una recarga de scripts debe conservar un borrador recuperable y verificar sus huellas antes de restaurarlo; no debe guardar cambios en la fuente ni descartarlos silenciosamente. El borrador es estado local del Editor, no una nueva fuente de verdad del modelo.
+
+### Relación con MagicaVoxel y LODs
+
+El flujo recomendado será: preparar geometría y colores de LOD0 en MagicaVoxel, asignar superficies en Unity, guardar, reconstruir y derivar los LODs inferiores. Las ediciones en MagicaVoxel posteriores a la pintura requieren conservar slots y sidecar. Dos slots con RGB idéntico pueden intercambiarse sin que una comparación de RGBA detecte el cambio; las huellas locales no certifican por sí solas ese intercambio.
+
+La validación externa debe guardar y reabrir un fixture con el mismo ColorID y superficies distintas, varios chunks y un cambio controlado de color u ocupación. Comparar los pares por coordenada, no sólo el aspecto visual. Hasta completar esa prueba, el flujo de ida y vuelta con RGB duplicados debe mostrar una advertencia y no presentarse como certificado. Si falla, evaluar una representación por voxel con reconciliación explícita antes de ampliar el formato; no introducirla preventivamente.
+
+Los descendientes existentes nunca se sobrescriben al guardar una superficie. `Rebuild` no transmite cambios entre niveles. Crear niveles mediante reducción o duplicación sí parte de los pares del padre; actualizar un descendiente existente requiere `Regenerate`, con la advertencia de pérdida de sus retoques. La reducción mayoritaria puede eliminar regiones pequeñas, incluidos emisivos; conservar su semántica no garantiza conservar todos sus detalles.
+
+### Entregas y criterios de aceptación
+
+1. **Edición y transporte por celda:** mismo ColorID con dos superficies, cambios parciales de un slot, varios chunks, reutilización de pares, límite de 255, no-op y preservación de geometría/metadatos.
+2. **Interfaz mínima:** selección visible, aplicación, previsualización, Undo/Redo, cancelación, cambio de fuente, recarga de scripts y liberación de recursos temporales.
+3. **Integración de autoría:** guardado y recuperación ante fallo entre archivos, rechazo de conflictos externos, reconstrucción del prefab manteniendo referencias y avisos de LODs derivados. Prueba de round-trip real con MagicaVoxel antes de certificarlo.
+4. **Asistencia posterior:** selección por ColorID, SurfaceID o regiones conectadas, según necesidad artística. La clasificación como LED, neón u otro material sigue siendo explícita. La intensidad emisiva original no se conserva como atributo por voxel en el formato actual; agrupar por esa intensidad exigiría ampliar su captura y transporte.
+
+Quedan fuera de esta primera versión la modificación de geometría, pintura por cara, selección a través del volumen, edición de vidrio/follaje voxel, un editor general de materiales, clasificación automática por intensidad y reemplazar MagicaVoxel, Blender o Vengi.
 
 ## Combinación manual de familias voxel
 
@@ -131,7 +203,7 @@ Las reglas `Voxelize`, `Ignore` y `Keep Original` se aplican antes del cálculo 
 
 La reducción manual de un volumen semántico selecciona la combinación mayoritaria con desempate estable. Duplicar un LOD conserva la tabla de slots sin reinterpretarla. El alcance de detección de emisión y la conservación de piezas se describen en [MATERIALS.md](MATERIALS.md#superficies-durante-la-conversión) y [README.md](README.md#reglas-de-conversión).
 
-La pintura visual de SurfaceID por voxel requiere una fase de autoría específica. La selección entre una herramienta de Unity, un editor voxel adaptado o una integración de Blender permanece pendiente. La agrupación asistida podrá proponer conjuntos según color, intensidad y separación espacial; el equipo artístico asignará el tipo de superficie, sin inferir LED o neón a partir de la intensidad. La conversión utiliza una superficie emisiva de respaldo configurable, inicialmente Neon. El almacenamiento de los IDs debe conservar independencia respecto al editor elegido. La emisión con color independiente del albedo y los shaders voxel transparentes quedan fuera de la conversión opaca inicial.
+La pintura visual de SurfaceID se planifica como una herramienta acotada dentro de Unity; su contrato y etapas se describen en [Autoría visual de superficies en Unity](#autoría-visual-de-superficies-en-unity). La conversión utiliza una superficie emisiva de respaldo configurable, inicialmente Neon. La emisión con color independiente del albedo y los shaders voxel transparentes quedan fuera de la conversión opaca inicial.
 
 ### Mesh de producción
 
@@ -178,6 +250,14 @@ La validación DOTS debe realizarse primero con los impostores desactivados para
 - culling por cámara y las opciones de oclusión disponibles para la configuración final del proyecto.
 
 El tamaño máximo recomendado para una familia combinada debe derivarse de estos resultados y de la partición espacial de las subescenas.
+
+### Rendimiento diferido, HLOD y streaming
+
+La comprobación funcional de materiales y descarte por frustum no certifica un presupuesto de producción. Retomar las mediciones con la misma cámara, resolución, iluminación y distribución, registrando tiempos CPU/GPU por frame, LOD activo, draws y recursos residentes. Separar el coste de geometría opaca, piezas transparentes, sombras, HTrace y APV; incluir un Player de la plataforma objetivo además del Editor.
+
+La combinación manual actual produce un único asset y un `LODGroup`; no constituye un sistema HLOD. Un HLOD permitiría sustituir varios objetos por una representación conjunta distante y recuperar las representaciones originales al acercarse. Antes de implementarlo, definir propiedad de los grupos, límites de streaming, transiciones, exclusión mutua entre originales y sustituto, y tratamiento de piezas transparentes. Comparar el beneficio con LODs convencionales y agrupaciones compactas, sin combinar automáticamente escenas completas.
+
+El frustum descarta trabajo de render, pero no descarga entidades, meshes ni atlas. Medir por separado la carga/descarga de subescenas y su residencia. La oclusión requiere una evaluación independiente; un objeto detrás de otro no queda cubierto por la validación de frustum. La adaptación del horneado semántico precede a cualquier comparación de impostores o HLOD que los utilice.
 
 ## Análisis de visibilidad y presupuesto
 
