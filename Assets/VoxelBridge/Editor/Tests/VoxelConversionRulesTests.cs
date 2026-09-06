@@ -32,6 +32,11 @@ namespace LocalModels.VoxelBridge.Tests
             var surfaces = ScriptableObject.CreateInstance<VoxelSurfacePalette>();
             AssetDatabase.CreateAsset(colors, folder + "/Colors.asset");
             AssetDatabase.CreateAsset(surfaces, folder + "/Surfaces.asset");
+            Assert.That(VoxelPaletteLutGenerator.TryRebuild(colors, out _, out string error), Is.True, error);
+            Assert.That(VoxelPaletteLutGenerator.TryRebuild(surfaces, out _, out error), Is.True, error);
+            sharedMaterial = VoxelProductionExporter.SharedMaterialFolder + "/VoxelWorld_" + Hash128.Compute(
+                AssetDatabase.AssetPathToGUID(folder + "/Colors.asset") + ":" +
+                AssetDatabase.AssetPathToGUID(folder + "/Surfaces.asset")) + ".mat";
             var mapping = ScriptableObject.CreateInstance<VoxelColorMappingProfile>();
             mapping.ConfigureForTests(colors, 100, 100);
             AssetDatabase.CreateAsset(mapping, folder + "/Mapping.asset");
@@ -232,6 +237,8 @@ namespace LocalModels.VoxelBridge.Tests
             {
                 Assert.That(VoxelImporterIntegration.TryLoadMetadata(item.BuildResult.VoxAssetPaths.Single(), out var metadata, out string error), Is.True, error);
                 Assert.That(metadata.formatVersion, Is.EqualTo(4));
+                Assert.That(VoxelProductionFamily.Load(item.BuildResult.ManifestAssetPath).productionMeshes, Is.True);
+                Assert.That(VoxelProductionLink.HasLink(item.BuildResult.PrefabAssetPath), Is.True);
             }
             SetRule(first, VoxelConversionAction.Voxelize, 7);
             batch.ModifiedPrefabHandling = VoxelPrefabOverrideHandling.ConvertInstanceSeparately;
@@ -255,9 +262,11 @@ namespace LocalModels.VoxelBridge.Tests
             Assert.That(metadata.formatVersion, Is.EqualTo(4));
             Assert.That(metadata.semantic.slots.All(s => s.surfaceId == 7), Is.True);
             Assert.That(metadata.retainedGeometryGuid, Is.Not.Null.And.Not.Empty);
-            var preview = AssetDatabase.LoadAssetAtPath<GameObject>(build.PrefabAssetPath);
-            Assert.That(preview.GetComponentInChildren<MeshRenderer>().GetComponents<VoxelConversionRule>(), Is.Empty);
+            var production = AssetDatabase.LoadAssetAtPath<GameObject>(build.PrefabAssetPath);
+            Assert.That(production.GetComponentInChildren<MeshRenderer>().GetComponents<VoxelConversionRule>(), Is.Empty);
             string manifestPath = VoxelProductionFamily.Create(vox, style, folder + "/Production");
+            Assert.That(manifestPath, Is.EqualTo(build.ManifestAssetPath));
+            Assert.That(AssetDatabase.IsValidFolder(folder + "/Production"), Is.False, "The same source must not create a second family.");
             var manifest = VoxelProductionFamily.Load(manifestPath);
             var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(manifest.prefabAssetPath);
             sharedMaterial = AssetDatabase.GetAssetPath(prefab.transform.Find("LOD0").GetComponentInChildren<MeshRenderer>().sharedMaterial);
@@ -275,6 +284,153 @@ namespace LocalModels.VoxelBridge.Tests
             Assert.That(VoxelImporterIntegration.TryLoadMetadata(VoxelProductionFamily.SourcePath(manifest.lods[1]), out var child, out error), Is.True, error);
             Assert.That(child.semantic.slots.All(s => s.surfaceId == 7), Is.True);
             Assert.That(child.retainedGeometryGuid, Is.EqualTo(metadata.retainedGeometryGuid));
+        }
+
+        [Test]
+        public void AutomaticProduction_AllLevelsKeepEmissionLinksScaleAndIndependentSources()
+        {
+            Cube(Vector3.zero, body);
+            conversion.detectEmission = true;
+            body.SetColor("_EmissiveColor", Color.white * 50);
+            var build = VoxelLodPipeline.GenerateAutomatic(root, style, new VoxelLodBuildOptions
+            { ExportFolder = folder, ColorMode = VoxelColorMode.MaterialOnly, ConversionProfile = conversion }, initialVoxelMultiplier: 2);
+            var manifest = VoxelProductionFamily.Load(build.ManifestAssetPath);
+            Assert.That(manifest.lods.Length, Is.EqualTo(style.LodCount));
+            Assert.That(manifest.initialVoxelMultiplier, Is.EqualTo(2));
+            Assert.That(manifest.prefabAssetPath, Is.EqualTo(build.PrefabAssetPath));
+            Assert.That(VoxelProductionLink.Load(build.PrefabAssetPath).manifestGuid,
+                Is.EqualTo(AssetDatabase.AssetPathToGUID(build.ManifestAssetPath)));
+            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(build.PrefabAssetPath);
+            Assert.That(prefab.GetComponent<LODGroup>().fadeMode, Is.EqualTo(UnityEngine.LODFadeMode.None));
+            var filters = prefab.GetComponentsInChildren<MeshFilter>();
+            Assert.That(filters.All(f => f.sharedMesh.uv4.All(uv => uv.x == 13)), Is.True);
+            Assert.That(filters.All(f => AssetDatabase.GetAssetPath(f.sharedMesh).EndsWith(".asset")), Is.True);
+            Assert.That(prefab.GetComponentsInChildren<MeshRenderer>().Select(r => r.sharedMaterial).Distinct().Count(), Is.EqualTo(1));
+            Assert.That(prefab.GetComponentInChildren<MeshRenderer>().sharedMaterial.shader,
+                Is.EqualTo(AssetDatabase.LoadAssetAtPath<Shader>(VoxelProductionExporter.ShaderPath)));
+            foreach (var entry in manifest.lods)
+                Assert.That(VoxelProductionFamily.IsDerivedStale(manifest, entry.lodIndex), Is.False);
+            string firstHash = VoxelProductionFamily.SourceHash(manifest.lods[0]);
+            string[] meshGuids = manifest.lods.SelectMany(e => e.meshGuids).ToArray();
+            VoxelProductionFamily.RebuildAll(build.ManifestAssetPath);
+            manifest = VoxelProductionFamily.Load(build.ManifestAssetPath);
+            Assert.That(manifest.lods.SelectMany(e => e.meshGuids), Is.EqualTo(meshGuids));
+            Assert.That(VoxelProductionFamily.SourceHash(manifest.lods[0]), Is.EqualTo(firstHash));
+            VoxelProductionFamily.DeriveLevel(build.ManifestAssetPath, 1, VoxelLodGenerationMode.ReduceParent, true);
+            manifest = VoxelProductionFamily.Load(build.ManifestAssetPath);
+            Assert.That(manifest.lods[1].multiplier, Is.EqualTo(2 * style.GetLodMultiplier(1)));
+            Assert.That(VoxelImporterIntegration.TryLoadMetadata(VoxelProductionFamily.SourcePath(manifest.lods[1]), out var reduced, out string error), Is.True, error);
+            Assert.That(reduced.voxelSize, Is.EqualTo(style.BaseVoxelSize * 2 * style.GetLodMultiplier(1)).Within(.00001));
+            Assert.That(VoxelProductionFamily.IsDerivedStale(manifest, 2), Is.False, "Source-mesh levels are independent of edited predecessors.");
+        }
+
+        [Test]
+        public void ProductionMeshingCancellation_DiscardsIncompleteFamily()
+        {
+            Cube(Vector3.zero, body);
+            string[] before = AssetDatabase.GetSubFolders(folder);
+            int calls = 0;
+            Assert.Throws<OperationCanceledException>(() => VoxelLodPipeline.GenerateAutomatic(root, style,
+                new VoxelLodBuildOptions { ExportFolder = folder, ConversionProfile = conversion },
+                (progress, message) => message == "Building production meshes" && ++calls > 2));
+            Assert.That(AssetDatabase.GetSubFolders(folder), Is.EquivalentTo(before));
+        }
+
+        [Test]
+        public void ProductionPreflight_AdaptsToMesherCellLimitBeforeVoxelizing()
+        {
+            Cube(Vector3.zero, body).transform.localScale = Vector3.one * 30;
+            var options = new VoxelLodBuildOptions { ExportFolder = folder, ConversionProfile = conversion, GenerateLod0Only = true };
+            var limits = new VoxelLodBatchOptions { AdaptInitialVoxelSize = false, MaximumEstimatedMemoryBytes = 0 };
+            var estimate = VoxelLodBatchAnalyzer.AnalyzeSingle(root, style, options, limits);
+            Assert.That(estimate.IsValid, Is.False);
+            limits.AdaptInitialVoxelSize = true; limits.MaximumInitialLodIndex = 1;
+            estimate = VoxelLodBatchAnalyzer.AnalyzeSingle(root, style, options, limits);
+            Assert.That(estimate.IsValid, Is.True, estimate.Error);
+            Assert.That(estimate.InitialVoxelMultiplier, Is.EqualTo(2));
+            Assert.That(estimate.LodPlans.All(p => p.CellCount <= VoxelSemanticMesher.MaximumCells), Is.True);
+        }
+
+        [Test]
+        public void ConversionWithoutProfile_PreservesRgbPreviewOutput()
+        {
+            Cube(Vector3.zero, body);
+            var build = VoxelLodPipeline.GenerateAutomatic(root, style,
+                new VoxelLodBuildOptions { ExportFolder = folder, GenerateLod0Only = true });
+            Assert.That(VoxelProductionLink.HasLink(build.PrefabAssetPath), Is.False);
+            Assert.That(VoxelLodPipeline.TryReadManifest(build.ManifestAssetPath, out var manifest), Is.True);
+            Assert.That(manifest.productionMeshes, Is.False);
+            Assert.That(VoxelImporterIntegration.TryLoadMetadata(build.VoxAssetPaths[0], out var metadata, out string error), Is.True, error);
+            Assert.That(metadata.formatVersion, Is.EqualTo(3));
+        }
+
+        [Test]
+        public void ProductionCheckpoint_RejectsMissingChunkMeshes()
+        {
+            Cube(Vector3.zero, body);
+            var options = new VoxelLodBuildOptions { ExportFolder = folder, ConversionProfile = conversion, GenerateLod0Only = true };
+            var batch = new VoxelLodBatchOptions();
+            var plans = VoxelLodPipeline.GetAutomaticBatchPlans(root, batch);
+            string signature = VoxelLodBatchIdentity.CreateBatchSignature(plans, style, options, batch);
+            try
+            {
+                var build = VoxelLodPipeline.GenerateAutomatic(plans[0].ConversionSource, style, options);
+                VoxelLodBatchCheckpointStore.Record(signature, plans[0], build);
+                Assert.That(VoxelLodBatchCheckpointStore.LoadOutcomes(signature, plans).Count, Is.EqualTo(1));
+                var manifest = VoxelProductionFamily.Load(build.ManifestAssetPath);
+                AssetDatabase.DeleteAsset(AssetDatabase.GUIDToAssetPath(manifest.lods[0].meshGuids[0]));
+                Assert.That(VoxelLodBatchCheckpointStore.LoadOutcomes(signature, plans), Is.Empty);
+            }
+            finally { VoxelLodBatchCheckpointStore.Reset(signature); }
+        }
+
+        [Test]
+        public void ProductionPlacement_UsesLinkedPrefabAndSupportsUndo()
+        {
+            Cube(Vector3.zero, body);
+            var build = VoxelLodPipeline.GenerateAutomatic(root, style,
+                new VoxelLodBuildOptions { ExportFolder = folder, ConversionProfile = conversion, GenerateLod0Only = true });
+            SceneManager.MoveGameObjectToScene(root, SceneManager.GetActiveScene());
+            GameObject instance = null;
+            try
+            {
+                root.transform.position = new Vector3(2, 0, 3);
+                var placed = VoxelLodBatchScenePlacement.PlaceSingle(root, build, style, true);
+                instance = placed.Instance;
+                Assert.That(root.activeSelf, Is.False);
+                Assert.That(PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(instance), Is.EqualTo(build.PrefabAssetPath));
+                Assert.That(VoxelProductionLink.HasLink(build.PrefabAssetPath), Is.True);
+                Assert.That(instance.transform.position, Is.EqualTo(root.transform.position));
+                Assert.That(instance.GetComponentInChildren<MeshRenderer>().sharedMaterial.shader,
+                    Is.EqualTo(AssetDatabase.LoadAssetAtPath<Shader>(VoxelProductionExporter.ShaderPath)));
+                Undo.FlushUndoRecordObjects();
+                Undo.PerformUndo();
+                Assert.That(instance == null, Is.True);
+                Assert.That(root.activeSelf, Is.True);
+            }
+            finally
+            {
+                if (instance != null) Object.DestroyImmediate(instance);
+                SceneManager.MoveGameObjectToScene(root, scene);
+            }
+        }
+
+        [Test]
+        public void SemanticImpostors_RejectBeforeCreatingBakeAssets()
+        {
+            string manifestPath = folder + "/Source.voxset.json";
+            VoxelLodPipeline.SaveManifest(manifestPath, new VoxelLodSetManifest
+            { productionMeshes = true, sourceName = "Source", lods = new[] { new VoxelLodEntry { lodIndex = 0 } } });
+            var profile = ScriptableObject.CreateInstance<VoxelImpostorProfile>();
+            try
+            {
+                Assert.That(AmplifyImpostorIntegration.FindPendingManifestAssetPaths(folder), Is.Empty);
+                var error = Assert.Throws<InvalidOperationException>(() =>
+                    AmplifyImpostorIntegration.GenerateOrUpdate(manifestPath, profile, VoxelImpostorQuality.Medium));
+                StringAssert.Contains("palette-aware bake shader", error.Message);
+                Assert.That(AssetDatabase.IsValidFolder(folder + "/Impostor"), Is.False);
+            }
+            finally { Object.DestroyImmediate(profile); }
         }
     }
 }

@@ -469,6 +469,9 @@ namespace LocalModels.VoxelBridge
             if (maximumInitialVoxelMultiplier == 0)
                 maximumInitialVoxelMultiplier = initialVoxelMultiplier;
             options.ConversionProfile?.ValidateForExport();
+            if (options.ConversionProfile != null)
+                VoxelProductionExporter.ValidatePalettes(options.ConversionProfile.colorMapping.ColorPalette,
+                    options.ConversionProfile.surfacePalette);
             if (!IsPowerOfTwo(maximumInitialVoxelMultiplier) ||
                 maximumInitialVoxelMultiplier < initialVoxelMultiplier)
                 throw new ArgumentOutOfRangeException(nameof(maximumInitialVoxelMultiplier),
@@ -567,9 +570,19 @@ namespace LocalModels.VoxelBridge
                 };
                 WriteJsonAsset(manifestAssetPath, manifest);
                 ImportGeneratedVox(voxPaths);
-                string prefabPath = BuildPrefab(manifest, familyFolder);
-                manifest.prefabAssetPath = prefabPath;
-                WriteJsonAsset(manifestAssetPath, manifest);
+                string prefabPath;
+                if (options.ConversionProfile != null)
+                    prefabPath = VoxelProductionFamily.BuildConvertedFamily(manifestAssetPath, profile, progress =>
+                    {
+                        if (cancelProgress != null && cancelProgress(progress, "Building production meshes"))
+                            throw new OperationCanceledException("Production meshing cancelled.");
+                    });
+                else
+                {
+                    prefabPath = BuildPrefab(manifest, familyFolder);
+                    manifest.prefabAssetPath = prefabPath;
+                    WriteJsonAsset(manifestAssetPath, manifest);
+                }
                 AssetDatabase.ImportAsset(manifestAssetPath, ImportAssetOptions.ForceSynchronousImport);
                 VoxelLodBatchRecovery.CompleteFamily(familyFolder);
                 return new VoxelLodBuildResult(manifestAssetPath, prefabPath, voxPaths.ToArray());

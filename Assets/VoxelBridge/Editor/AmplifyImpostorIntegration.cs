@@ -245,6 +245,8 @@ namespace LocalModels.VoxelBridge
             manifestAssetPath = VoxelLodPipeline.NormalizeAssetPath(manifestAssetPath);
             if (!VoxelLodPipeline.TryReadManifest(manifestAssetPath, out VoxelLodSetManifest manifest))
                 throw new InvalidDataException("The voxel family manifest is invalid.");
+            if (manifest.productionMeshes)
+                throw new InvalidOperationException("Semantic production impostors require a palette-aware bake shader. Convert without an impostor until semantic baking is supported.");
             if (manifest.lods == null || manifest.lods.Length == 0)
                 throw new InvalidDataException("The family does not contain any voxel LODs.");
             if (!TryGetLastVoxelTransition(manifest, out float lastVoxelTransition))
@@ -830,7 +832,7 @@ namespace LocalModels.VoxelBridge
                 .Where(path => path.EndsWith(".voxset.json", StringComparison.OrdinalIgnoreCase))
                 .Where(path => VoxelLodPipeline.TryReadManifest(
                     path, out VoxelLodSetManifest manifest) &&
-                    !manifest.impostorDisabled &&
+                    !manifest.productionMeshes && !manifest.impostorDisabled &&
                     (manifest.impostor == null ||
                      string.IsNullOrWhiteSpace(manifest.impostor.assetPath) ||
                      !File.Exists(VoxelLodPipeline.AssetPathToAbsolute(

@@ -92,7 +92,7 @@ namespace LocalModels.VoxelBridge
             VoxelLodBatchSourcePlan[] plans, VoxelStyleProfile profile,
             VoxelLodBuildOptions lodOptions, VoxelLodBatchOptions batchOptions)
         {
-            var builder = new StringBuilder("VoxelLodBatch:v3");
+            var builder = new StringBuilder("VoxelLodBatch:v4");
             builder.Append('|').Append(profile != null ? GetStableObjectKey(profile) : "profile:null");
             if (profile != null)
             {
@@ -276,7 +276,22 @@ namespace LocalModels.VoxelBridge
                 !File.Exists(VoxelLodPipeline.AssetPathToAbsolute(entry.prefabAssetPath)))
                 return false;
             if (!VoxelLodPipeline.TryReadManifest(entry.manifestAssetPath, out var manifest)) return false;
-            try { VoxelRetainedGeometry.Resolve(manifest.retainedGeometryGuid); }
+            try
+            {
+                VoxelRetainedGeometry.Resolve(manifest.retainedGeometryGuid);
+                if (manifest.productionMeshes)
+                {
+                    manifest = VoxelProductionFamily.Load(entry.manifestAssetPath);
+                    var link = VoxelProductionLink.Load(entry.prefabAssetPath);
+                    if (link.manifestGuid != AssetDatabase.AssetPathToGUID(entry.manifestAssetPath)) return false;
+                    foreach (var lod in manifest.lods)
+                    {
+                        VoxelProductionFamily.SourcePath(lod);
+                        if (lod.meshGuids == null || lod.meshGuids.Length == 0 || lod.meshGuids.Any(guid =>
+                            AssetDatabase.LoadAssetAtPath<Mesh>(AssetDatabase.GUIDToAssetPath(guid)) == null)) return false;
+                    }
+                }
+            }
             catch (InvalidDataException) { return false; }
             return entry.voxAssetPaths.All(path =>
                 !string.IsNullOrWhiteSpace(path) &&

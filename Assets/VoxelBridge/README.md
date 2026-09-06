@@ -32,7 +32,8 @@ Las paletas, el transporte de `ColorID + SurfaceID` y las familias semánticas d
 4. Configurar `Base Voxel Size` en unidades de Unity. El valor predeterminado `0.032` equivale a 3,2 cm cuando una unidad representa un metro.
 5. Configurar multiplicadores LOD crecientes en potencias de dos, comenzando en `1`, por ejemplo `1, 2, 4`. Cada LOD requiere una transición explícita y válida.
 6. Elegir `Generate Levels`: `LOD0 Only` para preparar la autoría semántica, o `All Profile Levels` para voxelizar cada nivel desde la malla original. La selección se aplica a la conversión individual y por lotes, independientemente de `Maximum Allowed Base`.
-7. Elegir el origen del color, la carpeta de familias y generar el resultado.
+7. Asignar `Conversion Profile` para utilizar colores y superficies globales. Regenerar las LUT desactualizadas desde `Global Palettes`.
+8. Elegir el origen del color, la carpeta de familias y generar el resultado. Con perfil, la salida es el prefab semántico de producción; `Place Result in Scene` coloca ese mismo prefab. Sin perfil, la salida es una previsualización RGB de Voxel Importer.
 
 Cada LOD automático se voxeliza desde la malla fuente. Con multiplicadores `1, 2, 4`, las celdas utilizan `base`, `base × 2` y `base × 4`. Todas las rejillas comparten la alineación física.
 
@@ -50,7 +51,7 @@ Crear `Assets > Create > Voxel Bridge > Conversion Profile` y asignarlo en `Conv
 
 Las reglas de componentes aplicadas a instancias de prefabs se consideran overrides. Para utilizarlas sin modificar el prefab fuente, seleccionar `Modified Instances > Convert Instance Separately` en lotes. La opción de utilizar el prefab original descarta esos overrides de forma intencional.
 
-Los `.vox` generados con perfil contienen vinculaciones semánticas y pueden pasar directamente a una familia de producción. `Bind Semantic IDs` permite revisar o ajustar esas vinculaciones. Sin perfil, la conversión conserva el flujo RGB y permite reglas de componentes `Ignore` y `Keep Original`, pero no SurfaceID explícitos.
+Los `.vox` generados con perfil contienen vinculaciones semánticas. La carpeta de la familia contiene sus fuentes, manifiesto, mallas de chunks y un único prefab LOD final, sin otro prefab de previsualización. El Inspector del prefab ofrece `Open in MagicaVoxel`, `Semantic Bindings` y `Rebuild` para cada nivel. Sin perfil, la conversión conserva el flujo RGB y permite reglas de componentes `Ignore` y `Keep Original`, pero no SurfaceID explícitos.
 
 Las ventanas requieren un objeto o submesh identificable. Excluirlas antes del relleno permite conservar el interior si la resolución mantiene una abertura real. La geometría retenida se almacena como `RetainedGeometry.prefab` y meshes en la carpeta de la familia; el sidecar y el manifiesto conservan su GUID. Cada LOD utiliza esa geometría sin simplificar y participa en su transición y descarte. No se copian scripts, colisiones ni animaciones; un renderer skinned se conserva en su pose horneada. Reconvertir la fuente para actualizar la selección de piezas retenidas.
 
@@ -117,7 +118,7 @@ En un volumen semántico, la reducción conserva el par `ColorID + SurfaceID` ma
 
 `Rebuild Prefab from Manifest` reconstruye la familia y resincroniza sus imports. Conserva la ruta registrada y el GUID del prefab, incluso si se ha reubicado. Un perfil o manifiesto requerido que falta produce un error; la herramienta no inventa transiciones ni sustituye la familia silenciosamente.
 
-Para trabajar con materiales globales, vincular los IDs de LOD0 y crear una `Semantic Production LOD Family` desde `VOX to Unity`. Su prefab permite editar, reconstruir, duplicar y reducir niveles individualmente. Esta ruta utiliza el mesher propio, conserva chunks para culling y no depende de las mallas de previsualización de Voxel Importer. Consultar el [flujo de producción](MATERIALS.md#familias-semánticas-de-producción).
+Las conversiones con `Conversion Profile` generan la familia semántica de producción directamente. Para un `.vox` externo o convertido sin perfil, vincular los IDs de LOD0 y utilizar `Semantic Production LOD Family` en `VOX to Unity`. Su prefab permite editar, reconstruir, duplicar y reducir niveles individualmente. Esta ruta utiliza el mesher propio y conserva chunks para culling. Consultar el [flujo de producción](MATERIALS.md#familias-semánticas-de-producción).
 
 ## Transiciones y sombras
 
@@ -136,7 +137,7 @@ La escala individual de una instancia no recalcula estas decisiones de autoría.
 
 ## Impostores opcionales
 
-`Generate Final Impostor` está desactivado por defecto. Amplify hornea los renderers de LOD0 y añade un último nivel al `LODGroup`. La configuración central reside en `Assets/VoxelBridgeSettings/VoxelImpostorProfile.asset`.
+`Generate Final Impostor` está desactivado por defecto. El horneado está disponible para familias RGB; las familias semánticas requieren un shader de captura compatible con las LUT y bloquean esta operación. Amplify hornea los renderers de LOD0 y añade un último nivel al `LODGroup`. La configuración central reside en `Assets/VoxelBridgeSettings/VoxelImpostorProfile.asset`.
 
 | Perfil | Proyección | Atlas | Vistas | Uso orientativo |
 |---|---|---|---|---|

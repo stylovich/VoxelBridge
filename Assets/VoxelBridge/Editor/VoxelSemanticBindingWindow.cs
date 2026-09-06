@@ -46,6 +46,16 @@ namespace LocalModels.VoxelBridge
         [MenuItem("Assets/Voxel Bridge/Bind Semantic IDs", false, 2050)]
         private static void OpenForSelection() => OpenWindow();
 
+        internal static void OpenForSource(string sourcePath)
+        {
+            if (!IsVoxPath(sourcePath)) throw new ArgumentException("Choose a VOX source.", nameof(sourcePath));
+            var window = GetWindow<VoxelSemanticBindingWindow>("VOX Semantic IDs");
+            window.minSize = new Vector2(860f, 460f);
+            window.voxAsset = AssetDatabase.LoadMainAssetAtPath(sourcePath);
+            window.Reload();
+            window.Show();
+        }
+
         [MenuItem("Assets/Voxel Bridge/Bind Semantic IDs", true)]
         private static bool ValidateOpenForSelection() =>
             IsVoxPath(AssetDatabase.GetAssetPath(Selection.activeObject));

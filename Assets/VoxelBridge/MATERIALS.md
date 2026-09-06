@@ -231,13 +231,15 @@ Los prefabs generados sólo requieren sus mallas, material, shader y texturas en
 
 ## Familias semánticas de producción
 
-1. Seleccionar `Generate Levels > LOD0 Only` en `Physical Models and LODs` y convertir la fuente.
-2. Asignar `ColorID + SurfaceID` con `Bind Semantic IDs` y editar LOD0 en MagicaVoxel.
-3. Abrir `VOX to Unity`, seleccionar el `.vox` semántico, `Production Folder` y `LOD Profile`, y ejecutar `Create or Select Production LOD Family`. Un prefab LOD0 independiente permite abrir esta ventana con `Create LOD Family...`.
+1. Asignar `Conversion Profile` y seleccionar `Generate Levels > LOD0 Only` en `Physical Models and LODs`. Las LUT de las paletas deben estar actualizadas.
+2. Convertir la fuente. La herramienta genera directamente un prefab semántico vinculado; `Place Result in Scene` permite colocarlo y desactivar el original.
+3. Revisar `ColorID + SurfaceID` con `Semantic Bindings` y editar LOD0 mediante `Open in MagicaVoxel`, desde el Inspector del prefab. Utilizar `Rebuild` después de guardar.
 4. Seleccionar el prefab de familia. `Duplicate Previous` copia el nivel anterior sin reinterpretar sus slots; `Reduce Previous` selecciona el par semántico mayoritario por celda, con desempate estable. `Generate Remaining LODs by Reduction` crea únicamente los niveles que faltan.
-5. Utilizar `Edit`, `Select Source` y `Rebuild` en la fila de cada LOD. Guardar en MagicaVoxel no reconstruye automáticamente el prefab.
+5. Utilizar `Open in MagicaVoxel`, `Semantic Bindings`, `Select Source` y `Rebuild` en la fila de cada LOD. Guardar en MagicaVoxel no reconstruye automáticamente el prefab.
 
-La carpeta `<Model>_ProductionLODs` contiene el manifiesto, el prefab, las mallas de chunks y los `.vox` derivados. LOD0 permanece en su ubicación original y se referencia por GUID; crear la familia no lo duplica ni modifica. La unidad efectiva de ese LOD0 constituye la base de la familia, incluso cuando difiere de la unidad del perfil. Los multiplicadores del perfil determinan las resoluciones reducidas; duplicar conserva la resolución del padre.
+La conversión física guarda el manifiesto, el prefab, las mallas de chunks y las fuentes `.vox` en `<Model>_VoxelLOD`. `All Profile Levels` genera cada nivel desde la malla original, con sus propias vinculaciones; no hereda retoques de otros niveles. La reducción posterior utiliza la unidad base y el multiplicador inicial efectivo de la familia, incluidos los ajustes para modelos grandes. Duplicar conserva la resolución del padre.
+
+Para fuentes externas o convertidas sin perfil, asignar los IDs y utilizar `VOX to Unity > Create or Select Production LOD Family`. Esta operación crea `<Model>_ProductionLODs`, referencia LOD0 por GUID sin duplicarlo y utiliza su unidad efectiva como base. Si el `.vox` pertenece a una familia de producción vinculada, selecciona esa familia sin crear otra.
 
 Cada nivel contiene renderers de chunks independientes. La eliminación de caras y cavidades consulta el volumen completo, incluidas las fronteras entre chunks. La geometría conserva sus coordenadas físicas, sin recentrar cada LOD. El prefab utiliza `LODFadeMode.None`, transiciones adaptativas y política de sombras del perfil. La colocación posterior puede utilizar el snapping del grid; reconstruir no mueve las instancias existentes.
 
@@ -245,7 +247,7 @@ Cada nivel contiene renderers de chunks independientes. La eliminación de caras
 
 El manifiesto conserva huellas de las fuentes y del padre utilizado para cada derivación. Si cambia un antecesor, sus descendientes muestran un aviso de revisión. Reconstruir el mesh del padre no elimina ese aviso ni modifica los `.vox` descendientes. `Regenerate: Duplicate` y `Regenerate: Reduce` requieren confirmación antes de reemplazar un nivel existente; conservan su GUID, pero descartan sus retoques manuales y no admiten Undo del archivo fuente. Los errores y cancelaciones restauran los archivos reemplazados. La reconstrucción de varios niveles confirma cada nivel por separado y se detiene ante un fallo.
 
-Las familias admiten superficies opacas, una misma pareja de paletas globales y hasta 8 niveles consecutivos. Se mantienen los límites de 8.000.000 de celdas, 64 MiB de `.vox` y 500.000 quads por nivel; el límite de quads se aplica a la suma de sus chunks. No se reduce automáticamente la resolución durante el meshing. Los colliders, UV de lightmap y nuevos impostores no se generan en esta ruta. Un impostor existente debe retirarse antes de reconstruir la geometría y hornearse posteriormente; el shader de horneado semántico requiere validación independiente.
+Las familias admiten superficies opacas, una misma pareja de paletas globales y hasta 8 niveles consecutivos. Se mantienen los límites de 8.000.000 de celdas, 64 MiB de `.vox` y 500.000 quads por nivel; el límite de quads se aplica a la suma de sus chunks. La conversión física considera el límite de celdas al adaptar el tamaño inicial, antes de voxelizar. El meshing de una fuente editada no cambia su resolución: si supera un límite, se detiene con un error. Los colliders y UV de lightmap no se generan en esta ruta. El horneado de impostores semánticos está bloqueado hasta disponer de un shader de captura compatible con las LUT y los IDs.
 
 ## Validaciones
 

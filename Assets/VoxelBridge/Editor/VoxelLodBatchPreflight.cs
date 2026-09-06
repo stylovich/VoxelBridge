@@ -227,7 +227,7 @@ namespace LocalModels.VoxelBridge
                     VoxelLodBatchSourceEstimate estimate = EstimateAtMultiplier(
                         reuseKey, sourceName, profile,
                         batchOptions, bounds, sourceOverhead,
-                        initialLodIndex, initialMultiplier, lodOptions.GenerateLod0Only);
+                        initialLodIndex, initialMultiplier, lodOptions.GenerateLod0Only, lodOptions.ConversionProfile != null);
                     lastValid = estimate;
                     if (!estimate.IsOverBudget) return estimate;
                 }
@@ -254,7 +254,7 @@ namespace LocalModels.VoxelBridge
             VoxelStyleProfile profile,
             VoxelLodBatchOptions batchOptions,
             Bounds bounds, long sourceOverhead, int initialLodIndex,
-            int initialMultiplier, bool lod0Only)
+            int initialMultiplier, bool lod0Only, bool productionMeshes)
         {
             var lodPlans = new List<VoxelGridPlan>(profile.LodCount);
             long peakBytes = 0;
@@ -269,6 +269,7 @@ namespace LocalModels.VoxelBridge
                 float voxelSize = profile.BaseVoxelSize * effectiveMultiplier;
                 VoxelGridPlan gridPlan = VoxelGridPlanner.Create(
                     bounds, voxelSize, profile.Padding, profile.ChunkCellSize);
+                if (productionMeshes) VoxelSemanticMesher.ValidateGrid(gridPlan.Size, gridPlan.Origin, gridPlan.VoxelSize);
                 lodPlans.Add(gridPlan);
                 totalCells += gridPlan.CellCount;
                 long lodBytes = checked(gridPlan.CellCount * bytesPerCell +

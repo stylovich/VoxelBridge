@@ -131,7 +131,7 @@ Las reglas `Voxelize`, `Ignore` y `Keep Original` se aplican antes del cálculo 
 
 La reducción manual de un volumen semántico selecciona la combinación mayoritaria con desempate estable. Duplicar un LOD conserva la tabla de slots sin reinterpretarla. El alcance de detección de emisión y la conservación de piezas se describen en [MATERIALS.md](MATERIALS.md#superficies-durante-la-conversión) y [README.md](README.md#reglas-de-conversión).
 
-La pintura visual de SurfaceID por voxel requiere una fase de autoría específica. La selección entre una herramienta de Unity, un editor voxel adaptado o una integración de Blender permanece pendiente. El almacenamiento de los IDs debe conservar independencia respecto a esa elección. La emisión con color independiente del albedo y los shaders voxel transparentes quedan fuera de la conversión opaca inicial.
+La pintura visual de SurfaceID por voxel requiere una fase de autoría específica. La selección entre una herramienta de Unity, un editor voxel adaptado o una integración de Blender permanece pendiente. La agrupación asistida podrá proponer conjuntos según color, intensidad y separación espacial; el equipo artístico asignará el tipo de superficie, sin inferir LED o neón a partir de la intensidad. La conversión utiliza una superficie emisiva de respaldo configurable, inicialmente Neon. El almacenamiento de los IDs debe conservar independencia respecto al editor elegido. La emisión con color independiente del albedo y los shaders voxel transparentes quedan fuera de la conversión opaca inicial.
 
 ### Mesh de producción
 
@@ -139,7 +139,7 @@ La exportación independiente LOD0 opaca está disponible en `VOX to Unity`, con
 
 Las familias semánticas de producción preservan chunks para culling, consultan vecinos a través de sus fronteras y mantienen la alineación física entre niveles. El prefab permite reconstruir cada nivel, derivar los siguientes por duplicación o reducción y revisar avisos de fuentes modificadas sin sobrescribir descendientes. El alcance, los límites de volumen y las operaciones con confirmación se describen en [MATERIALS.md](MATERIALS.md#familias-semánticas-de-producción). La reimportación automática y la ampliación de los límites de meshing requieren validación adicional de memoria y recuperación ante fallos.
 
-Voxel Bridge debe generar los meshes finales desde el volumen semántico y no depender del atlas local creado por Voxel Importer. El greedy mesher combina caras únicamente cuando coinciden color, superficie, orientación y clase de render.
+La conversión física con `Conversion Profile` genera directamente una familia de producción mediante el mesher semántico, sin otro prefab de previsualización. La colocación individual y por lotes utiliza ese resultado vinculado; los controles de edición, bindings y reconstrucción están disponibles por nivel. El greedy mesher combina caras únicamente cuando coinciden color, superficie, orientación y clase de render.
 
 El resultado utiliza un submesh por comportamiento real de render, no por `SurfaceID`. Voxel Importer permanece disponible para previsualizar y editar `.vox`, pero no es la fuente definitiva del mesh de producción. Esta separación evita parches profundos al asset de terceros y proporciona un contrato estable para combinación, LODs y DOTS.
 

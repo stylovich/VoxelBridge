@@ -33,6 +33,8 @@ namespace LocalModels.VoxelBridge
                 if (GUILayout.Button("Select Source VOX")) SelectSource(path);
             }
             if (GUILayout.Button("Rebuild")) Rebuild(path);
+            if (GUILayout.Button("Semantic Bindings")) Run(() =>
+                VoxelSemanticBindingWindow.OpenForSource(VoxelProductionLink.Load(path).SourcePath));
             if (GUILayout.Button("Create LOD Family...")) Run(() =>
                 VoxToUnityWindow.OpenProductionFamily(VoxelProductionLink.Load(path).SourcePath));
         }
@@ -53,10 +55,11 @@ namespace LocalModels.VoxelBridge
                     if (meshChanged) EditorGUILayout.HelpBox("El .vox o sus bindings cambiaron. Rebuild actualiza la malla sin regenerar el archivo fuente.", MessageType.Info);
                     using (new EditorGUILayout.HorizontalScope())
                     {
-                        if (GUILayout.Button("Edit")) Run(() => MagicaVoxelLauncher.OpenPath(VoxelLodPipeline.AssetPathToAbsolute(source)));
+                        if (GUILayout.Button("Open in MagicaVoxel")) Run(() => MagicaVoxelLauncher.OpenPath(VoxelLodPipeline.AssetPathToAbsolute(source)));
                         if (GUILayout.Button("Select Source")) { Selection.activeObject = AssetDatabase.LoadMainAssetAtPath(source); EditorGUIUtility.PingObject(Selection.activeObject); }
                         if (GUILayout.Button("Rebuild")) Run(() => VoxelProductionFamily.RebuildLevel(manifestPath, entry.lodIndex, Progress));
                     }
+                    if (GUILayout.Button("Semantic Bindings")) Run(() => VoxelSemanticBindingWindow.OpenForSource(source));
                     if (entry.lodIndex > 0)
                         using (new EditorGUILayout.HorizontalScope())
                         {

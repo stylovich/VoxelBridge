@@ -319,7 +319,7 @@ namespace LocalModels.VoxelBridge
             {
                 string label = individualGenerateImpostor
                     ? "Generate .vox Family + LOD Prefab + Impostor"
-                    : "Generate .vox Family + LOD Prefab";
+                    : conversionProfile != null ? "Generate .vox + Production LOD Prefab" : "Generate .vox + RGB Preview Prefab";
                 if (GUILayout.Button(label, GUILayout.Height(38)))
                     GenerateAutomaticLods();
             }
@@ -564,7 +564,7 @@ namespace LocalModels.VoxelBridge
             {
                 string label = batchGenerateImpostors
                     ? "Generate Families and Impostors for All Children"
-                    : "Generate Families for All Children";
+                    : conversionProfile != null ? "Generate Production Families for All Children" : "Generate RGB Preview Families for All Children";
                 if (GUILayout.Button(label, GUILayout.Height(38)))
                     GenerateAutomaticBatch();
             }
@@ -683,6 +683,11 @@ namespace LocalModels.VoxelBridge
             generateImpostor = EditorGUILayout.Toggle(
                 new GUIContent("Generate Final Impostor", toggleTooltip), generateImpostor);
             if (!generateImpostor) return true;
+            if (conversionProfile != null)
+            {
+                EditorGUILayout.HelpBox("El horneado de impostores semánticos requiere integrar las LUT y los IDs en el shader de captura. Desactivar Generate Final Impostor para convertir con materiales semánticos.", MessageType.Warning);
+                return false;
+            }
 
             AmplifyImpostorCompatibility compatibility =
                 AmplifyImpostorIntegration.GetCompatibility();
@@ -738,7 +743,9 @@ namespace LocalModels.VoxelBridge
                 new GUIContent("Conversion Profile", "Reglas por material, ColorID y SurfaceID durante la voxelización. Crear desde Assets > Create > Voxel Bridge > Conversion Profile."),
                 conversionProfile, typeof(VoxelConversionProfile), false);
             if (conversionProfile != null)
-                EditorGUILayout.HelpBox("Las reglas se aplican antes del relleno. Keep Original conserva geometría estática fuera del .vox; sus materiales originales permanecen en el prefab.", MessageType.Info);
+                EditorGUILayout.HelpBox("Salida: prefab semántico de producción, con edición y reconstrucción por LOD. Place Result in Scene utiliza este prefab. Los .vox se conservan como fuentes editables. Keep Original conserva geometría estática con sus materiales originales. Las LUT deben estar actualizadas; máximo 8 millones de celdas y 500.000 quads por nivel.", MessageType.Info);
+            else
+                EditorGUILayout.HelpBox("Sin Conversion Profile, la salida es un prefab de previsualización RGB de Voxel Importer. No utiliza ColorID, SurfaceID ni emisión semántica.", MessageType.Info);
             colorMode = (VoxelColorMode)EditorGUILayout.Popup("Color Source", (int)colorMode,
                 new[] { "Material + Texture", "Material Only", "Single Color" });
             if (colorMode == VoxelColorMode.SingleColor)
@@ -920,6 +927,8 @@ namespace LocalModels.VoxelBridge
                 EditorGUILayout.HelpBox(
                     "Carga una familia desde su prefab, .vox o manifiesto para generar el impostor.",
                     MessageType.Warning);
+            if (hasManifest && manifest.productionMeshes)
+                EditorGUILayout.HelpBox("El horneado de esta familia semántica requiere un shader de captura compatible con ColorID, SurfaceID y las LUT. Esta operación no está disponible para materiales semánticos.", MessageType.Info);
 
             float lastVoxelTransition = 0f;
             bool hasTransition = hasManifest &&
@@ -972,7 +981,7 @@ namespace LocalModels.VoxelBridge
                         MessageType.Warning);
             }
 
-            bool canGenerate = compatibility.CanBake && hasManifest && validProfile;
+            bool canGenerate = compatibility.CanBake && hasManifest && !manifest.productionMeshes && validProfile;
             using (new EditorGUI.DisabledScope(!canGenerate))
             {
                 if (GUILayout.Button("Generate or Update Final Impostor", GUILayout.Height(36)))
@@ -989,7 +998,7 @@ namespace LocalModels.VoxelBridge
             EditorGUILayout.Space(6);
             EditorGUILayout.LabelField("Existing Families", EditorStyles.miniBoldLabel);
             EditorGUILayout.HelpBox(
-                "Procesa las familias de la carpeta de exportación cuyo manifiesto todavía no contiene un impostor válido. Utiliza el perfil seleccionado y no vuelve a voxelizar los modelos.",
+                "Procesa las familias RGB de la carpeta de exportación cuyo manifiesto todavía no contiene un impostor válido. Las familias semánticas se excluyen hasta disponer de un shader de captura compatible. Utiliza el perfil seleccionado y no vuelve a voxelizar los modelos.",
                 MessageType.None);
             bool canGeneratePending = compatibility.CanBake && impostorProfile != null &&
                                       VoxelLodPipeline.IsAssetFolder(exportFolder);

@@ -19,6 +19,14 @@ namespace LocalModels.VoxelBridge
             VoxelProductionExporter.ReadGrid(sourcePath, out var metadata, out _, out _, out _);
             if (metadata.lodIndex != 0) throw new InvalidDataException("Start a production family from semantic LOD0.");
             string sourceGuid = AssetDatabase.AssetPathToGUID(sourcePath);
+            if (!string.IsNullOrEmpty(metadata.lodSetAssetPath) &&
+                VoxelLodPipeline.TryReadManifest(metadata.lodSetAssetPath, out var owner) && owner.productionMeshes)
+            {
+                owner = Load(metadata.lodSetAssetPath);
+                if (owner.lods[0].sourceGuid != sourceGuid)
+                    throw new InvalidDataException("The source does not belong to the linked production family.");
+                return metadata.lodSetAssetPath;
+            }
             string existing = null;
             if (AssetDatabase.IsValidFolder(outputFolder))
                 foreach (string guid in AssetDatabase.FindAssets("t:Prefab", new[] { outputFolder }))
@@ -80,6 +88,37 @@ namespace LocalModels.VoxelBridge
             return manifest;
         }
 
+        // The caller owns the incomplete family transaction and removes it if any level fails.
+        internal static string BuildConvertedFamily(string manifestPath, VoxelStyleProfile profile,
+            Action<float> progress = null)
+        {
+            ValidateProfile(profile);
+            if (!VoxelLodPipeline.TryReadManifest(manifestPath, out var manifest) || manifest.productionMeshes ||
+                manifest.lods == null || manifest.lods.Length == 0 || !string.IsNullOrEmpty(manifest.prefabAssetPath))
+                throw new InvalidDataException("Production initialization requires a new converted family without a prefab.");
+            string folder = Path.GetDirectoryName(manifestPath).Replace('\\', '/');
+            manifest.productionMeshes = true;
+            manifest.profileGuid = AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(profile));
+            manifest.prefabAssetPath = folder + "/" + VoxelLodPipeline.MakeSafeFileName(manifest.sourceName) + ".prefab";
+            if (File.Exists(VoxelLodPipeline.AssetPathToAbsolute(manifest.prefabAssetPath)))
+                throw new InvalidDataException("The production prefab output already exists.");
+            foreach (var entry in manifest.lods)
+                entry.sourceGuid = AssetDatabase.AssetPathToGUID(entry.voxAssetPath);
+            VoxelLodPipeline.SaveManifest(manifestPath, manifest);
+            for (int i = 0; i < manifest.lods.Length; i++)
+            {
+                int level = i;
+                progress?.Invoke((float)level / manifest.lods.Length);
+                RebuildLevel(manifestPath, level, value => progress?.Invoke((level + value) / manifest.lods.Length));
+            }
+            manifest = Load(manifestPath);
+            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(manifest.prefabAssetPath);
+            VoxelProductionLink.Store(prefab, SourcePath(manifest.lods[0]), null, manifestPath);
+            manifest.prefabGuid = AssetDatabase.AssetPathToGUID(manifest.prefabAssetPath);
+            VoxelLodPipeline.SaveManifest(manifestPath, manifest);
+            return manifest.prefabAssetPath;
+        }
+
         internal static string SourcePath(VoxelLodEntry entry)
         {
             string path = AssetDatabase.GUIDToAssetPath(entry.sourceGuid);
@@ -99,7 +138,10 @@ namespace LocalModels.VoxelBridge
         internal static bool IsDerivedStale(VoxelLodSetManifest manifest, int level)
         {
             for (int i = level; i > 0; i--)
+            {
+                if (manifest.lods[i].generationMode == VoxelLodGenerationMode.SourceMesh) break;
                 if (manifest.lods[i].parentSourceHash != SourceHash(manifest.lods[i - 1])) return true;
+            }
             return false;
         }
 
@@ -142,7 +184,7 @@ namespace LocalModels.VoxelBridge
             {
                 progress?.Invoke(0);
                 int multiplier = mode == VoxelLodGenerationMode.DuplicateParent
-                    ? manifest.lods[level - 1].multiplier : profile.GetLodMultiplier(level);
+                    ? manifest.lods[level - 1].multiplier : checked(Math.Max(1, manifest.initialVoxelMultiplier) * profile.GetLodMultiplier(level));
                 if (mode == VoxelLodGenerationMode.DuplicateParent)
                 {
                     File.Copy(VoxelLodPipeline.AssetPathToAbsolute(parentPath), absolute, replacing);

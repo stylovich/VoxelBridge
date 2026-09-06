@@ -71,6 +71,8 @@ namespace LocalModels.VoxelBridge
             importer.userData = Prefix + JsonUtility.ToJson(link);
             EditorUtility.SetDirty(importer);
             AssetDatabase.WriteImportSettingsIfDirty(path);
+            // Commit the importer artifact as well as the .meta before batch cleanup unloads it.
+            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport);
         }
 
         internal static string FindOutput(string sourcePath, string folder)

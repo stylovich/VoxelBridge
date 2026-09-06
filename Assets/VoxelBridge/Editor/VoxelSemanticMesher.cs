@@ -8,7 +8,7 @@ namespace LocalModels.VoxelBridge
 {
     internal static class VoxelSemanticMesher
     {
-        // Bounds for the standalone, single-mesh export, not the voxelization budget.
+        // Per-volume safety limits shared by standalone and chunked production meshes.
         internal const int MaximumCells = 8_000_000;
         internal const int MaximumQuads = 500_000;
 
@@ -17,7 +17,7 @@ namespace LocalModels.VoxelBridge
             if (size.x <= 0 || size.y <= 0 || size.z <= 0 ||
                 size.x > MaximumCells || size.y > MaximumCells || size.z > MaximumCells ||
                 (long)size.x * size.y > MaximumCells / size.z)
-                throw new InvalidDataException($"Standalone meshing supports at most {MaximumCells:N0} grid cells. Use a smaller source or a coarser voxel size.");
+                throw new InvalidDataException($"Production meshing supports at most {MaximumCells:N0} grid cells. Use a smaller source or a coarser voxel size.");
             if (!float.IsFinite(voxelSize) || voxelSize <= 0 ||
                 !Finite(origin) || !Finite(origin + (Vector3)size * voxelSize))
                 throw new InvalidDataException("The grid scale or origin is invalid.");

@@ -88,6 +88,7 @@ namespace LocalModels.VoxelBridge
                         Mathf.Clamp(Mathf.CeilToInt(bounds.size.z / voxelSize - 1e-5f) + settings.Padding * 2, 1, 256));
                     origin = bounds.min - Vector3.one * (settings.Padding * voxelSize);
                 }
+                if (mapper != null) VoxelSemanticMesher.ValidateGrid(size, origin, voxelSize);
                 var grid = new VoxelGrid(size, origin, voxelSize, mapper != null);
                 var bestDistances = new float[grid.Occupied.Length];
                 for (int i = 0; i < bestDistances.Length; i++) bestDistances[i] = float.PositiveInfinity;
