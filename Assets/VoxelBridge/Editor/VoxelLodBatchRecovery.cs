@@ -107,6 +107,7 @@ namespace LocalModels.VoxelBridge
                     .Append(lodOptions.SingleColor.g).Append(',').Append(lodOptions.SingleColor.b)
                     .Append(',').Append(lodOptions.SingleColor.a);
                 builder.Append('|').Append(lodOptions.AlphaCutoff.ToString("R"));
+                builder.Append('|').Append(lodOptions.GenerateLod0Only);
                 builder.Append('|').Append(batchOptions == null
                     ? lodOptions.IncludeInactiveObjects
                     : !batchOptions.IgnoreInactiveObjects);

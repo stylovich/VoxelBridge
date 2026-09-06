@@ -15,26 +15,27 @@ namespace LocalModels.VoxelBridge
 
         static VoxelProductionExporter() => Undo.undoRedoEvent += RefreshRestoredMesh;
 
-        internal static void RegisterMeshUndo(Mesh mesh)
+        internal static void RegisterMeshUndo(Mesh mesh) => RegisterMeshUndo(new[] { mesh });
+
+        internal static void RegisterMeshUndo(Mesh[] meshes)
         {
+            if (meshes.Length == 0) return;
             Undo.IncrementCurrentGroup();
-            Undo.RegisterCompleteObjectUndo(mesh, "Rebuild Voxel Production Mesh");
+            Undo.RegisterCompleteObjectUndo(meshes, "Rebuild Voxel Production Mesh");
             // SessionState survives script reloads without keeping mesh objects alive.
-            SessionState.SetInt(UndoMeshKey + Undo.GetCurrentGroup(), mesh.GetInstanceID());
+            SessionState.SetIntArray(UndoMeshKey + Undo.GetCurrentGroup(), Array.ConvertAll(meshes, mesh => mesh.GetInstanceID()));
         }
 
         private static void RefreshRestoredMesh(in UndoRedoInfo info)
         {
-            int id = SessionState.GetInt(UndoMeshKey + info.undoGroup, 0);
-            if (id == 0 || !(EditorUtility.EntityIdToObject((EntityId)id) is Mesh mesh)) return;
-            Mesh restored = Object.Instantiate(mesh);
-            try
+            foreach (int id in SessionState.GetIntArray(UndoMeshKey + info.undoGroup, Array.Empty<int>()))
             {
-                restored.name = mesh.name;
-                ReplaceMeshData(restored, mesh);
-                SceneView.RepaintAll();
+                if (!(EditorUtility.EntityIdToObject((EntityId)id) is Mesh mesh)) continue;
+                Mesh restored = Object.Instantiate(mesh);
+                try { restored.name = mesh.name; ReplaceMeshData(restored, mesh); }
+                finally { Object.DestroyImmediate(restored); }
             }
-            finally { Object.DestroyImmediate(restored); }
+            SceneView.RepaintAll();
         }
 
         public static GameObject Export(string voxAssetPath, string outputFolder, Action<float> progress = null)
@@ -50,10 +51,18 @@ namespace LocalModels.VoxelBridge
             out VoxelBridgeMetadata metadata, out VoxelColorPalette colors,
             out VoxelSurfacePalette surfaces, out Shader shader)
         {
+            VoxelGrid grid = ReadGrid(voxAssetPath, out metadata, out colors, out surfaces, out shader);
+            if (metadata.lodIndex != 0) throw new InvalidDataException("Standalone export requires LOD0.");
+            return VoxelSemanticMesher.Build(grid, metadata.hideInternalCavities, progress);
+        }
+
+        internal static VoxelGrid ReadGrid(string voxAssetPath, out VoxelBridgeMetadata metadata,
+            out VoxelColorPalette colors, out VoxelSurfacePalette surfaces, out Shader shader)
+        {
             if (!VoxelImporterIntegration.TryLoadMetadata(voxAssetPath, out metadata, out string error))
                 throw new InvalidDataException(error);
-            if (metadata.formatVersion != 4 || metadata.lodIndex != 0)
-                throw new InvalidDataException("Production export requires a semantic LOD0. Save its ColorID and SurfaceID bindings first.");
+            if (metadata.formatVersion != 4)
+                throw new InvalidDataException("Production export requires semantic bindings. Save ColorID and SurfaceID first.");
             VoxelSemanticMesher.ValidateGrid(metadata.unityGridSize, metadata.gridOrigin, metadata.voxelSize);
             string absolutePath = VoxelLodPipeline.AssetPathToAbsolute(voxAssetPath);
             if (new FileInfo(absolutePath).Length > 64L * 1024 * 1024)
@@ -68,7 +77,7 @@ namespace LocalModels.VoxelBridge
 
             VoxelGrid grid = VoxelVolumeReader.Read(absolutePath, metadata);
             ValidateSurfaces(grid, surfaces);
-            return VoxelSemanticMesher.Build(grid, metadata.hideInternalCavities, progress);
+            return grid;
         }
 
         private static GameObject Create(string voxAssetPath, string outputFolder, Action<float> progress)
@@ -114,6 +123,11 @@ namespace LocalModels.VoxelBridge
         public static GameObject Rebuild(string prefabPath, Action<float> progress = null)
         {
             VoxelProductionLink link = VoxelProductionLink.Load(prefabPath);
+            if (!string.IsNullOrEmpty(link.manifestGuid))
+            {
+                VoxelProductionFamily.RebuildAll(AssetDatabase.GUIDToAssetPath(link.manifestGuid), progress);
+                return AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
+            }
             string sourcePath = link.SourcePath;
             GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
             Mesh target = AssetDatabase.LoadAssetAtPath<Mesh>(AssetDatabase.GUIDToAssetPath(link.meshGuid));
@@ -192,7 +206,7 @@ namespace LocalModels.VoxelBridge
             }
         }
 
-        private static Material GetSharedMaterial(VoxelColorPalette colors, VoxelSurfacePalette surfaces,
+        internal static Material GetSharedMaterial(VoxelColorPalette colors, VoxelSurfacePalette surfaces,
             Shader shader, out string createdPath)
         {
             createdPath = null;

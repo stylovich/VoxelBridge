@@ -95,6 +95,10 @@ namespace LocalModels.VoxelBridge
         public VoxelLodGenerationMode generationMode;
         public string voxAssetPath;
         public float screenRelativeTransitionHeight;
+        public string sourceGuid;
+        public string parentSourceHash;
+        public string builtSourceHash;
+        public string[] meshGuids;
     }
 
     [Serializable]
@@ -124,6 +128,9 @@ namespace LocalModels.VoxelBridge
         public VoxelLodEntry[] lods;
         public VoxelImpostorEntry impostor;
         public bool impostorDisabled;
+        public bool productionMeshes;
+        public string profileGuid;
+        public string prefabGuid;
     }
 
     internal sealed class VoxelGrid

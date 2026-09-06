@@ -10,7 +10,7 @@ Copiar `Assets/VoxelBridge` junto con sus archivos `.meta` al proyecto. El módu
 
 La generación y la edición son procesos de autoría. Los prefabs contienen meshes y renderers convencionales; el módulo no implementa edición voxel en runtime.
 
-Las paletas, el transporte de `ColorID + SurfaceID` y la exportación semántica de un LOD0 opaco se describen en [MATERIALS.md](MATERIALS.md). La integración del mesher con familias completas, la combinación de modelos y la validación DOTS figuran en [ROADMAP.md](ROADMAP.md).
+Las paletas, el transporte de `ColorID + SurfaceID` y las familias semánticas de producción se describen en [MATERIALS.md](MATERIALS.md). La combinación de modelos, los impostores semánticos y la validación DOTS figuran en [ROADMAP.md](ROADMAP.md).
 
 ## Herramientas
 
@@ -18,7 +18,7 @@ Las paletas, el transporte de `ColorID + SurfaceID` y la exportación semántica
 |---|---|
 | `Physical Models and LODs` | Conversión con unidad física, familias LOD, lotes e impostores |
 | `Resolution-Based Conversion` | Conversión individual con una resolución explícita |
-| `VOX to Unity` | Sincronización de un `.vox`, exportación semántica LOD0 o retorno desde OBJ |
+| `VOX to Unity` | Sincronización de `.vox`, exportación semántica LOD0, familias de producción o retorno desde OBJ |
 | `Bind Semantic IDs` | Asignación de ColorID y SurfaceID a los slots de un `.vox` |
 | `Global Palettes` | Administración de las paletas globales y sus LUT |
 | `Sync All Generated VOX Assets` | Resincronización explícita de los `.vox` con sidecar |
@@ -31,7 +31,8 @@ Las paletas, el transporte de `ColorID + SurfaceID` y la exportación semántica
 3. Crear o seleccionar un `Voxel Style Profile`.
 4. Configurar `Base Voxel Size` en unidades de Unity. El valor predeterminado `0.032` equivale a 3,2 cm cuando una unidad representa un metro.
 5. Configurar multiplicadores LOD crecientes en potencias de dos, comenzando en `1`, por ejemplo `1, 2, 4`. Cada LOD requiere una transición explícita y válida.
-6. Elegir el origen del color, la carpeta de familias y generar el resultado.
+6. Elegir `Generate Levels`: `LOD0 Only` para preparar la autoría semántica, o `All Profile Levels` para voxelizar cada nivel desde la malla original. La selección se aplica a la conversión individual y por lotes, independientemente de `Maximum Allowed Base`.
+7. Elegir el origen del color, la carpeta de familias y generar el resultado.
 
 Cada LOD automático se voxeliza desde la malla fuente. Con multiplicadores `1, 2, 4`, las celdas utilizan `base`, `base × 2` y `base × 4`. Todas las rejillas comparten la alineación física.
 
@@ -95,6 +96,8 @@ El modo manual ofrece dos operaciones:
 En un volumen semántico, la reducción conserva el par `ColorID + SurfaceID` mayoritario por celda y resuelve empates de forma determinista.
 
 `Rebuild Prefab from Manifest` reconstruye la familia y resincroniza sus imports. Conserva la ruta registrada y el GUID del prefab, incluso si se ha reubicado. Un perfil o manifiesto requerido que falta produce un error; la herramienta no inventa transiciones ni sustituye la familia silenciosamente.
+
+Para trabajar con materiales globales, vincular los IDs de LOD0 y crear una `Semantic Production LOD Family` desde `VOX to Unity`. Su prefab permite editar, reconstruir, duplicar y reducir niveles individualmente. Esta ruta utiliza el mesher propio, conserva chunks para culling y no depende de las mallas de previsualización de Voxel Importer. Consultar el [flujo de producción](MATERIALS.md#familias-semánticas-de-producción).
 
 ## Transiciones y sombras
 

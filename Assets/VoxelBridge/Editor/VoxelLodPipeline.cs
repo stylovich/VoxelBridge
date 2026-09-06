@@ -16,6 +16,7 @@ namespace LocalModels.VoxelBridge
         public float AlphaCutoff;
         public string ExportFolder;
         public bool IncludeInactiveObjects = true;
+        public bool GenerateLod0Only;
     }
 
     internal readonly struct VoxelLodBuildResult
@@ -342,6 +343,7 @@ namespace LocalModels.VoxelBridge
                 SingleColor = source.SingleColor,
                 AlphaCutoff = source.AlphaCutoff,
                 ExportFolder = source.ExportFolder,
+                GenerateLod0Only = source.GenerateLod0Only,
                 IncludeInactiveObjects = !batchOptions.IgnoreInactiveObjects
             };
         }
@@ -513,7 +515,7 @@ namespace LocalModels.VoxelBridge
                 var entries = new List<VoxelLodEntry>();
                 var voxPaths = new List<string>();
 
-                for (int lodIndex = 0; lodIndex < profile.LodCount; lodIndex++)
+                for (int lodIndex = 0; lodIndex < (options.GenerateLod0Only ? 1 : profile.LodCount); lodIndex++)
                 {
                     int multiplier = checked(
                         initialVoxelMultiplier * profile.GetLodMultiplier(lodIndex));
@@ -577,7 +579,8 @@ namespace LocalModels.VoxelBridge
         {
             int multiplier = checked(
                 initialVoxelMultiplier * profile.GetLodMultiplier(lodIndex));
-            float progressBase = (float)lodIndex / profile.LodCount;
+            int count = options.GenerateLod0Only ? 1 : profile.LodCount;
+            float progressBase = (float)lodIndex / count;
             var settings = new VoxelizationSettings
             {
                 VoxelSize = profile.BaseVoxelSize * multiplier,
@@ -591,7 +594,7 @@ namespace LocalModels.VoxelBridge
             };
             return MeshVoxelizer.Voxelize(source, settings, (progress, message) =>
                 cancelProgress != null && cancelProgress(
-                    progressBase + progress / profile.LodCount,
+                    progressBase + progress / count,
                     $"LOD {lodIndex}: {message}"));
         }
 
@@ -639,6 +642,13 @@ namespace LocalModels.VoxelBridge
                     throw new InvalidDataException("The LOD manifest is missing or unsupported. Regenerate the family before creating a manual LOD.");
                 if (manifest.familyId != parent.familyId)
                     throw new InvalidDataException("The manifest does not belong to the same LOD family.");
+                if (manifest.productionMeshes)
+                {
+                    VoxelProductionFamily.DeriveLevel(manifestPath, targetLodIndex, mode);
+                    var production = VoxelProductionFamily.Load(manifestPath);
+                    return new VoxelLodBuildResult(manifestPath, production.prefabAssetPath,
+                        new[] { VoxelProductionFamily.SourcePath(production.lods[targetLodIndex]) });
+                }
             }
             else
             {
@@ -752,6 +762,11 @@ namespace LocalModels.VoxelBridge
         {
             if (!TryReadManifest(manifestAssetPath, out VoxelLodSetManifest manifest))
                 throw new InvalidDataException("The LOD manifest is invalid or unsupported. Regenerate the family.");
+            if (manifest.productionMeshes)
+            {
+                VoxelProductionFamily.RebuildAll(manifestAssetPath);
+                return manifest.prefabAssetPath;
+            }
             foreach (VoxelLodEntry entry in manifest.lods ?? Array.Empty<VoxelLodEntry>())
             {
                 if (!VoxelImporterIntegration.ApplyAndReimport(
@@ -819,7 +834,7 @@ namespace LocalModels.VoxelBridge
             return false;
         }
 
-        private static void WriteGrid(string voxAssetPath, VoxelGrid grid, Bounds sourceBounds,
+        internal static void WriteGrid(string voxAssetPath, VoxelGrid grid, Bounds sourceBounds,
             string sourceName, string sourceAssetPath, string familyId, string manifestAssetPath,
             int lodIndex, int lodMultiplier, VoxelLodGenerationMode mode, string parentVoxAssetPath,
             VoxelStyleProfile profile, VoxelBridgeMetadata semanticSource = null)
@@ -874,7 +889,7 @@ namespace LocalModels.VoxelBridge
                 lodMultiplier = lodMultiplier,
                 lodGenerationMode = mode,
                 parentVoxAssetPath = parentVoxAssetPath,
-                baseVoxelSize = profile.BaseVoxelSize,
+                baseVoxelSize = semanticSource?.baseVoxelSize > 0 ? semanticSource.baseVoxelSize : profile.BaseVoxelSize,
                 chunkCellSize = profile.ChunkCellSize,
                 sourceBoundsMin = sourceBounds.min,
                 sourceBoundsMax = sourceBounds.max,

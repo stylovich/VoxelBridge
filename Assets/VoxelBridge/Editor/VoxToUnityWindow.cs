@@ -19,6 +19,7 @@ namespace LocalModels.VoxelBridge
         private TextAsset metadataAsset;
         private ReturnAxis returnAxis = ReturnAxis.MagicaVoxelDefault;
         private string prefabFolder = "Assets/VoxelBridgeImports";
+        [SerializeField] private VoxelStyleProfile productionProfile;
         private string status;
         private Vector2 scroll;
 
@@ -67,6 +68,14 @@ namespace LocalModels.VoxelBridge
                 voxAsset = Selection.activeObject;
         }
 
+        internal static void OpenProductionFamily(string sourcePath)
+        {
+            var window = GetWindow<VoxToUnityWindow>();
+            window.titleContent = new GUIContent("VOX to Unity");
+            window.voxAsset = AssetDatabase.LoadMainAssetAtPath(sourcePath);
+            window.Show();
+        }
+
         private void OnGUI()
         {
             scroll = EditorGUILayout.BeginScrollView(scroll);
@@ -77,6 +86,7 @@ namespace LocalModels.VoxelBridge
             DrawDirectImport();
             EditorGUILayout.Space(18);
             DrawProductionExport();
+            DrawProductionFamily();
             EditorGUILayout.Space(18);
             DrawObjAlternative();
             if (!string.IsNullOrEmpty(status)) EditorGUILayout.HelpBox(status, MessageType.None);
@@ -120,6 +130,31 @@ namespace LocalModels.VoxelBridge
                         AssetDatabase.GetAssetPath(voxAsset)));
                 if (GUILayout.Button("Open in MagicaVoxel")) MagicaVoxelLauncher.OpenAsset(voxAsset);
                 EditorGUILayout.EndHorizontal();
+            }
+        }
+
+        private void DrawProductionFamily()
+        {
+            EditorGUILayout.Space(12);
+            EditorGUILayout.LabelField("Semantic Production LOD Family", EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox("Crea una familia de producción desde el LOD0 semántico editado. El .vox existente sigue siendo la fuente; los siguientes niveles se crean explícitamente desde el prefab. Cada nivel conserva chunks, IDs y un material compartido. Máximo 8 millones de celdas y 500.000 quads por nivel. La unidad efectiva de LOD0 determina la escala de toda la familia.", MessageType.Info);
+            productionProfile = (VoxelStyleProfile)EditorGUILayout.ObjectField("LOD Profile", productionProfile, typeof(VoxelStyleProfile), false);
+            using (new EditorGUI.DisabledScope(productionProfile == null || !VoxelImporterIntegration.IsVoxAsset(voxAsset)))
+            {
+                if (GUILayout.Button("Create or Select Production LOD Family", GUILayout.Height(30)))
+                {
+                    try
+                    {
+                        string manifestPath = VoxelProductionFamily.Create(AssetDatabase.GetAssetPath(voxAsset), productionProfile, prefabFolder, VoxelProductionEditor.Progress);
+                        var manifest = VoxelProductionFamily.Load(manifestPath);
+                        Selection.activeObject = AssetDatabase.LoadMainAssetAtPath(manifest.prefabAssetPath);
+                        EditorGUIUtility.PingObject(Selection.activeObject);
+                        status = "Production family: " + manifest.prefabAssetPath;
+                    }
+                    catch (OperationCanceledException) { }
+                    catch (Exception exception) { EditorUtility.DisplayDialog("Voxel Bridge", exception.Message, "Close"); }
+                    finally { EditorUtility.ClearProgressBar(); }
+                }
             }
         }
 

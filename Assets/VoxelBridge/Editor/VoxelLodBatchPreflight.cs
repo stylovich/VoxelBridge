@@ -159,7 +159,7 @@ namespace LocalModels.VoxelBridge
             string options = lodOptions == null
                 ? "none"
                 : $"{lodOptions.ColorMode}:{lodOptions.AlphaCutoff:R}:{lodOptions.ExportFolder}:" +
-                  $"{includeInactiveObjects}";
+                  $"{includeInactiveObjects}:{lodOptions.GenerateLod0Only}";
             return Hash128.Compute(
                 $"{sources}#{profileValues}#{options}#{batchOptions.MaximumEstimatedMemoryBytes}:" +
                 $"{batchOptions.SkipSourcesOverMemoryBudget}:{batchOptions.AdaptInitialVoxelSize}:" +
@@ -227,7 +227,7 @@ namespace LocalModels.VoxelBridge
                     VoxelLodBatchSourceEstimate estimate = EstimateAtMultiplier(
                         reuseKey, sourceName, profile,
                         batchOptions, bounds, sourceOverhead,
-                        initialLodIndex, initialMultiplier);
+                        initialLodIndex, initialMultiplier, lodOptions.GenerateLod0Only);
                     lastValid = estimate;
                     if (!estimate.IsOverBudget) return estimate;
                 }
@@ -254,7 +254,7 @@ namespace LocalModels.VoxelBridge
             VoxelStyleProfile profile,
             VoxelLodBatchOptions batchOptions,
             Bounds bounds, long sourceOverhead, int initialLodIndex,
-            int initialMultiplier)
+            int initialMultiplier, bool lod0Only)
         {
             var lodPlans = new List<VoxelGridPlan>(profile.LodCount);
             long peakBytes = 0;
@@ -262,7 +262,7 @@ namespace LocalModels.VoxelBridge
             int bytesPerCell = profile.FillInterior
                 ? DenseBytesPerCellWithFill
                 : DenseBytesPerCellWithoutFill;
-            for (int lodIndex = 0; lodIndex < profile.LodCount; lodIndex++)
+            for (int lodIndex = 0; lodIndex < (lod0Only ? 1 : profile.LodCount); lodIndex++)
             {
                 int effectiveMultiplier = checked(
                     initialMultiplier * profile.GetLodMultiplier(lodIndex));

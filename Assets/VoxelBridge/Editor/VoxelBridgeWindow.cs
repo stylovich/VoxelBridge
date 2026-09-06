@@ -17,6 +17,7 @@ namespace LocalModels.VoxelBridge
             "Assets/VoxelBridgeSettings/VoxelImpostorProfile.asset";
 
         private Object source;
+        [SerializeField] private bool generateLod0Only = true;
         [SerializeField] private bool individualGenerateImpostor;
         [SerializeField] private bool individualPlaceInScene;
         [SerializeField] private bool individualDisableOriginalObject = true;
@@ -281,6 +282,9 @@ namespace LocalModels.VoxelBridge
             }
 
             DrawColorSettings();
+            generateLod0Only = EditorGUILayout.Popup(new GUIContent("Generate Levels",
+                "LOD0 Only permite editar y asignar IDs antes de derivar los demás niveles. Se aplica a la conversión individual y por lotes; no cambia Maximum Allowed Base."),
+                generateLod0Only ? 0 : 1, new[] { "LOD0 Only", "All Profile Levels" }) == 0;
             VoxelBridgeFolderPicker.Draw("Family Folder", ref exportFolder);
             DrawIndividualSafetyOptions();
             bool individualImpostorReady = DrawIndividualImpostorOptions();
@@ -1081,6 +1085,7 @@ namespace LocalModels.VoxelBridge
             ColorMode = colorMode,
             SingleColor = singleColor,
             AlphaCutoff = alphaCutoff,
+            GenerateLod0Only = generateLod0Only,
             ExportFolder = exportFolder
         };
 

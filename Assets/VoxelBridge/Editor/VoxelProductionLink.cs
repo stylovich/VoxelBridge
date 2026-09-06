@@ -16,6 +16,7 @@ namespace LocalModels.VoxelBridge
         public string ownerGuid;
         public string sourceGuid;
         public string meshGuid;
+        public string manifestGuid;
 
         public string SourcePath
         {
@@ -36,7 +37,8 @@ namespace LocalModels.VoxelBridge
                 throw new InvalidDataException("This prefab has no production source link. Create a linked output from its source VOX first.");
             var link = JsonUtility.FromJson<VoxelProductionLink>(importer.userData.Substring(Prefix.Length));
             if (link == null || link.version != 1 || string.IsNullOrEmpty(link.sourceGuid) ||
-                string.IsNullOrEmpty(link.meshGuid) || link.ownerGuid != AssetDatabase.AssetPathToGUID(prefabPath))
+                (string.IsNullOrEmpty(link.meshGuid) && string.IsNullOrEmpty(link.manifestGuid)) ||
+                link.ownerGuid != AssetDatabase.AssetPathToGUID(prefabPath))
                 throw new InvalidDataException("Invalid or copied production link. Rebuild the original prefab, not an independent duplicate.");
             return link;
         }
@@ -48,7 +50,7 @@ namespace LocalModels.VoxelBridge
             return importer != null && importer.userData.StartsWith(Prefix, StringComparison.Ordinal);
         }
 
-        internal static void Store(GameObject prefab, string sourcePath, Mesh mesh)
+        internal static void Store(GameObject prefab, string sourcePath, Mesh mesh, string manifestPath = null)
         {
             if (string.IsNullOrEmpty(AssetDatabase.AssetPathToGUID(sourcePath)))
                 AssetDatabase.ImportAsset(sourcePath, ImportAssetOptions.ForceSynchronousImport);
@@ -60,9 +62,11 @@ namespace LocalModels.VoxelBridge
             {
                 ownerGuid = AssetDatabase.AssetPathToGUID(path),
                 sourceGuid = AssetDatabase.AssetPathToGUID(sourcePath),
-                meshGuid = AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(mesh))
+                meshGuid = mesh != null ? AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(mesh)) : null,
+                manifestGuid = string.IsNullOrEmpty(manifestPath) ? null : AssetDatabase.AssetPathToGUID(manifestPath)
             };
-            if (string.IsNullOrEmpty(link.sourceGuid) || string.IsNullOrEmpty(link.meshGuid))
+            if (string.IsNullOrEmpty(link.sourceGuid) ||
+                (string.IsNullOrEmpty(link.meshGuid) && string.IsNullOrEmpty(link.manifestGuid)))
                 throw new InvalidDataException("Could not resolve production asset GUIDs.");
             importer.userData = Prefix + JsonUtility.ToJson(link);
             EditorUtility.SetDirty(importer);

@@ -36,37 +36,75 @@ namespace LocalModels.VoxelBridge
             if (maximumQuads < 1 || maximumQuads > MaximumQuads)
                 throw new ArgumentOutOfRangeException(nameof(maximumQuads));
             bool[] exterior = hideEnclosedCavities ? FindExterior(grid, progress) : null;
+            return BuildRegion(grid, exterior, Vector3Int.zero, grid.Size, progress, maximumQuads, false);
+        }
+
+        internal static Mesh[] BuildChunks(VoxelGrid grid, int chunkSize, bool hideEnclosedCavities,
+            Action<float> progress = null)
+        {
+            if (grid == null || !grid.IsSemantic) throw new ArgumentException("A semantic grid is required.");
+            ValidateGrid(grid.Size, grid.Origin, grid.VoxelSize);
+            if (chunkSize < 16 || chunkSize > 256) throw new ArgumentOutOfRangeException(nameof(chunkSize));
+            bool[] exterior = hideEnclosedCavities ? FindExterior(grid, progress) : null;
+            var meshes = new List<Mesh>();
+            int quads = 0;
+            try
+            {
+                for (int z = 0; z < grid.Size.z; z += chunkSize)
+                for (int y = 0; y < grid.Size.y; y += chunkSize)
+                for (int x = 0; x < grid.Size.x; x += chunkSize)
+                {
+                    var offset = new Vector3Int(x, y, z);
+                    Vector3Int size = Vector3Int.Min(Vector3Int.one * chunkSize, grid.Size - offset);
+                    Mesh mesh = BuildRegion(grid, exterior, offset, size, progress, MaximumQuads - quads, true);
+                    mesh.name = $"Chunk_{x / chunkSize}_{y / chunkSize}_{z / chunkSize}";
+                    meshes.Add(mesh);
+                    quads += mesh.vertexCount / 4;
+                }
+                if (quads == 0) throw new InvalidDataException("The voxel grid contains no visible geometry.");
+                return meshes.ToArray();
+            }
+            catch
+            {
+                foreach (Mesh mesh in meshes) UnityEngine.Object.DestroyImmediate(mesh);
+                throw;
+            }
+        }
+
+        private static Mesh BuildRegion(VoxelGrid grid, bool[] exterior, Vector3Int offset, Vector3Int size,
+            Action<float> progress, int maximumQuads, bool allowEmpty)
+        {
             var vertices = new List<Vector3>();
             var normals = new List<Vector3>();
             var tangents = new List<Vector4>();
             var colors = new List<Vector2>();
             var surfaces = new List<Vector2>();
             var triangles = new List<int>();
-            int totalSlices = grid.Size.x + grid.Size.y + grid.Size.z + 3;
+            int totalSlices = size.x + size.y + size.z + 3;
             int completedSlices = 0;
 
             for (int axis = 0; axis < 3; axis++)
             {
                 int u = (axis + 1) % 3, v = (axis + 2) % 3;
-                int width = grid.Size[u], height = grid.Size[v];
+                int width = size[u], height = size[v];
                 var mask = new int[width * height];
-                for (int slice = -1; slice < grid.Size[axis]; slice++)
+                for (int slice = -1; slice < size[axis]; slice++)
                 {
                     progress?.Invoke(0.2f + 0.8f * completedSlices++ / totalSlices);
-                    var p = Vector3Int.zero;
-                    p[axis] = slice;
+                    var p = offset;
+                    p[axis] += slice;
                     for (int y = 0; y < height; y++)
                     for (int x = 0; x < width; x++)
                     {
-                        p[u] = x; p[v] = y;
-                        int a = slice >= 0 ? grid.Index(p.x, p.y, p.z) : -1;
+                        p[u] = offset[u] + x; p[v] = offset[v] + y;
+                        int a = p[axis] >= 0 ? grid.Index(p.x, p.y, p.z) : -1;
                         p[axis]++;
-                        int b = slice + 1 < grid.Size[axis] ? grid.Index(p.x, p.y, p.z) : -1;
+                        int b = p[axis] < grid.Size[axis] ? grid.Index(p.x, p.y, p.z) : -1;
                         p[axis]--;
                         bool solidA = a >= 0 && grid.Occupied[a];
                         bool solidB = b >= 0 && grid.Occupied[b];
                         int value = 0;
-                        if (solidA != solidB)
+                        if (solidA != solidB && (solidA ? slice >= 0 : slice + 1 < size[axis]))
                         {
                             int air = solidA ? b : a;
                             if (exterior == null || air < 0 || exterior[air])
@@ -92,7 +130,7 @@ namespace LocalModels.VoxelBridge
                         }
                         if (vertices.Count / 4 >= maximumQuads)
                             throw new InvalidDataException($"The mesh exceeds the {maximumQuads:N0}-quad safety limit. No output was saved.");
-                        p[axis] = slice + 1; p[u] = x; p[v] = y;
+                        p[axis] = offset[axis] + slice + 1; p[u] = offset[u] + x; p[v] = offset[v] + y;
                         Vector3 corner = grid.Origin + (Vector3)p * grid.VoxelSize;
                         Vector3 du = Vector3.zero, dv = Vector3.zero, normal = Vector3.zero;
                         du[u] = w * grid.VoxelSize; dv[v] = h * grid.VoxelSize;
@@ -122,7 +160,7 @@ namespace LocalModels.VoxelBridge
                     }
                 }
             }
-            if (vertices.Count == 0) throw new InvalidDataException("The voxel grid contains no visible geometry.");
+            if (vertices.Count == 0 && !allowEmpty) throw new InvalidDataException("The voxel grid contains no visible geometry.");
             var mesh = new Mesh { name = "SemanticLOD0", indexFormat = vertices.Count > 65535 ? IndexFormat.UInt32 : IndexFormat.UInt16 };
             try
             {
