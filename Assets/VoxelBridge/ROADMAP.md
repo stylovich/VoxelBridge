@@ -165,6 +165,8 @@ El shader de horneado de Amplify Impostors debe leer las mismas LUT y los mismos
 
 ## DOTS, subescenas y culling
 
+`DOTS Stress Test` permite crear entidades progresivamente desde prefabs horneados, revisar recursos compartidos y comparar frustum con contadores agregados de Entities Graphics. El procedimiento se describe en [README.md](README.md#prueba-masiva-en-dots). No sustituye la validación visual, las capturas de Profiler o el análisis de residencia por zonas.
+
 La validación DOTS debe realizarse primero con los impostores desactivados para obtener una referencia clara. Debe comprobar:
 
 - conversión de los prefabs Voxel Bridge a entidades;

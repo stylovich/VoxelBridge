@@ -1,0 +1,6 @@
+{
+  "name": "VoxelBridge.DotsDiagnostics",
+  "rootNamespace": "LocalModels.VoxelBridge.Diagnostics",
+  "references": ["Unity.Entities", "Unity.Transforms", "Unity.Mathematics", "Unity.Collections"],
+  "autoReferenced": true
+}

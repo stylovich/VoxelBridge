@@ -1,7 +1,7 @@
 {
   "name": "VoxelBridge.Editor",
   "rootNamespace": "LocalModels.VoxelBridge",
-  "references": ["VoxelBridge.Authoring"],
+  "references": ["VoxelBridge.Authoring", "VoxelBridge.DotsDiagnostics", "Unity.Entities", "Unity.Entities.Hybrid", "Unity.Entities.Graphics", "Unity.Transforms", "Unity.Mathematics", "Unity.Mathematics.Extensions", "Unity.Collections"],
   "includePlatforms": [
     "Editor"
   ],

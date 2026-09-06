@@ -10,6 +10,8 @@ Copiar `Assets/VoxelBridge` junto con sus archivos `.meta` al proyecto. El módu
 
 La generación y la edición son procesos de autoría. Los prefabs contienen meshes y renderers convencionales; el módulo no implementa edición voxel en runtime.
 
+El diagnóstico de entidades requiere Entities 1.4 y Entities Graphics 1.4, incluidos en la configuración DOTS del proyecto.
+
 Las paletas, el transporte de `ColorID + SurfaceID` y las familias semánticas de producción se describen en [MATERIALS.md](MATERIALS.md). Los impostores semánticos y la validación DOTS figuran en [ROADMAP.md](ROADMAP.md).
 
 ## Herramientas
@@ -18,6 +20,7 @@ Las paletas, el transporte de `ColorID + SurfaceID` y las familias semánticas d
 |---|---|
 | `Physical Models and LODs` | Conversión con unidad física, familias LOD, lotes e impostores |
 | `Combine Voxel Models` | Unión exacta de instancias semánticas en una familia editable independiente |
+| `DOTS Stress Test` | Spawn manual de entidades, recursos compartidos y diagnóstico de frustum |
 | `Resolution-Based Conversion` | Conversión individual con una resolución explícita |
 | `VOX to Unity` | Sincronización de `.vox`, exportación semántica LOD0, familias de producción o retorno desde OBJ |
 | `Bind Semantic IDs` | Asignación de ColorID y SurfaceID a los slots de un `.vox` |
@@ -200,6 +203,32 @@ Los formatos admitidos son sidecar v3 para RGB, sidecar v4 para datos semántico
 Los logs se reservan para fallos, conflictos, recuperación y resúmenes de acciones explícitas. Las importaciones correctas no generan un mensaje por archivo.
 
 ## Validación
+
+### Prueba masiva en DOTS
+
+1. Crear un GameObject vacío dentro de una subescena y añadir `Voxel Bridge > DOTS Stress Spawner`.
+2. Asignar un **prefab de producción**, no un `.vox` importado. Configurar inicialmente `Count = 100`, `Columns = 10` e `Instances Per Frame = 16`. Ajustar `Spacing` por encima del tamaño del modelo para evitar solapamientos.
+3. Guardar la subescena y entrar en Play Mode. Abrir `Tools > Voxel Bridge > DOTS Stress Test` y seleccionar el spawner del mundo predeterminado.
+4. Pulsar `Spawn / Resume`. `Pause` detiene la creación sin eliminar instancias; `Clear Spawned` elimina únicamente las raíces creadas por ese spawner y sus grupos vinculados, de forma gradual.
+5. Asignar `Frustum Camera`, pausar el spawn y esperar un frame antes de `Capture Resource and Frustum Snapshot`.
+6. Comparar el mismo prefab con 100, 500 y 1.000 instancias. Limpiar primero para cambiar `Runtime Target Count`, columnas, separación o ritmo desde la ventana; estos valores no modifican el componente de autoría y se pierden al salir de Play Mode.
+
+La distribución es una cuadrícula XZ centrada en la posición horneada del componente y orientada con su rotación. La escala del componente no se aplica; los clones conservan la escala del prefab. El spawn utiliza `EntityManager.Instantiate` y su `LinkedEntityGroup`, por lo que incluye los chunks, LODs y referencias remapeadas de cada modelo sin crear nuevos Materials o meshes.
+
+El inicio es manual. Se permiten hasta 10.000 raíces y 250.000 entidades vinculadas por spawner; son límites de seguridad, no presupuestos calculados de RAM o VRAM. La eliminación del spawner o la descarga de su subescena activa la limpieza de sus instancias restantes. Utilizar varios spawners para comparar prefabs distintos. No cambiar el prefab ni efectuar rebaking durante una medición.
+
+La ventana de control pertenece al Editor; no proporciona controles de spawn en un Player. Mantener los spawners de diagnóstico fuera de las escenas destinadas a producción.
+
+| Lectura | Interpretación |
+|---|---|
+| `Unique Materials / Meshes` | Identidades reales de recursos utilizados por las entidades de la prueba, incluidos todos sus LODs. La cantidad única debe permanecer estable al aumentar clones del mismo prefab. |
+| `Inside / Outside Frustum` | Estimación por `WorldRenderBounds` respecto a la cámara seleccionada; no aplica selección de LOD ni oclusión y no representa draws efectivos. |
+| `Entities Graphics — All Views` | Contadores nativos de rendering y culling para todo el mundo y sus callbacks. No aíslan este spawner, Game View ni una cámara concreta. |
+| `Instance Data GPU Memory` | Memoria gestionada para datos de instancias, subidas y sincronización. No incluye toda la VRAM de texturas y meshes. |
+
+Para comprobar el descarte, comparar la cámara mirando hacia el grupo y en dirección contraria, con idénticas condiciones. Evitar que Scene View u otras cámaras sigan mostrando el grupo. Los objetos fuera de Game View pueden seguir participando en sombras. Utilizar Profiler o Frame Debugger para confirmar los draws de la cámara y separar los pases de sombras. La captura de recursos sincroniza trabajos de ECS y puede alterar el tiempo de ese frame; no utilizar ese frame como medición de rendimiento.
+
+### Pruebas automatizadas
 
 Con el Editor cerrado, ejecutar las pruebas EditMode desde la raíz del proyecto:
 
