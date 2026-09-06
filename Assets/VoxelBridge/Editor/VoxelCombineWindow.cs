@@ -18,6 +18,7 @@ namespace LocalModels.VoxelBridge
         private string report;
         private MessageType reportType;
         private Vector2 scroll;
+        private VoxelSourceSnap[] pendingSnap;
 
         [MenuItem("Tools/Voxel Bridge/Combine Voxel Models", false, 103)]
         [MenuItem("GameObject/Voxel Bridge/Combine Voxel Models", false, 53)]
@@ -34,7 +35,7 @@ namespace LocalModels.VoxelBridge
             scroll = EditorGUILayout.BeginScrollView(scroll);
             EditorGUILayout.HelpBox("Une los LOD0 guardados de instancias de producción semántica. Conserva ColorID, SurfaceID y las piezas Keep Original. Las fuentes no se sobrescriben; la salida es una familia independiente, editable en MagicaVoxel.", MessageType.Info);
             EditorGUILayout.HelpBox("La unión exacta requiere celdas del tamaño base del perfil, posiciones alineadas a la rejilla mundial y rotaciones ortogonales. No remuestrea, no rellena nuevos huecos y no copia scripts, luces ni colliders. Las modificaciones internas de las instancias deben aplicarse en el VOX.", MessageType.Info);
-            if (GUILayout.Button("Use Scene Selection")) { selection = Selection.gameObjects; report = null; }
+            if (GUILayout.Button("Use Scene Selection")) { selection = Selection.gameObjects; report = null; pendingSnap = null; }
             using (new EditorGUI.DisabledScope(true))
                 foreach (var item in selection) EditorGUILayout.ObjectField(item, typeof(GameObject), true);
             EditorGUI.BeginChangeCheck();
@@ -45,19 +46,59 @@ namespace LocalModels.VoxelBridge
             generateLods = EditorGUILayout.Toggle(new GUIContent("Generate Derived LODs", "Reduce sucesivamente el volumen combinado según los multiplicadores del perfil. Desactivar para editar primero el LOD0 y derivar los niveles desde el prefab."), generateLods);
             placeResult = EditorGUILayout.Toggle("Place Result in Scene", placeResult);
             using (new EditorGUI.DisabledScope(!placeResult)) disableSources = EditorGUILayout.Toggle("Disable Source Instances", disableSources);
-            if (EditorGUI.EndChangeCheck()) report = null;
+            if (EditorGUI.EndChangeCheck()) { report = null; pendingSnap = null; }
             EditorGUILayout.HelpBox("Mantener grupos compactos. Un único LODGroup aplica las transiciones al conjunto; una agrupación extensa limita la eficacia del culling. No se permite cruzar escenas. Los impostores semánticos requieren adaptar su horneado.", MessageType.Info);
             using (new EditorGUI.DisabledScope(profile == null || selection.Length == 0 || EditorApplication.isPlayingOrWillChangePlaymode))
             {
+                if (GUILayout.Button(new GUIContent("Snap Sources to Grid", "Previsualiza y confirma el ajuste de posición y rotación de las raíces. No modifica escalas ni assets. Se puede deshacer en una sola operación."))) SnapSources();
                 if (GUILayout.Button("Analyze Combination")) Run(false);
                 if (GUILayout.Button("Create Combined Family")) Run(true);
             }
             if (!string.IsNullOrEmpty(report)) EditorGUILayout.HelpBox(report, reportType);
+            if (pendingSnap != null)
+            {
+                EditorGUILayout.HelpBox("Se ajustará cada raíz por separado. Las separaciones y los solapamientos pueden cambiar. No se modifican escalas, LODs internos ni archivos. La operación admite Undo.", MessageType.Warning);
+                using (new EditorGUI.DisabledScope(EditorApplication.isPlayingOrWillChangePlaymode))
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    if (GUILayout.Button("Apply Snap"))
+                    {
+                        try
+                        {
+                            int count = VoxelFamilyCombiner.ApplySnap(pendingSnap, profile);
+                            report = $"Snapped {count} source roots. Run Analyze Combination to review overlaps and limits.";
+                            reportType = MessageType.Info;
+                        }
+                        catch (Exception ex) { report = ex.Message; reportType = MessageType.Error; }
+                        pendingSnap = null;
+                    }
+                    if (GUILayout.Button("Cancel Snap")) { pendingSnap = null; report = "Snap cancelled. No source transforms were changed."; reportType = MessageType.Info; }
+                }
+            }
             EditorGUILayout.EndScrollView();
+        }
+
+        private void SnapSources()
+        {
+            pendingSnap = null;
+            try
+            {
+                var plan = VoxelFamilyCombiner.PreviewSnap(selection, profile, ignoreInactive);
+                var changed = plan.Where(p => p.Changed).ToArray();
+                report = "Snap Preview (world space):\n" + string.Join("\n", changed.Select(p =>
+                    $"{p.Instance.name}\nPosition: {p.OriginalPosition.ToString("F6")} > {p.Position.ToString("F6")}\n" +
+                    $"Rotation: {p.OriginalRotation.eulerAngles.ToString("F3")} > {p.Rotation.eulerAngles.ToString("F3")} " +
+                    $"({Quaternion.Angle(p.OriginalRotation, p.Rotation):F3} deg)"));
+                reportType = MessageType.Info;
+                if (changed.Length == 0) { report = "All source roots are already aligned."; return; }
+                pendingSnap = plan;
+            }
+            catch (Exception ex) { report = ex.Message; reportType = MessageType.Error; }
         }
 
         private void Run(bool build)
         {
+            pendingSnap = null;
             try
             {
                 // Re-read sources on every action; a preview never authorizes stale transforms or VOX data.

@@ -12,6 +12,17 @@ namespace LocalModels.VoxelBridge.Tests
 {
     public sealed class VoxelCellTransformTests
     {
+        [TestCase(0, 182.8828f, 0, 0, 180, 0)]
+        [TestCase(89, 181, 1, 90, 180, 0)]
+        [TestCase(0, 359, 0, 0, 0, 0)]
+        public void NearestGridRotation_UsesClosestCubeOrientation(float x, float y, float z, float tx, float ty, float tz)
+        {
+            var result = VoxelFamilyCombiner.NearestGridRotation(Quaternion.Euler(x, y, z));
+            Assert.That(Quaternion.Angle(result, Quaternion.Euler(tx, ty, tz)), Is.LessThan(.01f));
+            var metadata = new VoxelBridgeMetadata { voxelSize = .024f, unityGridSize = Vector3Int.one * 200 };
+            Assert.DoesNotThrow(() => new VoxelCellTransform(metadata, Matrix4x4.Rotate(result), .024f));
+        }
+
         [TestCase(0, 0, 0, 1)]
         [TestCase(0, 90, 0, 1)]
         [TestCase(90, 180, 270, 1)]
@@ -135,6 +146,93 @@ namespace LocalModels.VoxelBridge.Tests
             b = (GameObject)PrefabUtility.InstantiatePrefab(prefab, preview);
             b.transform.SetParent(parent.transform, false);
             b.transform.localPosition = Vector3.right * 2.5f;
+        }
+
+        [TestCase(1f)]
+        [TestCase(2f)]
+        public void Snap_PreviewsRootsPreservesScaleAndSupportsUndoRedo(float parentScale)
+        {
+            SceneManager.MoveGameObjectToScene(parent, SceneManager.GetActiveScene());
+            parent.transform.SetPositionAndRotation(new Vector3(5, 1, -2), Quaternion.Euler(0, 31, 0));
+            parent.transform.localScale = Vector3.one * parentScale;
+            a.transform.localScale = Vector3.one / parentScale;
+            b.transform.localScale = new Vector3(-1, 1, 1) / parentScale;
+            a.transform.SetPositionAndRotation(new Vector3(-31.71f, 0, 71.736f), Quaternion.Euler(0, 182.8828f, 0));
+            b.transform.SetPositionAndRotation(new Vector3(-30.61f, 0, 71.563f), Quaternion.Euler(0, 182.8828f, 0));
+            var aPosition = a.transform.localPosition; var bPosition = b.transform.localPosition;
+            var aRotation = a.transform.localRotation; var bRotation = b.transform.localRotation;
+            var aScale = a.transform.localScale; var bScale = b.transform.localScale;
+            var parentMatrix = parent.transform.localToWorldMatrix;
+            byte[] sourceBytes = File.ReadAllBytes(VoxelLodPipeline.AssetPathToAbsolute(sourcePath));
+            try
+            {
+                var plan = VoxelFamilyCombiner.PreviewSnap(new[] { a.transform.Find("LOD0").gameObject, b.transform.Find("LOD0").gameObject }, profile, true);
+                Assert.That(plan.Select(p => p.Instance), Is.EquivalentTo(new[] { a, b }));
+                Assert.That(plan.All(p => p.Changed), Is.True);
+                Assert.That(a.transform.localPosition, Is.EqualTo(aPosition));
+                Assert.That(b.transform.localRotation, Is.EqualTo(bRotation));
+                Assert.That(VoxelFamilyCombiner.ApplySnap(plan, profile), Is.EqualTo(2));
+                Assert.That(Quaternion.Angle(a.transform.rotation, Quaternion.Euler(0, 180, 0)), Is.LessThan(.01f));
+                Assert.DoesNotThrow(() => VoxelFamilyCombiner.Analyze(new[] { parent }, profile));
+                Assert.That(a.transform.localScale, Is.EqualTo(aScale));
+                Assert.That(b.transform.localScale, Is.EqualTo(bScale));
+                Assert.That(parent.transform.localToWorldMatrix, Is.EqualTo(parentMatrix));
+                Assert.That(a.transform.Find("LOD0").localPosition, Is.EqualTo(Vector3.zero));
+                Undo.PerformUndo();
+                Assert.That(a.transform.localPosition, Is.EqualTo(aPosition));
+                Assert.That(b.transform.localPosition, Is.EqualTo(bPosition));
+                Assert.That(a.transform.localRotation, Is.EqualTo(aRotation));
+                Assert.That(b.transform.localRotation, Is.EqualTo(bRotation));
+                Undo.PerformRedo();
+                Assert.That(a.transform.localPosition, Is.EqualTo(plan[0].LocalPosition));
+                Assert.That(b.transform.localPosition, Is.EqualTo(plan[1].LocalPosition));
+                Assert.That(b.transform.localRotation, Is.EqualTo(plan[1].LocalRotation));
+                Assert.DoesNotThrow(() => VoxelFamilyCombiner.Analyze(new[] { parent }, profile));
+                Assert.That(File.ReadAllBytes(VoxelLodPipeline.AssetPathToAbsolute(sourcePath)), Is.EqualTo(sourceBytes));
+                Undo.PerformUndo();
+            }
+            finally { SceneManager.MoveGameObjectToScene(parent, preview); }
+        }
+
+        [Test]
+        public void Snap_RejectsIncompatibleScaleWithoutChangingAnySource()
+        {
+            a.transform.position = new Vector3(.03f, .02f, .01f);
+            b.transform.localScale = new Vector3(1.1f, 1, 1);
+            var position = a.transform.position;
+            int undoGroup = Undo.GetCurrentGroup();
+            Assert.Throws<InvalidDataException>(() => VoxelFamilyCombiner.PreviewSnap(new[] { parent }, profile, true));
+            Assert.That(a.transform.position, Is.EqualTo(position));
+            Assert.That(Undo.GetCurrentGroup(), Is.EqualTo(undoGroup));
+        }
+
+        [Test]
+        public void Snap_RejectsStalePreviewAndDoesNotRecordNoOp()
+        {
+            var aligned = VoxelFamilyCombiner.PreviewSnap(new[] { parent }, profile, true);
+            int undoGroup = Undo.GetCurrentGroup();
+            Assert.That(VoxelFamilyCombiner.ApplySnap(aligned, profile), Is.Zero);
+            Assert.That(Undo.GetCurrentGroup(), Is.EqualTo(undoGroup));
+            a.transform.position = new Vector3(.03f, .02f, .01f);
+            var position = a.transform.position;
+            var plan = VoxelFamilyCombiner.PreviewSnap(new[] { parent }, profile, true);
+            b.transform.position += Vector3.up;
+            Assert.Throws<InvalidOperationException>(() => VoxelFamilyCombiner.ApplySnap(plan, profile));
+            Assert.That(a.transform.position, Is.EqualTo(position));
+            Assert.That(Undo.GetCurrentGroup(), Is.EqualTo(undoGroup));
+            plan = VoxelFamilyCombiner.PreviewSnap(new[] { parent }, profile, true);
+            var otherScene = EditorSceneManager.NewPreviewScene();
+            try
+            {
+                SceneManager.MoveGameObjectToScene(parent, otherScene);
+                Assert.Throws<InvalidOperationException>(() => VoxelFamilyCombiner.ApplySnap(plan, profile));
+            }
+            finally { SceneManager.MoveGameObjectToScene(parent, preview); EditorSceneManager.ClosePreviewScene(otherScene); }
+            var data = new SerializedObject(profile);
+            data.FindProperty("baseVoxelSize").floatValue = .25f;
+            data.ApplyModifiedPropertiesWithoutUndo();
+            Assert.Throws<InvalidOperationException>(() => VoxelFamilyCombiner.ApplySnap(plan, profile));
+            Assert.That(a.transform.position, Is.EqualTo(position));
         }
 
         [Test]

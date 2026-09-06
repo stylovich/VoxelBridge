@@ -81,6 +81,19 @@ namespace LocalModels.VoxelBridge
         internal readonly List<string> ConflictExamples = new List<string>();
     }
 
+    internal sealed class VoxelSourceSnap
+    {
+        internal GameObject Instance;
+        internal Transform Parent;
+        internal UnityEngine.SceneManagement.Scene Scene;
+        internal bool Active;
+        internal Matrix4x4 ParentMatrix;
+        internal Vector3 OriginalPosition, OriginalLocalPosition, OriginalScale, Position, LocalPosition;
+        internal Quaternion OriginalRotation, OriginalLocalRotation, Rotation, LocalRotation;
+        internal float Unit;
+        internal bool Changed => !OriginalLocalPosition.Equals(LocalPosition) || !OriginalLocalRotation.Equals(LocalRotation);
+    }
+
     internal static class VoxelFamilyCombiner
     {
         internal static GameObject[] Collect(GameObject[] selection, bool ignoreInactive)
@@ -115,6 +128,110 @@ namespace LocalModels.VoxelBridge
 
         private static string HierarchyKey(Transform node) =>
             (node.parent == null ? "" : HierarchyKey(node.parent) + "/") + node.GetSiblingIndex().ToString("D8");
+
+        internal static Quaternion NearestGridRotation(Quaternion rotation)
+        {
+            // Search the 24 proper cube orientations, not rounded Euler components.
+            var axes = new[] { Vector3.forward, Vector3.back, Vector3.right, Vector3.left, Vector3.up, Vector3.down };
+            Quaternion best = Quaternion.identity;
+            float bestScore = -1;
+            foreach (var forward in axes) foreach (var up in axes)
+            {
+                if (Vector3.Dot(forward, up) != 0) continue;
+                Quaternion candidate = Quaternion.LookRotation(forward, up);
+                float score = Mathf.Abs(Quaternion.Dot(rotation, candidate));
+                if (score <= bestScore) continue;
+                bestScore = score; best = candidate;
+            }
+            return best;
+        }
+
+        internal static VoxelSourceSnap[] PreviewSnap(GameObject[] selection, VoxelStyleProfile profile, bool ignoreInactive)
+        {
+            if (EditorApplication.isPlayingOrWillChangePlaymode) throw new InvalidOperationException("Exit Play Mode before snapping sources.");
+            if (profile == null || string.IsNullOrEmpty(AssetDatabase.GetAssetPath(profile)) || !profile.TryValidate(out _))
+                throw new InvalidDataException("Assign a valid saved voxel style profile.");
+            var roots = Collect(selection, ignoreInactive);
+            if (roots.Any(a => roots.Any(b => a != b && a.transform.IsChildOf(b.transform))))
+                throw new InvalidDataException("Select independent production roots, not nested source instances together.");
+            return roots.Select(root =>
+            {
+                Transform t = root.transform;
+                Vector3 position = t.position;
+                float unit = profile.BaseVoxelSize;
+                for (int i = 0; i < 3; i++) position[i] = Mathf.Round(position[i] / unit) * unit;
+                Quaternion rotation = NearestGridRotation(t.rotation);
+                var item = new VoxelSourceSnap { Instance = root, Parent = t.parent, Scene = root.scene, Active = root.activeInHierarchy,
+                    ParentMatrix = t.parent == null ? Matrix4x4.identity : t.parent.localToWorldMatrix,
+                    OriginalPosition = t.position, OriginalRotation = t.rotation,
+                    OriginalLocalPosition = t.localPosition, OriginalLocalRotation = t.localRotation, OriginalScale = t.localScale,
+                    Position = position, Rotation = rotation, Unit = unit,
+                    LocalPosition = t.parent == null ? position : t.parent.InverseTransformPoint(position),
+                    LocalRotation = t.parent == null ? rotation : Quaternion.Inverse(t.parent.rotation) * rotation };
+                ValidateSnap(item, item.ParentMatrix * Matrix4x4.TRS(item.LocalPosition, item.LocalRotation, item.OriginalScale));
+                return item;
+            }).ToArray();
+        }
+
+        private static void ValidateSnap(VoxelSourceSnap item, Matrix4x4 matrix)
+        {
+            string path = VoxelProductionLink.PrefabPath(item.Instance);
+            var link = VoxelProductionLink.Load(path);
+            ValidateInstance(item.Instance, path, link);
+            if (!VoxelImporterIntegration.TryLoadMetadata(link.SourcePath, out var metadata, out string error))
+                throw new InvalidDataException(error);
+            if (metadata.formatVersion != 4 || metadata.lodIndex != 0 || metadata.semantic == null)
+                throw new InvalidDataException("Snapping requires a semantic production LOD0.");
+            VoxelSemanticMesher.ValidateGrid(metadata.unityGridSize, metadata.gridOrigin, metadata.voxelSize);
+            try { _ = new VoxelCellTransform(metadata, matrix, item.Unit); }
+            catch (InvalidDataException ex)
+            {
+                throw new InvalidDataException($"'{item.Instance.name}': position and rotation snapping cannot align this source. " +
+                    "Check its effective voxel size, source grid origin and parent scale. Scale is never changed automatically. " + ex.Message, ex);
+            }
+        }
+
+        internal static int ApplySnap(VoxelSourceSnap[] plan, VoxelStyleProfile profile)
+        {
+            if (EditorApplication.isPlayingOrWillChangePlaymode) throw new InvalidOperationException("Exit Play Mode before snapping sources.");
+            if (plan == null || plan.Length == 0 || profile == null || !profile.TryValidate(out _))
+                throw new InvalidOperationException("Create a valid snap preview first.");
+            // Validate the whole preview before recording Undo or changing any source.
+            foreach (var item in plan)
+            {
+                if (item.Instance == null || profile.BaseVoxelSize != item.Unit || item.Instance.scene != item.Scene ||
+                    item.Instance.activeInHierarchy != item.Active)
+                    throw new InvalidOperationException("The sources or profile changed. Preview the snap again.");
+                Transform t = item.Instance.transform;
+                Matrix4x4 parent = t.parent == null ? Matrix4x4.identity : t.parent.localToWorldMatrix;
+                if (t.parent != item.Parent || !parent.Equals(item.ParentMatrix) ||
+                    !t.localPosition.Equals(item.OriginalLocalPosition) || !t.localRotation.Equals(item.OriginalLocalRotation) ||
+                    !t.localScale.Equals(item.OriginalScale))
+                    throw new InvalidOperationException("A source transform changed. Preview the snap again.");
+                ValidateSnap(item, parent * Matrix4x4.TRS(item.LocalPosition, item.LocalRotation, item.OriginalScale));
+            }
+            var changed = plan.Where(p => p.Changed).ToArray();
+            if (changed.Length == 0) return 0;
+            Undo.IncrementCurrentGroup();
+            int group = Undo.GetCurrentGroup();
+            Undo.SetCurrentGroupName("Snap Voxel Sources to Grid");
+            try
+            {
+                Undo.RecordObjects(changed.Select(p => (Object)p.Instance.transform).ToArray(), "Snap Voxel Sources to Grid");
+                foreach (var item in changed)
+                {
+                    Transform t = item.Instance.transform;
+                    t.localPosition = item.LocalPosition; t.localRotation = item.LocalRotation;
+                    ValidateSnap(item, t.localToWorldMatrix);
+                    PrefabUtility.RecordPrefabInstancePropertyModifications(t);
+                }
+                Undo.FlushUndoRecordObjects();
+                Undo.CollapseUndoOperations(group);
+                SceneView.RepaintAll();
+                return changed.Length;
+            }
+            catch { Undo.FlushUndoRecordObjects(); Undo.RevertAllDownToGroup(group); throw; }
+        }
 
         internal static VoxelCombineAnalysis Analyze(GameObject[] selection, VoxelStyleProfile profile,
             bool ignoreInactive = true, Action<float> progress = null)

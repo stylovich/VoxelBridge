@@ -30,11 +30,14 @@ Las paletas, el transporte de `ColorID + SurfaceID` y las familias semánticas d
 1. Colocar dos o más prefabs de producción semántica en la misma escena. Seleccionar las instancias o un padre que las contenga.
 2. Abrir `Tools > Voxel Bridge > Combine Voxel Models` o el menú contextual equivalente de GameObject. `Use Scene Selection` actualiza las entradas.
 3. Asignar un `Voxel Profile` cuya unidad base coincida con el tamaño físico efectivo de las celdas. Mantener posiciones alineadas a la rejilla mundial y rotaciones ortogonales. Se admiten reflexiones y escalas uniformes únicamente cuando conservan esa unidad efectiva; no se remuestrean celdas.
+   `Snap Sources to Grid` muestra una vista previa de posiciones y rotaciones mundiales. `Apply Snap` confirma el ajuste de las raíces; `Cancel Snap` descarta la propuesta. Seleccionar un hijo LOD también resuelve su raíz de producción.
 4. Elegir `Family Name`, `Output Folder` y ejecutar `Analyze Combination`. El informe muestra dimensiones, ocupación, pares semánticos, solapamientos y prioridad de fuentes según el orden de la jerarquía.
 5. Ejecutar `Create Combined Family`. Los solapamientos con IDs distintos requieren confirmar `Keep First Source`; los que comparten ambos IDs se unifican directamente.
 6. Activar `Generate Derived LODs` para reducir el conjunto según el perfil. Desactivar para editar primero LOD0 y derivar los niveles desde el Inspector del prefab.
 
 La herramienta lee los `.vox` LOD0 guardados, incluidos sus retoques, y crea `<Family>_VoxelLOD` con fuentes editables, sidecars, manifiesto, chunks y un único prefab con `LODGroup`. No conserva un vínculo de actualización con las familias de entrada. `Open in MagicaVoxel`, `Semantic Bindings` y `Rebuild` operan sobre las fuentes del conjunto. No se copian los LODs anteriores ni se generan impostores.
+
+El snapping ajusta cada instancia por separado a la posición de rejilla y a la más cercana de las 24 orientaciones ortogonales. Conserva la escala local, los padres, los LODs internos y los archivos fuente. La operación admite Undo/Redo agrupado. Una escala o un origen de rejilla incompatibles impiden aplicar el ajuste a todo el grupo; no se corrigen deformando el modelo. Si cambian los transforms, la escena, el estado activo o la unidad del perfil después de la vista previa, se requiere una nueva propuesta. Revisar los solapamientos después del ajuste: las distancias y orientaciones relativas pueden cambiar.
 
 `Place Result in Scene` coloca el resultado en la raíz de la escena, con rotación identidad y escala unitaria. Su pivote se ajusta a la rejilla cerca de la primera fuente, sin desplazar la geometría combinada. `Disable Source Instances` desactiva únicamente las instancias incluidas, no sus padres. La colocación y desactivación admiten Undo/Redo; la creación de assets no se deshace mediante Undo.
 
