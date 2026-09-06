@@ -157,6 +157,74 @@ namespace LocalModels.VoxelBridge.Tests
             finally { Object.DestroyImmediate(palette); }
         }
 
+        [TestCase(false)]
+        [TestCase(true)]
+        public void ReplaceMeshData_RefreshesUploadedGpuBuffers(bool changeVertexCount)
+        {
+            Mesh target = VoxelSemanticMesher.Build(Solid(Vector3Int.one, VoxelSemanticEncoding.Pack(25, 0)), false);
+            var grid = Solid(changeVertexCount ? new Vector3Int(2, 1, 1) : Vector3Int.one, VoxelSemanticEncoding.Pack(54, 1));
+            if (changeVertexCount) grid.SemanticIds[1] = VoxelSemanticEncoding.Pack(12, 2);
+            Mesh source = VoxelSemanticMesher.Build(grid, false);
+            try
+            {
+                AssertGpuMatchesMesh(target); // Upload the old mesh before replacement, as a visible scene instance does.
+                VoxelProductionExporter.RegisterMeshUndo(target);
+                VoxelProductionExporter.ReplaceMeshData(source, target);
+                Assert.That(target.vertexCount, Is.EqualTo(source.vertexCount));
+                AssertGpuMatchesMesh(target);
+                Undo.FlushUndoRecordObjects();
+                Undo.PerformUndo();
+                Assert.That(target.uv[0].x, Is.EqualTo(25));
+                AssertGpuMatchesMesh(target);
+                Undo.PerformRedo();
+                Assert.That(target.vertexCount, Is.EqualTo(source.vertexCount));
+                AssertGpuMatchesMesh(target);
+            }
+            finally
+            {
+                Undo.ClearUndo(target);
+                Object.DestroyImmediate(target);
+                Object.DestroyImmediate(source);
+            }
+        }
+
+        private static void AssertGpuMatchesMesh(Mesh mesh)
+        {
+            int stream = mesh.GetVertexAttributeStream(VertexAttribute.TexCoord0);
+            int stride = mesh.GetVertexBufferStride(stream);
+            int colorOffset = mesh.GetVertexAttributeOffset(VertexAttribute.TexCoord0) / sizeof(float);
+            int surfaceOffset = mesh.GetVertexAttributeOffset(VertexAttribute.TexCoord3) / sizeof(float);
+            int positionOffset = mesh.GetVertexAttributeOffset(VertexAttribute.Position) / sizeof(float);
+            using (var buffer = mesh.GetVertexBuffer(stream))
+            {
+                Assert.That(buffer.count, Is.EqualTo(mesh.vertexCount), "GPU vertex count is stale.");
+                var values = new float[mesh.vertexCount * stride / sizeof(float)];
+                buffer.GetData(values);
+                Vector2[] colors = mesh.uv, surfaces = mesh.uv4;
+                Vector3[] vertices = mesh.vertices;
+                for (int i = 0; i < mesh.vertexCount; i++)
+                {
+                    int start = i * stride / sizeof(float);
+                    Assert.That(values[start + colorOffset], Is.EqualTo(colors[i].x), $"GPU ColorID at vertex {i}.");
+                    Assert.That(values[start + surfaceOffset], Is.EqualTo(surfaces[i].x), $"GPU SurfaceID at vertex {i}.");
+                    for (int axis = 0; axis < 3; axis++)
+                        Assert.That(values[start + positionOffset + axis], Is.EqualTo(vertices[i][axis]));
+                }
+            }
+            using (var buffer = mesh.GetIndexBuffer())
+            {
+                int[] triangles = mesh.triangles;
+                Assert.That(buffer.count, Is.EqualTo(triangles.Length), "GPU index count is stale.");
+                var bytes = new byte[buffer.count * buffer.stride];
+                buffer.GetData(bytes);
+                for (int i = 0; i < triangles.Length; i++)
+                {
+                    uint actual = buffer.stride == 2 ? BitConverter.ToUInt16(bytes, i * 2) : BitConverter.ToUInt32(bytes, i * 4);
+                    Assert.That(actual, Is.EqualTo(triangles[i]));
+                }
+            }
+        }
+
         [Test]
         public void ProductionShader_HasHdrpPassesAndNoImportErrors()
         {
@@ -169,7 +237,7 @@ namespace LocalModels.VoxelBridge.Tests
                 // Inspect the HDRP subshader without relying on a rendered camera to activate the pipeline in batch mode.
                 var data = ShaderUtil.GetShaderData(shader);
                 bool found = false;
-                for (int i = 0; i < shader.subshaderCount; i++)
+                for (int i = 0; i < data.SerializedSubshaderCount; i++)
                 {
                     var subshader = data.GetSerializedSubshader(i);
                     if (subshader.FindTagValue(new ShaderTagId("RenderPipeline")).name != "HDRenderPipeline") continue;

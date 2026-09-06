@@ -6,10 +6,36 @@ using Object = UnityEngine.Object;
 
 namespace LocalModels.VoxelBridge
 {
+    [InitializeOnLoad]
     internal static class VoxelProductionExporter
     {
+        private const string UndoMeshKey = "VoxelBridge.ProductionMeshUndo.";
         internal const string ShaderPath = "Assets/VoxelBridge/Shaders/VoxelWorldOpaque.shadergraph";
         internal const string SharedMaterialFolder = "Assets/VoxelBridgeImports/SharedMaterials";
+
+        static VoxelProductionExporter() => Undo.undoRedoEvent += RefreshRestoredMesh;
+
+        internal static void RegisterMeshUndo(Mesh mesh)
+        {
+            Undo.IncrementCurrentGroup();
+            Undo.RegisterCompleteObjectUndo(mesh, "Rebuild Voxel Production Mesh");
+            // SessionState survives script reloads without keeping mesh objects alive.
+            SessionState.SetInt(UndoMeshKey + Undo.GetCurrentGroup(), mesh.GetInstanceID());
+        }
+
+        private static void RefreshRestoredMesh(in UndoRedoInfo info)
+        {
+            int id = SessionState.GetInt(UndoMeshKey + info.undoGroup, 0);
+            if (id == 0 || !(EditorUtility.EntityIdToObject((EntityId)id) is Mesh mesh)) return;
+            Mesh restored = Object.Instantiate(mesh);
+            try
+            {
+                restored.name = mesh.name;
+                ReplaceMeshData(restored, mesh);
+                SceneView.RepaintAll();
+            }
+            finally { Object.DestroyImmediate(restored); }
+        }
 
         public static GameObject Export(string voxAssetPath, string outputFolder, Action<float> progress = null)
         {
@@ -107,8 +133,8 @@ namespace LocalModels.VoxelBridge
                     throw new InvalidDataException("The prefab material does not use the source's current palette pair. Assign a compatible production material before rebuilding.");
                 backup = Object.Instantiate(target);
                 generated.name = target.name;
-                Undo.RegisterCompleteObjectUndo(target, "Rebuild Voxel Production Mesh");
-                EditorUtility.CopySerialized(generated, target);
+                RegisterMeshUndo(target);
+                ReplaceMeshData(generated, target);
                 EditorUtility.SetDirty(target);
                 AssetDatabase.SaveAssetIfDirty(target);
                 SceneView.RepaintAll();
@@ -119,7 +145,7 @@ namespace LocalModels.VoxelBridge
                 if (backup != null)
                 {
                     backup.name = target.name;
-                    EditorUtility.CopySerialized(backup, target);
+                    ReplaceMeshData(backup, target);
                     EditorUtility.SetDirty(target);
                     AssetDatabase.SaveAssetIfDirty(target);
                 }
@@ -130,6 +156,14 @@ namespace LocalModels.VoxelBridge
                 Object.DestroyImmediate(generated);
                 if (backup != null) Object.DestroyImmediate(backup);
             }
+        }
+
+        internal static void ReplaceMeshData(Mesh source, Mesh target)
+        {
+            // CopySerialized alone leaves uploaded vertex/index buffers intact. Invalidate them before copying.
+            target.Clear(false);
+            EditorUtility.CopySerialized(source, target);
+            target.MarkModified();
         }
 
         internal static void ValidatePalettes(VoxelColorPalette colors, VoxelSurfacePalette surfaces)
