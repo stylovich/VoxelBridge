@@ -10,19 +10,43 @@ Copiar `Assets/VoxelBridge` junto con sus archivos `.meta` al proyecto. El módu
 
 La generación y la edición son procesos de autoría. Los prefabs contienen meshes y renderers convencionales; el módulo no implementa edición voxel en runtime.
 
-Las paletas, el transporte de `ColorID + SurfaceID` y las familias semánticas de producción se describen en [MATERIALS.md](MATERIALS.md). La combinación de modelos, los impostores semánticos y la validación DOTS figuran en [ROADMAP.md](ROADMAP.md).
+Las paletas, el transporte de `ColorID + SurfaceID` y las familias semánticas de producción se describen en [MATERIALS.md](MATERIALS.md). Los impostores semánticos y la validación DOTS figuran en [ROADMAP.md](ROADMAP.md).
 
 ## Herramientas
 
 | Menú en `Tools > Voxel Bridge` | Función |
 |---|---|
 | `Physical Models and LODs` | Conversión con unidad física, familias LOD, lotes e impostores |
+| `Combine Voxel Models` | Unión exacta de instancias semánticas en una familia editable independiente |
 | `Resolution-Based Conversion` | Conversión individual con una resolución explícita |
 | `VOX to Unity` | Sincronización de `.vox`, exportación semántica LOD0, familias de producción o retorno desde OBJ |
 | `Bind Semantic IDs` | Asignación de ColorID y SurfaceID a los slots de un `.vox` |
 | `Global Palettes` | Administración de las paletas globales y sus LUT |
 | `Sync All Generated VOX Assets` | Resincronización explícita de los `.vox` con sidecar |
 | `Compatibility` | Aplicación controlada de los parches de integración |
+
+## Combinación de modelos voxel
+
+1. Colocar dos o más prefabs de producción semántica en la misma escena. Seleccionar las instancias o un padre que las contenga.
+2. Abrir `Tools > Voxel Bridge > Combine Voxel Models` o el menú contextual equivalente de GameObject. `Use Scene Selection` actualiza las entradas.
+3. Asignar un `Voxel Profile` cuya unidad base coincida con el tamaño físico efectivo de las celdas. Mantener posiciones alineadas a la rejilla mundial y rotaciones ortogonales. Se admiten reflexiones y escalas uniformes únicamente cuando conservan esa unidad efectiva; no se remuestrean celdas.
+4. Elegir `Family Name`, `Output Folder` y ejecutar `Analyze Combination`. El informe muestra dimensiones, ocupación, pares semánticos, solapamientos y prioridad de fuentes según el orden de la jerarquía.
+5. Ejecutar `Create Combined Family`. Los solapamientos con IDs distintos requieren confirmar `Keep First Source`; los que comparten ambos IDs se unifican directamente.
+6. Activar `Generate Derived LODs` para reducir el conjunto según el perfil. Desactivar para editar primero LOD0 y derivar los niveles desde el Inspector del prefab.
+
+La herramienta lee los `.vox` LOD0 guardados, incluidos sus retoques, y crea `<Family>_VoxelLOD` con fuentes editables, sidecars, manifiesto, chunks y un único prefab con `LODGroup`. No conserva un vínculo de actualización con las familias de entrada. `Open in MagicaVoxel`, `Semantic Bindings` y `Rebuild` operan sobre las fuentes del conjunto. No se copian los LODs anteriores ni se generan impostores.
+
+`Place Result in Scene` coloca el resultado en la raíz de la escena, con rotación identidad y escala unitaria. Su pivote se ajusta a la rejilla cerca de la primera fuente, sin desplazar la geometría combinada. `Disable Source Instances` desactiva únicamente las instancias incluidas, no sus padres. La colocación y desactivación admiten Undo/Redo; la creación de assets no se deshace mediante Undo.
+
+### Compatibilidad y límites
+
+- Ambas paletas globales y sus revisiones deben coincidir. Revisar y guardar `Semantic Bindings` si una fuente referencia una revisión anterior; no se reinterpretan IDs entre bibliotecas.
+- Las piezas `Keep Original` conservan su colocación y materiales, con copias de sus meshes dentro de la nueva familia. No se voxelizan ni simplifican. No se transfieren scripts, luces ni colliders.
+- Las modificaciones de geometría, materiales o transforms internos de una instancia requieren editar la fuente y reconstruirla; mover, rotar o escalar su raíz sí está permitido dentro de las restricciones de la rejilla.
+- Se mantienen los límites de producción: 8.000.000 de celdas en el volumen, 4.000.000 de voxels ocupados en la importación inicial, 255 pares por `.vox`, 64 MiB por fuente y 500.000 quads por nivel. La división en chunks no elimina estos límites.
+- Mantener agrupaciones compactas. El LODGroup gobierna todo el conjunto; ampliar sus bounds puede perjudicar el culling. La primera versión no admite fuentes de escenas diferentes, selección directa de assets de Project, Prefab Mode ni remuestreo de rejillas incompatibles.
+
+Un error o cancelación elimina solamente la nueva carpeta incompleta. Las fuentes permanecen intactas. La combinación vuelve a analizar los archivos y transforms al crear el resultado; un informe anterior no autoriza datos desactualizados.
 
 ## Conversión física y LODs
 

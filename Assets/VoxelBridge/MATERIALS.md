@@ -249,6 +249,12 @@ El manifiesto conserva huellas de las fuentes y del padre utilizado para cada de
 
 Las familias admiten superficies opacas, una misma pareja de paletas globales y hasta 8 niveles consecutivos. Se mantienen los límites de 8.000.000 de celdas, 64 MiB de `.vox` y 500.000 quads por nivel; el límite de quads se aplica a la suma de sus chunks. La conversión física considera el límite de celdas al adaptar el tamaño inicial, antes de voxelizar. El meshing de una fuente editada no cambia su resolución: si supera un límite, se detiene con un error. Los colliders y UV de lightmap no se generan en esta ruta. El horneado de impostores semánticos está bloqueado hasta disponer de un shader de captura compatible con las LUT y los IDs.
 
+## Materiales en conjuntos combinados
+
+`Combine Voxel Models` une los pares globales de los LOD0 sin reconstruirlos desde RGB ni desde materiales de Unity. Requiere la misma pareja de paletas y revisiones vigentes. El archivo combinado crea su propia tabla de hasta 255 pares locales; el prefab reutiliza el material global compartido. Sus LODs derivados reducen el par completo mediante la regla mayoritaria existente.
+
+Las piezas `Keep Original` conservan materiales separados y copias de sus mallas. Cambiar una fuente de entrada después de combinar no modifica el conjunto: su autoría reside en el nuevo `.vox` y sidecar. Consultar el [flujo de combinación](README.md#combinación-de-modelos-voxel) para alineación, conflictos y colocación.
+
 ## Validaciones
 
 La herramienta comprueba:
