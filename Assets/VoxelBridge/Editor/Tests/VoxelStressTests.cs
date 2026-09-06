@@ -47,7 +47,6 @@ namespace LocalModels.VoxelBridge.Tests
                 manager.GetBuffer<LinkedEntityGroup>(prefab).Add(new LinkedEntityGroup { Value = child });
             }
             owner = manager.CreateEntity(typeof(VoxelStressSpawner));
-            manager.AddBuffer<VoxelStressSpawnedRoot>(owner);
             manager.SetComponentData(owner, new VoxelStressSpawner { Prefab = prefab, Count = 5, Columns = 3,
                 InstancesPerFrame = 2, Spacing = 2, Origin = new float3(10, 0, 2), Rotation = quaternion.RotateY(math.PI * .5f) });
         }
@@ -66,12 +65,15 @@ namespace LocalModels.VoxelBridge.Tests
             var settings = manager.GetComponentData<VoxelStressSpawner>(owner); settings.Mode = mode; manager.SetComponentData(owner, settings);
         }
 
-        private Entity[] Roots() => manager.GetBuffer<VoxelStressSpawnedRoot>(owner).AsNativeArray().ToArray().Select(e => e.Value).ToArray();
+        private Entity[] Roots() => manager.HasBuffer<VoxelStressSpawnedRoot>(owner)
+            ? manager.GetBuffer<VoxelStressSpawnedRoot>(owner).AsNativeArray().ToArray().Select(e => e.Value).ToArray() : Array.Empty<Entity>();
 
         [Test]
         public void Spawn_IsManualBatchedResumableAndKeepsPrefabReferences()
         {
+            Assert.That(manager.HasBuffer<VoxelStressSpawnedRoot>(owner), Is.False);
             system.Update(); Assert.That(Roots(), Is.Empty);
+            Assert.That(manager.HasBuffer<VoxelStressSpawnedRoot>(owner), Is.True);
             Mode(VoxelStressMode.Spawning); system.Update(); Assert.That(Roots().Length, Is.EqualTo(2));
             Mode(VoxelStressMode.Idle); system.Update(); Assert.That(Roots().Length, Is.EqualTo(2));
             Mode(VoxelStressMode.Spawning); system.Update(); system.Update();
@@ -205,21 +207,33 @@ namespace LocalModels.VoxelBridge.Tests
                 settingsType.GetProperty("BlobAssetStore").SetValue(settings, blobs);
                 // Render mesh postprocessing requires a SceneSection, supplied by a nonzero scene GUID.
                 settingsType.GetField("SceneGUID").SetValue(settings, new Unity.Entities.Hash128(1, 2, 3, 4));
+                var flags = settingsType.GetField("BakingFlags");
+                flags.SetValue(settings, Enum.ToObject(flags.FieldType, 1)); // AddEntityGUID for Live Baking transfer.
                 hybrid.GetType("Unity.Entities.BakingUtility", true).GetMethod("BakeGameObjects",
                     System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)
                     .Invoke(null, new[] { (object)baked, new[] { go }, settings });
-                var em = baked.EntityManager;
-                using var query = em.CreateEntityQuery(typeof(VoxelStressSpawner), typeof(VoxelStressSpawnedRoot));
+                using var bakedQuery = baked.EntityManager.CreateEntityQuery(typeof(VoxelStressSpawner));
+                var bakedSpawner = bakedQuery.GetSingletonEntity();
+                Assert.That(baked.EntityManager.HasBuffer<VoxelStressSpawnedRoot>(bakedSpawner), Is.False);
+                using var destination = new World("Voxel Stress Live Baking Destination");
+                using var differ = new EntityManagerDiffer(baked.EntityManager, Allocator.Persistent);
+                using (var changes = differ.GetChanges(EntityManagerDifferOptions.Default, Allocator.TempJob))
+                    EntityPatcher.ApplyChangeSet(destination.EntityManager, changes.ForwardChangeSet);
+                var em = destination.EntityManager;
+                using var query = em.CreateEntityQuery(typeof(VoxelStressSpawner));
                 Assert.That(query.CalculateEntityCount(), Is.EqualTo(1));
                 Entity spawner = query.GetSingletonEntity();
                 var configuration = em.GetComponentData<VoxelStressSpawner>(spawner);
                 Assert.That(configuration.Mode, Is.EqualTo(VoxelStressMode.Idle));
                 VoxelStressSpawnSystem.ValidatePrefab(em, configuration);
-                var runtime = baked.GetOrCreateSystemManaged<VoxelStressSpawnSystem>();
+                Assert.That(em.HasBuffer<VoxelStressSpawnedRoot>(spawner), Is.False);
+                var runtime = destination.GetOrCreateSystemManaged<VoxelStressSpawnSystem>();
+                runtime.Update();
+                Assert.That(em.GetBuffer<VoxelStressSpawnedRoot>(spawner).Length, Is.Zero);
                 configuration.Mode = VoxelStressMode.Spawning; em.SetComponentData(spawner, configuration);
                 runtime.Update(); runtime.Update();
                 Assert.That(em.GetBuffer<VoxelStressSpawnedRoot>(spawner).Length, Is.EqualTo(3));
-                var snapshot = VoxelStressSnapshot.Capture(baked, spawner, null);
+                var snapshot = VoxelStressSnapshot.Capture(destination, spawner, null);
                 Assert.That(snapshot.RenderEntities, Is.EqualTo(6));
                 Assert.That(snapshot.Materials.Count, Is.EqualTo(1));
                 Assert.That(snapshot.Materials.Keys.Single().shader.name, Is.EqualTo("Voxel Bridge/VoxelWorldOpaque"));
@@ -227,6 +241,21 @@ namespace LocalModels.VoxelBridge.Tests
                 var linked = em.GetBuffer<LinkedEntityGroup>(em.GetBuffer<VoxelStressSpawnedRoot>(spawner)[0].Value);
                 Assert.That(linked.AsNativeArray().ToArray().Any(e => em.HasComponent<MeshLODGroupComponent>(e.Value)), Is.True);
                 Assert.That(linked.AsNativeArray().ToArray().Count(e => em.HasComponent<MeshLODComponent>(e.Value)), Is.EqualTo(2));
+                var originalRoots = em.GetBuffer<VoxelStressSpawnedRoot>(spawner).AsNativeArray().ToArray();
+                var changedSettings = baked.EntityManager.GetComponentData<VoxelStressSpawner>(bakedSpawner);
+                changedSettings.Count = 4;
+                baked.EntityManager.SetComponentData(bakedSpawner, changedSettings);
+                using (var changes = differ.GetChanges(EntityManagerDifferOptions.Default, Allocator.TempJob))
+                    EntityPatcher.ApplyChangeSet(em, changes.ForwardChangeSet);
+                runtime.Update();
+                Assert.That(em.GetComponentData<VoxelStressSpawner>(spawner).Count, Is.EqualTo(4));
+                Assert.That(em.GetBuffer<VoxelStressSpawnedRoot>(spawner).AsNativeArray().ToArray(), Is.EqualTo(originalRoots));
+                baked.EntityManager.DestroyEntity(bakedSpawner);
+                using (var changes = differ.GetChanges(EntityManagerDifferOptions.Default, Allocator.TempJob))
+                    EntityPatcher.ApplyChangeSet(em, changes.ForwardChangeSet);
+                runtime.Update();
+                Assert.That(em.Exists(spawner), Is.False);
+                Assert.That(originalRoots.All(r => !em.Exists(r.Value)), Is.True);
             }
             finally
             {

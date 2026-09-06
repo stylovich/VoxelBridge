@@ -34,7 +34,7 @@ namespace LocalModels.VoxelBridge.Diagnostics
 
         protected override void OnCreate()
         {
-            spawners = GetEntityQuery(ComponentType.ReadWrite<VoxelStressSpawner>(), ComponentType.ReadWrite<VoxelStressSpawnedRoot>());
+            spawners = GetEntityQuery(ComponentType.ReadWrite<VoxelStressSpawner>());
             abandoned = GetEntityQuery(new EntityQueryDesc {
                 All = new[] { ComponentType.ReadWrite<VoxelStressSpawnedRoot>() },
                 None = new[] { ComponentType.ReadOnly<VoxelStressSpawner>() },
@@ -73,6 +73,9 @@ namespace LocalModels.VoxelBridge.Diagnostics
             using var active = spawners.ToEntityArray(Allocator.Temp);
             foreach (var owner in active)
             {
+                // Live Baking excludes cleanup components from its change set. This buffer belongs to runtime.
+                if (!EntityManager.HasBuffer<VoxelStressSpawnedRoot>(owner))
+                    EntityManager.AddBuffer<VoxelStressSpawnedRoot>(owner);
                 var settings = EntityManager.GetComponentData<VoxelStressSpawner>(owner);
                 if (settings.Mode != VoxelStressMode.Spawning && settings.Mode != VoxelStressMode.Clearing) continue;
                 try

@@ -219,6 +219,8 @@ El inicio es manual. Se permiten hasta 10.000 raíces y 250.000 entidades vincul
 
 La ventana de control pertenece al Editor; no proporciona controles de spawn en un Player. Mantener los spawners de diagnóstico fuera de las escenas destinadas a producción.
 
+El baker transfiere la configuración y la referencia al prefab. El sistema inicializa automáticamente la lista de seguimiento en runtime, incluso antes de iniciar el spawn. Esta lista de limpieza no se hornea: Live Baking no transfiere componentes de limpieza entre mundos. La ventana distingue la ausencia de una entidad horneada de una inicialización pendiente.
+
 | Lectura | Interpretación |
 |---|---|
 | `Unique Materials / Meshes` | Identidades reales de recursos utilizados por las entidades de la prueba, incluidos todos sus LODs. La cantidad única debe permanecer estable al aumentar clones del mismo prefab. |

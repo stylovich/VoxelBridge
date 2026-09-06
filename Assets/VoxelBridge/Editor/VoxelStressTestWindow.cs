@@ -30,7 +30,6 @@ namespace LocalModels.VoxelBridge
                 settings.Prefab = GetEntity(authoring.Prefab, TransformUsageFlags.Dynamic);
                 var entity = GetEntity(TransformUsageFlags.None);
                 AddComponent(entity, settings);
-                AddBuffer<VoxelStressSpawnedRoot>(entity);
             }
             catch (Exception ex) { Debug.LogError("Voxel stress spawner baking failed: " + ex.Message, authoring); }
         }
@@ -154,7 +153,7 @@ namespace LocalModels.VoxelBridge
             try
             {
                 var manager = world.EntityManager;
-                using var query = manager.CreateEntityQuery(typeof(VoxelStressSpawner), typeof(VoxelStressSpawnedRoot));
+                using var query = manager.CreateEntityQuery(typeof(VoxelStressSpawner));
                 using var entities = query.ToEntityArray(Allocator.Temp);
                 if (entities.Length == 0) EditorGUILayout.HelpBox("No hay spawners horneados en este mundo. Comprobar que la subescena está cargada y revisar posibles errores de baking.", MessageType.Info);
                 else
@@ -164,42 +163,47 @@ namespace LocalModels.VoxelBridge
                     var labels = entities.Select(e => $"{manager.GetName(e)} [{e.Index}:{e.Version}]").ToArray();
                     int chosen = EditorGUILayout.Popup("Spawner", index, labels);
                     if (selected != entities[chosen]) { selected = entities[chosen]; snapshot = null; error = null; }
-                    var settings = manager.GetComponentData<VoxelStressSpawner>(selected);
-                    int count = manager.GetBuffer<VoxelStressSpawnedRoot>(selected).Length;
-                    EditorGUILayout.LabelField("World", world.Name);
-                    EditorGUILayout.LabelField("State", settings.Mode.ToString());
-                    EditorGUILayout.LabelField("Instances", $"{count:N0} / {settings.Count:N0}");
-                    using (new EditorGUI.DisabledScope(count != 0 || settings.Mode == VoxelStressMode.Spawning || settings.Mode == VoxelStressMode.Clearing))
+                    if (!manager.HasBuffer<VoxelStressSpawnedRoot>(selected))
+                        EditorGUILayout.HelpBox("El spawner está horneado y espera su inicialización en runtime. Reanudar Play Mode si está pausado.", MessageType.Info);
+                    else
                     {
-                        EditorGUI.BeginChangeCheck();
-                        settings.Count = Mathf.Clamp(EditorGUILayout.IntField("Runtime Target Count", settings.Count), 1, VoxelStressSpawnSystem.MaximumInstances);
-                        settings.Columns = Mathf.Clamp(EditorGUILayout.IntField("Runtime Columns", settings.Columns), 1, VoxelStressSpawnSystem.MaximumInstances);
-                        settings.Spacing = Mathf.Max(.001f, EditorGUILayout.FloatField("Runtime Spacing", settings.Spacing));
-                        settings.InstancesPerFrame = Mathf.Clamp(EditorGUILayout.IntField("Instances per Frame", settings.InstancesPerFrame), 1, 256);
-                        if (EditorGUI.EndChangeCheck()) { VoxelStressSpawnSystem.Validate(settings); manager.SetComponentData(selected, settings); }
+                        var settings = manager.GetComponentData<VoxelStressSpawner>(selected);
+                        int count = manager.GetBuffer<VoxelStressSpawnedRoot>(selected).Length;
+                        EditorGUILayout.LabelField("World", world.Name);
+                        EditorGUILayout.LabelField("State", settings.Mode.ToString());
+                        EditorGUILayout.LabelField("Instances", $"{count:N0} / {settings.Count:N0}");
+                        using (new EditorGUI.DisabledScope(count != 0 || settings.Mode == VoxelStressMode.Spawning || settings.Mode == VoxelStressMode.Clearing))
+                        {
+                            EditorGUI.BeginChangeCheck();
+                            settings.Count = Mathf.Clamp(EditorGUILayout.IntField("Runtime Target Count", settings.Count), 1, VoxelStressSpawnSystem.MaximumInstances);
+                            settings.Columns = Mathf.Clamp(EditorGUILayout.IntField("Runtime Columns", settings.Columns), 1, VoxelStressSpawnSystem.MaximumInstances);
+                            settings.Spacing = Mathf.Max(.001f, EditorGUILayout.FloatField("Runtime Spacing", settings.Spacing));
+                            settings.InstancesPerFrame = Mathf.Clamp(EditorGUILayout.IntField("Instances per Frame", settings.InstancesPerFrame), 1, 256);
+                            if (EditorGUI.EndChangeCheck()) { VoxelStressSpawnSystem.Validate(settings); manager.SetComponentData(selected, settings); }
+                        }
+                        EditorGUILayout.HelpBox("Los ajustes de esta ventana afectan sólo a la sesión de Play Mode. Limpiar las instancias antes de cambiar la distribución.", MessageType.None);
+                        using (new EditorGUILayout.HorizontalScope())
+                        {
+                            using (new EditorGUI.DisabledScope(settings.Mode == VoxelStressMode.Spawning || settings.Mode == VoxelStressMode.Clearing || count >= settings.Count))
+                                if (GUILayout.Button("Spawn / Resume"))
+                                {
+                                    VoxelStressSpawnSystem.Validate(settings); VoxelStressSpawnSystem.ValidatePrefab(manager, settings);
+                                    if (settings.Count <= 1000 || EditorUtility.DisplayDialog("Large Voxel Stress Test", $"La prueba creará hasta {settings.Count:N0} instancias completas, con todos sus chunks y LODs. Comprobar el margen de memoria antes de continuar.", "Spawn", "Cancel"))
+                                    { settings.Mode = VoxelStressMode.Spawning; manager.SetComponentData(selected, settings); error = null; }
+                                }
+                            if (GUILayout.Button("Pause")) { settings.Mode = VoxelStressMode.Idle; manager.SetComponentData(selected, settings); }
+                            if (GUILayout.Button("Clear Spawned")) { settings.Mode = VoxelStressMode.Clearing; manager.SetComponentData(selected, settings); snapshot = null; error = null; }
+                        }
+                        targetCamera = (Camera)EditorGUILayout.ObjectField("Frustum Camera", targetCamera, typeof(Camera), true);
+                        if (GUILayout.Button("Use Main Camera")) targetCamera = Camera.main;
+                        if (GUILayout.Button("Capture Resource and Frustum Snapshot"))
+                        {
+                            snapshot = VoxelStressSnapshot.Capture(world, selected, targetCamera);
+                            snapshotHeader = $"Frame {Time.frameCount} | Camera: {(targetCamera == null ? "None" : targetCamera.name)}";
+                            error = null;
+                        }
+                        DrawSnapshot();
                     }
-                    EditorGUILayout.HelpBox("Los ajustes de esta ventana afectan sólo a la sesión de Play Mode. Limpiar las instancias antes de cambiar la distribución.", MessageType.None);
-                    using (new EditorGUILayout.HorizontalScope())
-                    {
-                        using (new EditorGUI.DisabledScope(settings.Mode == VoxelStressMode.Spawning || settings.Mode == VoxelStressMode.Clearing || count >= settings.Count))
-                            if (GUILayout.Button("Spawn / Resume"))
-                            {
-                                VoxelStressSpawnSystem.Validate(settings); VoxelStressSpawnSystem.ValidatePrefab(manager, settings);
-                                if (settings.Count <= 1000 || EditorUtility.DisplayDialog("Large Voxel Stress Test", $"La prueba creará hasta {settings.Count:N0} instancias completas, con todos sus chunks y LODs. Comprobar el margen de memoria antes de continuar.", "Spawn", "Cancel"))
-                                { settings.Mode = VoxelStressMode.Spawning; manager.SetComponentData(selected, settings); error = null; }
-                            }
-                        if (GUILayout.Button("Pause")) { settings.Mode = VoxelStressMode.Idle; manager.SetComponentData(selected, settings); }
-                        if (GUILayout.Button("Clear Spawned")) { settings.Mode = VoxelStressMode.Clearing; manager.SetComponentData(selected, settings); snapshot = null; error = null; }
-                    }
-                    targetCamera = (Camera)EditorGUILayout.ObjectField("Frustum Camera", targetCamera, typeof(Camera), true);
-                    if (GUILayout.Button("Use Main Camera")) targetCamera = Camera.main;
-                    if (GUILayout.Button("Capture Resource and Frustum Snapshot"))
-                    {
-                        snapshot = VoxelStressSnapshot.Capture(world, selected, targetCamera);
-                        snapshotHeader = $"Frame {Time.frameCount} | Camera: {(targetCamera == null ? "None" : targetCamera.name)}";
-                        error = null;
-                    }
-                    DrawSnapshot();
                 }
                 DrawGraphicsStats(world);
             }
