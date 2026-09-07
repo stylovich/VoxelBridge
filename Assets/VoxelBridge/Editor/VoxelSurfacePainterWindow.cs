@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEditor;
+using UnityEditor.ShortcutManagement;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.HighDefinition;
@@ -18,6 +19,7 @@ namespace LocalModels.VoxelBridge
         [SerializeField] private int surfaceId;
         [SerializeField] private Vector2 orbit = new(20, -30);
         [SerializeField] private float distance = 1;
+        [SerializeField] private Vector3 panOffset;
         [SerializeField] private string draftFingerprint;
         [SerializeField] private int[] draftCells = Array.Empty<int>();
         [SerializeField] private int[] draftSurfaces = Array.Empty<int>();
@@ -27,8 +29,6 @@ namespace LocalModels.VoxelBridge
         private PreviewRenderUtility preview;
         private Mesh mesh;
         private Material material;
-        private float sourceEmissionIntensity = 1f;
-        private bool hasSourceEmissionMaterial;
         private string status;
         private MessageType statusType = MessageType.Info;
         private Vector3 center;
@@ -115,7 +115,7 @@ namespace LocalModels.VoxelBridge
                 }
                 center = edit.Grid.Origin + (Vector3)edit.Grid.Size * edit.Grid.VoxelSize * .5f;
                 radius = Mathf.Max(edit.Grid.VoxelSize, ((Vector3)edit.Grid.Size * edit.Grid.VoxelSize).magnitude * .5f);
-                if (!restoreDraft) distance = radius * 4;
+                if (!restoreDraft) { distance = radius * 4; panOffset = Vector3.zero; }
                 if (!EditorApplication.isPlayingOrWillChangePlaymode) BuildPreview();
             }
             catch (Exception exception) { edit = null; status = exception.Message; statusType = MessageType.Error; }
@@ -143,8 +143,7 @@ namespace LocalModels.VoxelBridge
                     material.hideFlags = HideFlags.HideAndDontSave;
                     material.SetTexture("_PaletteColor", edit.Colors.GeneratedLut);
                     material.SetTexture("_PaletteSurface", edit.Surfaces.GeneratedLut);
-                    hasSourceEmissionMaterial = shared != null;
-                    sourceEmissionIntensity = hasSourceEmissionMaterial ? shared.GetFloat("_EmissionIntensity") : 1f;
+                    float sourceEmissionIntensity = shared != null ? shared.GetFloat("_EmissionIntensity") : 1f;
                     if (!float.IsFinite(sourceEmissionIntensity) || sourceEmissionIntensity < 0)
                         throw new InvalidOperationException("The source material has an invalid emission intensity.");
                     // Preview cameras have no HDRP exposure/tonemapping. Preserve hue using
@@ -198,7 +197,7 @@ namespace LocalModels.VoxelBridge
                 if (!path.EndsWith(".vox", StringComparison.OrdinalIgnoreCase)) status = "Choose a VOX source with semantic bindings.";
                 else if (ConfirmLeave()) { ResetDraft(); source = candidate; sourceGuid = AssetDatabase.AssetPathToGUID(path); prefabGuid = null; level = 0; LoadSource(false); }
             }
-            EditorGUILayout.HelpBox("Seleccionar voxels con clic o arrastre; Shift quita celdas. Alt + arrastre o botón derecho rota; rueda acerca/aleja. Se modifica el voxel completo, sin cambiar su color. Keep Original queda fuera de esta vista.", MessageType.Info);
+            EditorGUILayout.HelpBox("Clic o arrastre selecciona; Shift quita celdas. Alt + arrastre o botón derecho rota; botón central desplaza; rueda acerca/aleja. Frame Selection encuadra la selección. Se modifica el voxel completo. Keep Original queda fuera de esta vista.", MessageType.Info);
             EditorGUILayout.HelpBox("Los slots con RGB idéntico y superficies distintas requieren una prueba de intercambio con MagicaVoxel. No se debe asumir que un guardado externo conserva su identidad.", MessageType.Warning);
             if (!string.IsNullOrEmpty(SourcePath) && VoxelSurfaceEditStore.HasPending(SourcePath))
                 if (GUILayout.Button("Recover Interrupted Save")) Run(() => { VoxelSurfaceEditStore.Recover(SourcePath); LoadSource(true); });
@@ -212,15 +211,13 @@ namespace LocalModels.VoxelBridge
             if (EditorApplication.isPlayingOrWillChangePlaymode)
             { EditorGUILayout.HelpBox("La edición está deshabilitada en Play Mode. Los cambios pendientes se conservan.", MessageType.Info); return; }
             if (edit == null) return;
-            EditorGUILayout.LabelField(new GUIContent("Emission Preview",
-                "La vista usa un multiplicador de emisión entre 0 y 1 para evitar saturación a blanco. No reproduce la exposición ni el bloom de la escena y no modifica su material."),
-                hasSourceEmissionMaterial ? $"Reference ×{Mathf.Clamp01(sourceEmissionIntensity):0.###} · Source HDR ×{sourceEmissionIntensity:0.###}" :
-                    "Reference ×1 · No linked material");
             if (!edit.Surfaces.TryValidate(out string surfaceError))
             { EditorGUILayout.HelpBox(surfaceError, MessageType.Error); return; }
             var options = edit.Surfaces.Entries.Where(s => s.RenderClass == VoxelSurfaceRenderClass.Opaque).OrderBy(s => s.Id).ToArray();
             int choice = Array.FindIndex(options, s => s.Id == surfaceId);
-            choice = EditorGUILayout.Popup("Surface", Mathf.Max(0, choice), options.Select(s => $"{s.Id:000} · {s.DisplayName}").ToArray());
+            choice = EditorGUILayout.Popup(new GUIContent("Surface",
+                "La emisión de esta vista está normalizada para identificar colores; no reproduce el bloom ni la exposición de la escena. Los materiales de producción no cambian."),
+                Mathf.Max(0, choice), options.Select(s => new GUIContent($"{s.Id:000} · {s.DisplayName}")).ToArray());
             if (choice >= 0 && choice < options.Length)
             {
                 var surface = options[choice]; surfaceId = surface.Id;
@@ -231,13 +228,17 @@ namespace LocalModels.VoxelBridge
                 using (new EditorGUI.DisabledScope(selected.Count == 0))
                     if (GUILayout.Button("Apply Surface")) Run(() => Change(() => edit.Apply(selected, surfaceId)));
                 if (GUILayout.Button("Clear Selection")) { selected.Clear(); Repaint(); }
-                using (new EditorGUI.DisabledScope(!edit.CanUndo)) if (GUILayout.Button("Undo")) Run(() => Change(edit.Undo));
-                using (new EditorGUI.DisabledScope(!edit.CanRedo)) if (GUILayout.Button("Redo")) Run(() => Change(edit.Redo));
-                if (GUILayout.Button("Frame")) { distance = radius * 4; Repaint(); }
+                using (new EditorGUI.DisabledScope(!edit.CanUndo)) if (GUILayout.Button(new GUIContent("Undo", "Ctrl+Z en esta ventana. Deshace asignaciones pendientes; no revierte archivos guardados."))) Run(() => Change(edit.Undo));
+                using (new EditorGUI.DisabledScope(!edit.CanRedo)) if (GUILayout.Button(new GUIContent("Redo", "Ctrl+Y o Ctrl+Shift+Z en esta ventana."))) Run(() => Change(edit.Redo));
+                if (GUILayout.Button("Frame")) { distance = radius * 4; panOffset = Vector3.zero; Repaint(); }
+                using (new EditorGUI.DisabledScope(selected.Count == 0))
+                    if (GUILayout.Button("Frame Selection")) Run(FrameSelection);
             }
             using (new EditorGUILayout.HorizontalScope())
             {
-                using (new EditorGUI.DisabledScope(edit.PendingCells == 0)) if (GUILayout.Button("Save Source")) Run(SaveSource);
+                using (new EditorGUI.DisabledScope(string.IsNullOrEmpty(prefabGuid)))
+                    if (GUILayout.Button(new GUIContent("Save & Rebuild", "Guarda la fuente y reconstruye este LOD del prefab. No regenera los LODs descendientes."))) Run(SaveAndRebuild);
+                using (new EditorGUI.DisabledScope(edit.PendingCells == 0)) if (GUILayout.Button("Save Source Only")) Run(SaveSource);
                 using (new EditorGUI.DisabledScope(edit.PendingCells != 0 || string.IsNullOrEmpty(prefabGuid)))
                     if (GUILayout.Button("Rebuild Edited LOD")) Run(Rebuild);
             }
@@ -251,8 +252,9 @@ namespace LocalModels.VoxelBridge
             if (preview == null || mesh == null || material == null || rect.height <= 0) return;
             Camera camera = preview.camera;
             Quaternion rotation = Quaternion.Euler(orbit.x, orbit.y, 0);
-            camera.transform.SetPositionAndRotation(center - rotation * Vector3.forward * distance, rotation);
-            camera.nearClipPlane = Mathf.Max(.001f, radius * .001f); camera.farClipPlane = distance + radius * 4;
+            camera.transform.SetPositionAndRotation(center + panOffset - rotation * Vector3.forward * distance, rotation);
+            camera.nearClipPlane = Mathf.Max(.0001f, Mathf.Min(edit.Grid.VoxelSize * .05f, distance * .01f));
+            camera.farClipPlane = distance + (radius + panOffset.magnitude) * 4;
             camera.aspect = rect.width / rect.height;
             var e = Event.current;
             if (e.type == EventType.Repaint)
@@ -282,11 +284,17 @@ namespace LocalModels.VoxelBridge
             }
             if (!rect.Contains(e.mousePosition)) { if (e.type == EventType.MouseUp) selecting = false; return; }
             if (e.type == EventType.ScrollWheel)
-            { distance = Mathf.Clamp(distance * Mathf.Exp(e.delta.y * .06f), radius * 1.05f, radius * 30); e.Use(); Repaint(); }
+            { distance = ZoomDistance(distance, e.delta.y, edit.Grid.VoxelSize, radius); e.Use(); Repaint(); }
+            if (e.type == EventType.MouseDrag && (e.button == 2 || (e.alt && e.shift && e.button == 0)))
+            {
+                float unitsPerPoint = 2 * distance * Mathf.Tan(camera.fieldOfView * Mathf.Deg2Rad * .5f) / Mathf.Max(1, rect.height);
+                panOffset = Vector3.ClampMagnitude(panOffset + rotation * new Vector3(-e.delta.x, e.delta.y, 0) * unitsPerPoint, radius * 100);
+                selecting = false; e.Use(); Repaint();
+            }
             if (e.type == EventType.MouseDrag && (e.alt || e.button == 1))
-            { orbit += new Vector2(-e.delta.y, -e.delta.x) * .5f; e.Use(); Repaint(); }
+            { orbit = RotateView(orbit, e.delta); selecting = false; e.Use(); Repaint(); }
             if (e.type == EventType.MouseDown && e.button == 0 && !e.alt) selecting = true;
-            if ((e.type == EventType.MouseMove || e.type == EventType.MouseDown || e.type == EventType.MouseDrag) && !e.alt && e.button != 1)
+            if ((e.type == EventType.MouseMove || e.type == EventType.MouseDown || e.type == EventType.MouseDrag) && !e.alt && e.button == 0)
             {
                 Vector2 uv = new((e.mousePosition.x - rect.x) / rect.width, 1 - (e.mousePosition.y - rect.y) / rect.height);
                 hover = VoxelSurfaceEdit.Pick(edit.Grid, camera.ViewportPointToRay(uv), out int index) ? index : -1;
@@ -300,6 +308,50 @@ namespace LocalModels.VoxelBridge
                 Repaint();
             }
             if (e.type == EventType.MouseUp) { selecting = false; e.Use(); }
+        }
+
+        internal static Vector2 RotateView(Vector2 angles, Vector2 delta) => new(
+            Mathf.Clamp(angles.x + delta.y * .5f, -89, 89),
+            Mathf.Repeat(angles.y + delta.x * .5f + 180, 360) - 180);
+
+        internal static float ZoomDistance(float current, float scroll, float voxelSize, float modelRadius) =>
+            Mathf.Clamp(current * Mathf.Exp(Mathf.Clamp(scroll, -100, 100) * .06f), voxelSize * 2, Mathf.Max(voxelSize * 2, modelRadius * 100));
+
+        internal static void SelectionFrame(VoxelGrid grid, IReadOnlyCollection<int> cells, out Vector3 pivot, out float frameDistance)
+        {
+            if (cells == null || cells.Count == 0) throw new ArgumentException("Select at least one occupied cell.", nameof(cells));
+            Vector3Int min = grid.Size, max = Vector3Int.zero;
+            foreach (int cell in cells)
+            {
+                if (cell < 0 || cell >= grid.Occupied.Length || !grid.Occupied[cell]) throw new ArgumentException("Invalid selected cell.", nameof(cells));
+                grid.Coordinates(cell, out int x, out int y, out int z);
+                var position = new Vector3Int(x, y, z);
+                min = Vector3Int.Min(min, position); max = Vector3Int.Max(max, position);
+            }
+            pivot = grid.Origin + ((Vector3)min + max + Vector3.one) * (.5f * grid.VoxelSize);
+            frameDistance = Mathf.Max(grid.VoxelSize * 2, ((Vector3)(max - min) + Vector3.one).magnitude * grid.VoxelSize * 2);
+        }
+
+        private void FrameSelection()
+        {
+            SelectionFrame(edit.Grid, selected, out var pivot, out distance);
+            panOffset = pivot - center;
+            Repaint();
+        }
+
+        [Shortcut("Voxel Bridge/Surface Painter/Undo", typeof(VoxelSurfacePainterWindow), KeyCode.Z, ShortcutModifiers.Action)]
+        private static void UndoShortcut(ShortcutArguments args) => (args.context as VoxelSurfacePainterWindow)?.ApplyHistoryShortcut(false);
+
+        [Shortcut("Voxel Bridge/Surface Painter/Redo", typeof(VoxelSurfacePainterWindow), KeyCode.Y, ShortcutModifiers.Action)]
+        private static void RedoShortcut(ShortcutArguments args) => (args.context as VoxelSurfacePainterWindow)?.ApplyHistoryShortcut(true);
+
+        [Shortcut("Voxel Bridge/Surface Painter/Redo Alternate", typeof(VoxelSurfacePainterWindow), KeyCode.Z, ShortcutModifiers.Action | ShortcutModifiers.Shift)]
+        private static void RedoAlternateShortcut(ShortcutArguments args) => (args.context as VoxelSurfacePainterWindow)?.ApplyHistoryShortcut(true);
+
+        private void ApplyHistoryShortcut(bool redo)
+        {
+            if (edit == null || EditorApplication.isPlayingOrWillChangePlaymode || EditorGUIUtility.editingTextField) return;
+            if (redo ? edit.CanRedo : edit.CanUndo) Run(() => Change(redo ? edit.Redo : edit.Undo));
         }
 
         private void DrawCell(int index, Rect rect, Camera camera)
@@ -330,26 +382,47 @@ namespace LocalModels.VoxelBridge
             if (edit == null) throw new InvalidOperationException("Load a valid source before saving.");
             string warning = VoxelSurfaceEditStore.Save(SourcePath, edit);
             ResetDraft(); LoadSource(true);
+            if (edit == null) { status = "Source saved, but preview reload failed: " + status; statusType = MessageType.Error; return; }
             status = warning ?? "Fuente guardada. Rebuild actualiza el prefab; los LODs descendientes no se regeneran automáticamente.";
             statusType = warning == null ? MessageType.Info : MessageType.Warning;
         }
 
         private void Rebuild()
         {
-            string path = AssetDatabase.GUIDToAssetPath(prefabGuid);
+            ResolveRebuildTarget(out string path, out string manifestPath);
+            if (manifestPath != null) VoxelProductionFamily.RebuildLevel(manifestPath, level, VoxelProductionEditor.Progress);
+            else VoxelProductionExporter.Rebuild(path, VoxelProductionEditor.Progress);
+            status = "Malla actualizada. Los LODs descendientes conservan sus archivos y requieren regeneración explícita para heredar los cambios.";
+            statusType = MessageType.Info;
+        }
+
+        private void SaveAndRebuild()
+        {
+            ResolveRebuildTarget(out _, out _);
+            if (edit == null) throw new InvalidOperationException("Load a valid source before rebuilding.");
+            if (edit.PendingCells > 0)
+            {
+                SaveSource();
+                if (edit == null || statusType == MessageType.Warning || statusType == MessageType.Error) return;
+            }
+            Rebuild();
+        }
+
+        private void ResolveRebuildTarget(out string path, out string manifestPath)
+        {
+            path = AssetDatabase.GUIDToAssetPath(prefabGuid);
+            manifestPath = null;
             var link = VoxelProductionLink.Load(path);
             if (!string.IsNullOrEmpty(link.manifestGuid))
             {
-                string manifestPath = AssetDatabase.GUIDToAssetPath(link.manifestGuid);
+                manifestPath = AssetDatabase.GUIDToAssetPath(link.manifestGuid);
                 var manifest = VoxelProductionFamily.Load(manifestPath);
                 if (level < 0 || level >= manifest.lods.Length || VoxelProductionFamily.SourcePath(manifest.lods[level]) != SourcePath)
                     throw new InvalidOperationException("The production source link changed. Reopen the editor from the intended LOD.");
-                VoxelProductionFamily.RebuildLevel(manifestPath, level, VoxelProductionEditor.Progress);
             }
             else
             {
                 if (link.SourcePath != SourcePath) throw new InvalidOperationException("The production source link changed. Reopen the surface editor.");
-                VoxelProductionExporter.Rebuild(path, VoxelProductionEditor.Progress);
             }
         }
 

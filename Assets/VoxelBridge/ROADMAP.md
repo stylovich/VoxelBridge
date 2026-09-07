@@ -7,8 +7,8 @@ Voxel Bridge debe producir familias voxel físicamente coherentes y editables, i
 ## Orden de trabajo recomendado
 
 1. Mantener la conversión individual y por lotes, las paletas globales, el transporte semántico y los prefabs de producción como base del flujo.
-2. Validar artísticamente `Surface Painter` en Unity, con selección, previsualización, Undo y guardado seguro de la fuente.
-3. Verificar el intercambio con MagicaVoxel y la derivación de LODs después de editar superficies. Incorporar preasignación PBR revisable durante la conversión y selección asistida de grupos en el editor de superficies.
+2. Consolidar `Surface Painter` en Unity: navegación, atajos y guardado con reconstrucción; continuar con herramientas de selección y diagnóstico de superficies/emisión para la corrección artística.
+3. Verificar el intercambio con MagicaVoxel y la derivación de LODs después de editar superficies. Incorporar preasignación PBR revisable durante la conversión después de disponer de herramientas cómodas de corrección.
 4. Completar las validaciones funcionales pendientes de materiales especiales, iluminación y carga/descarga de subescenas sobre assets representativos.
 5. Retomar las mediciones de rendimiento por LOD, sombras, transparencias, culling y streaming cuando exista una distribución representativa del mapa.
 6. Adaptar el horneado de impostores a las paletas semánticas antes de evaluar su calidad y coste. Comparar agrupación manual, HLOD e impostores sin imponer una técnica a todos los assets.
@@ -25,7 +25,7 @@ La consolidación artística de las paletas puede continuar durante la validaci�
 | Materiales semánticos | Disponible: paletas, perfiles cromáticos, bindings por slot, LUT y mesher opaco compartido. |
 | Familias y combinación | Disponible: edición de fuentes, reconstrucción, derivación de LODs y unión exacta de conjuntos compactos. |
 | DOTS y subescenas | Integración y diagnóstico disponibles; validación funcional inicial de instancias, recursos compartidos y frustum. No equivale a certificar rendimiento, sombras, oclusión o streaming de producción. |
-| Autoría visual de superficies | Disponible: selección visible, aplicación por voxel, Undo/Redo local, previsualización y guardado recuperable. Pendiente de evaluación artística sobre modelos representativos. |
+| Autoría visual de superficies | Disponible: selección visible, aplicación por voxel, Undo/Redo con atajos contextuales, navegación, encuadre de selección y guardado recuperable con reconstrucción explícita. Pendientes: pincel ajustable, selección asistida y vistas de diagnóstico. |
 | Intercambio de RGB duplicados | Pendiente de certificar en MagicaVoxel; la escritura y lectura controladas por Voxel Bridge conservan los pares. |
 | Preasignación PBR | Planificada después del editor de corrección: candidatos por perfil, comparación de propiedades y revisión de coincidencias ambiguas. |
 | Impostores semánticos | Horneado bloqueado hasta adaptar la captura a las LUT y los canales de IDs. La ruta RGB existente no demuestra compatibilidad semántica. |
@@ -39,10 +39,10 @@ La consolidación artística de las paletas puede continuar durante la validaci�
 
 - Entrada desde el Inspector del prefab de producción mediante `Edit Surfaces`, indicando fuente y LOD. LOD0 es la entrada recomendada; seleccionar otro nivel requiere una elección explícita.
 - Una sola fuente por sesión, identificada por GUID y fijada aunque cambie la selección de la escena. Los prefabs combinados se editan sobre su propia fuente, no sobre los modelos utilizados para construirlos.
-- Vista aislada del volumen con órbita, zoom, encuadre y selección de voxels visibles mediante clic o trazo de selección. Añadir y quitar celdas de la selección antes de aplicar el cambio.
+- Vista aislada del volumen con órbita, desplazamiento, zoom hasta escala de celda, encuadre del volumen o selección y selección de voxels visibles mediante clic o trazo. Añadir y quitar celdas de la selección antes de aplicar el cambio.
 - Selector de `SurfaceID` con ID, nombre y propiedades PBR de referencia. `Apply Surface` modifica únicamente la superficie de las celdas seleccionadas; no edita la definición global, el ColorID, la ocupación, la escala ni el pivote.
 - Previsualización con el shader semántico y resaltado de selección. La vista de diagnóstico por SurfaceID permanece pendiente para distinguir superficies con apariencia similar sin modificar la paleta de color.
-- `Undo` y `Redo` para cambios pendientes; `Save Source` para persistirlos y `Discard Changes` para descartarlos. La reconstrucción del prefab continúa siendo explícita.
+- `Undo` y `Redo` para cambios pendientes, con atajos contextuales `Ctrl+Z`, `Ctrl+Y` y `Ctrl+Shift+Z`. `Save Source Only` persiste la fuente; `Save & Rebuild` guarda y reconstruye el LOD vinculado. `Discard Changes` descarta el borrador. El historial no revierte archivos guardados ni se mezcla con el de la escena.
 
 La unidad de asignación es el voxel completo, no una cara: todas sus caras expuestas utilizan la misma superficie. La selección inicial no atraviesa geometría ni incluye automáticamente voxels interiores. Las piezas `Keep Original` no pertenecen al volumen editable y deben identificarse como excluidas. No se admite edición en Play Mode.
 
@@ -90,6 +90,17 @@ Los descendientes existentes nunca se sobrescriben al guardar una superficie. `R
 4. **Asistencia posterior:** selección por ColorID, SurfaceID o regiones conectadas, según necesidad artística. La clasificación como LED, neón u otro material sigue siendo explícita. La intensidad emisiva original no se conserva como atributo por voxel en el formato actual; agrupar por esa intensidad exigiría ampliar su captura y transporte.
 
 Quedan fuera de esta primera versión la modificación de geometría, pintura por cara, selección a través del volumen, edición de vidrio/follaje voxel, un editor general de materiales, clasificación automática por intensidad y reemplazar MagicaVoxel, Blender o Vengi.
+
+### Herramientas de corrección previstas
+
+Implementar por bloques verificables, manteniendo las selecciones separadas de la aplicación de cambios:
+
+1. **Selección espacial:** tamaño de pincel ajustable y selección rectangular, con operaciones de reemplazo, adición y sustracción. Seleccionar únicamente celdas visibles por defecto; cualquier modo que atraviese geometría requiere una elección explícita. Mantener los límites de selección e historial.
+2. **Selección semántica:** ColorID exacto, color parecido con tolerancia perceptual reutilizando la comparación cromática existente, SurfaceID y región conectada por caras. Diferenciar seleccionar todos los coincidentes de seleccionar sólo una región conectada para no alterar piezas lejanas accidentalmente.
+3. **Inspección:** cuentagotas que muestre ColorID y SurfaceID del voxel, vistas de diagnóstico por superficie y emisión, e aislamiento de selección. El diagnóstico emisivo debe distinguir superficies sin depender del bloom ni cambiar la intensidad HDR compartida; no clasifica LED o neón por luminosidad.
+4. **Edición visual de ColorID:** operación independiente que conserve SurfaceID, seleccione colores de la paleta global y respete el perfil cromático cuando corresponda. Ampliar el historial, la escritura y sus pruebas para este contrato; no eliminar simplemente la protección actual que impide modificar ColorID durante la pintura de superficies.
+
+La representación HDR con bloom y una comparación visual antes/después pueden evaluarse después de estas herramientas. La referencia normalizada actual no constituye una vista de iluminación final. La captura de grupos emisivos de origen y la preasignación PBR requieren trabajo propio durante la conversión; las herramientas de selección no recuperan atributos que no estén almacenados en el `.vox` y su sidecar.
 
 ## Preasignación de superficies por semejanza PBR
 

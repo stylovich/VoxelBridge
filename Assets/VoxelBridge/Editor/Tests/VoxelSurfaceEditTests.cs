@@ -170,7 +170,7 @@ namespace LocalModels.VoxelBridge.Tests
                 Assert.That(previewMaterial.GetTexture("_PaletteSurface") == surfaces.GeneratedLut, Is.True);
                 Assert.That(AssetDatabase.GetAssetPath(previewMaterial.GetTexture("_PaletteColor")), Is.EqualTo(AssetDatabase.GetAssetPath(colors.GeneratedLut)));
                 Assert.That(previewMaterial.shader.name, Is.EqualTo("Voxel Bridge/VoxelWorldOpaque"));
-                Assert.That((bool)WindowField(restored, "hasSourceEmissionMaterial"), Is.False);
+                Assert.That(previewMaterial.GetFloat("_EmissionIntensity"), Is.EqualTo(1f));
             }
             finally
             {
@@ -268,8 +268,6 @@ namespace LocalModels.VoxelBridge.Tests
                 Assert.That(temporary, Is.Not.Null, (string)WindowField(window, "status"));
                 Assert.That(AssetDatabase.Contains(temporary), Is.False);
                 Assert.That(temporary.GetFloat("_EmissionIntensity"), Is.EqualTo(Mathf.Clamp01(intensity)));
-                Assert.That((float)WindowField(window, "sourceEmissionIntensity"), Is.EqualTo(intensity));
-                Assert.That((bool)WindowField(window, "hasSourceEmissionMaterial"), Is.True);
                 Assert.That(original.GetFloat("_EmissionIntensity"), Is.EqualTo(intensity));
                 CollectionAssert.AreEqual(savedMaterial, File.ReadAllBytes(materialPath));
                 CollectionAssert.AreEqual(sourceBytes, File.ReadAllBytes(path));
@@ -315,8 +313,9 @@ namespace LocalModels.VoxelBridge.Tests
         private static void InvokeWindow(VoxelSurfacePainterWindow window, string name, params object[] args) =>
             typeof(VoxelSurfacePainterWindow).GetMethod(name, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).Invoke(window, args);
 
-        [Test]
-        public void SavedSurfaceEdit_RebuildsLinkedPrefabWithoutChangingInstanceOrAssetIdentity()
+        [TestCase(false)]
+        [TestCase(true)]
+        public void SavedSurfaceEdit_RebuildsLinkedPrefabWithoutChangingInstanceOrAssetIdentity(bool saveFirst)
         {
             Create(8);
             Assert.That(VoxelPaletteLutGenerator.TryRebuild(colors, out _, out string error), Is.True, error);
@@ -327,6 +326,7 @@ namespace LocalModels.VoxelBridge.Tests
             var testScene = UnityEditor.SceneManagement.EditorSceneManager.NewScene(UnityEditor.SceneManagement.NewSceneSetup.EmptyScene,
                 UnityEditor.SceneManagement.NewSceneMode.Additive);
             string sharedMaterialPath = null;
+            VoxelSurfacePainterWindow window = null;
             try
             {
                 UnityEngine.SceneManagement.SceneManager.SetActiveScene(testScene);
@@ -338,9 +338,20 @@ namespace LocalModels.VoxelBridge.Tests
                 string meshGuid = AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(mesh));
                 var instance = (GameObject)PrefabUtility.InstantiatePrefab(prefab);
                 instance.transform.position = new Vector3(13, 4, -20);
-                var edit = new VoxelSurfaceEdit(path); edit.Apply(new[] { 0 }, 7);
-                Assert.That(VoxelSurfaceEditStore.Save(path, edit), Is.Null);
-                VoxelProductionExporter.Rebuild(prefabPath);
+                window = ScriptableObject.CreateInstance<VoxelSurfacePainterWindow>();
+                var state = new SerializedObject(window);
+                state.FindProperty("sourceGuid").stringValue = AssetDatabase.AssetPathToGUID(path);
+                state.FindProperty("prefabGuid").stringValue = AssetDatabase.AssetPathToGUID(prefabPath);
+                state.ApplyModifiedPropertiesWithoutUndo(); InvokeWindow(window, "LoadSource", false);
+                var edit = (VoxelSurfaceEdit)WindowField(window, "edit");
+                InvokeWindow(window, "Change", (Action)(() => edit.Apply(new[] { 0 }, 7)));
+                if (saveFirst)
+                {
+                    InvokeWindow(window, "SaveSource");
+                    Assert.That(mesh.uv4.All(uv => uv.x == 0), Is.True, "Saving only must not silently rebuild the mesh.");
+                }
+                InvokeWindow(window, "SaveAndRebuild");
+                Assert.That(window.hasUnsavedChanges, Is.False);
                 Assert.That(instance.transform.position, Is.EqualTo(new Vector3(13, 4, -20)));
                 Assert.That(AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(instance.GetComponent<MeshFilter>().sharedMesh)), Is.EqualTo(meshGuid));
                 Assert.That(instance.GetComponent<MeshRenderer>().sharedMaterial == material, Is.True);
@@ -349,9 +360,71 @@ namespace LocalModels.VoxelBridge.Tests
             }
             finally
             {
+                if (window != null) { window.DiscardChanges(); UnityEngine.Object.DestroyImmediate(window); }
                 if (previousScene.IsValid() && previousScene.isLoaded) UnityEngine.SceneManagement.SceneManager.SetActiveScene(previousScene);
                 UnityEditor.SceneManagement.EditorSceneManager.CloseScene(testScene, true);
                 if (sharedMaterialPath != null) AssetDatabase.DeleteAsset(sharedMaterialPath);
+            }
+        }
+
+        [Test]
+        public void CameraNavigation_AllowsCellScaleZoomAndFramesSelectedCells()
+        {
+            var grid = new VoxelGrid(new Vector3Int(50, 20, 10), new Vector3(-2, 3, 5), .032f, true);
+            int cell = grid.Index(40, 15, 5); grid.Occupied[cell] = true;
+            VoxelSurfacePainterWindow.SelectionFrame(grid, new[] { cell }, out Vector3 pivot, out float distance);
+            Assert.That(pivot, Is.EqualTo(grid.Origin + new Vector3(40.5f, 15.5f, 5.5f) * grid.VoxelSize));
+            Assert.That(distance, Is.InRange(grid.VoxelSize * 2, grid.VoxelSize * 4));
+            float zoom = 4;
+            for (int i = 0; i < 30; i++) zoom = VoxelSurfacePainterWindow.ZoomDistance(zoom, -5, grid.VoxelSize, 1);
+            Assert.That(zoom, Is.EqualTo(grid.VoxelSize * 2).Within(.00001f));
+            Assert.That(zoom, Is.LessThan(1.05f), "Zoom must not be clamped to the radius of the entire model.");
+            Assert.That(VoxelSurfacePainterWindow.ZoomDistance(100, 100, grid.VoxelSize, 1), Is.EqualTo(100));
+            Assert.That(VoxelSurfacePainterWindow.RotateView(Vector2.zero, new Vector2(10, 4)), Is.EqualTo(new Vector2(2, 5)));
+            Vector2 clamped = VoxelSurfacePainterWindow.RotateView(new Vector2(88, 179), new Vector2(10, 10));
+            Assert.That(clamped.x, Is.EqualTo(89)); Assert.That(clamped.y, Is.EqualTo(-176));
+            Assert.Throws<ArgumentException>(() => VoxelSurfacePainterWindow.SelectionFrame(grid, Array.Empty<int>(), out _, out _));
+        }
+
+        [Test]
+        public void ContextShortcuts_UseLocalHistoryAndLeaveTextEditingAlone()
+        {
+            Create(8);
+            Assert.That(VoxelPaletteLutGenerator.TryRebuild(colors, out _, out string error), Is.True, error);
+            Assert.That(VoxelPaletteLutGenerator.TryRebuild(surfaces, out _, out error), Is.True, error);
+            AssetDatabase.ImportAsset(sidecarPath, ImportAssetOptions.ForceSynchronousImport);
+            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport);
+            var window = ScriptableObject.CreateInstance<VoxelSurfacePainterWindow>();
+            bool editingText = EditorGUIUtility.editingTextField;
+            try
+            {
+                var state = new SerializedObject(window);
+                state.FindProperty("sourceGuid").stringValue = AssetDatabase.AssetPathToGUID(path);
+                state.ApplyModifiedPropertiesWithoutUndo(); InvokeWindow(window, "LoadSource", false);
+                var edit = (VoxelSurfaceEdit)WindowField(window, "edit");
+                InvokeWindow(window, "Change", (Action)(() => edit.Apply(new[] { 0 }, 7)));
+                EditorGUIUtility.editingTextField = false;
+                int undoGroup = Undo.GetCurrentGroup();
+                var arguments = new UnityEditor.ShortcutManagement.ShortcutArguments { context = window };
+                var flags = System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic;
+                foreach (string method in new[] { "UndoShortcut", "RedoShortcut", "UndoShortcut", "RedoAlternateShortcut" })
+                {
+                    typeof(VoxelSurfacePainterWindow).GetMethod(method, flags).Invoke(null, new object[] { arguments });
+                    Assert.That(edit.PendingCells, Is.EqualTo(method == "UndoShortcut" ? 0 : 1));
+                }
+                Assert.That(Undo.GetCurrentGroup(), Is.EqualTo(undoGroup));
+                EditorGUIUtility.editingTextField = true;
+                typeof(VoxelSurfacePainterWindow).GetMethod("UndoShortcut", flags).Invoke(null, new object[] { arguments });
+                Assert.That(edit.PendingCells, Is.EqualTo(1));
+                EditorGUIUtility.editingTextField = false;
+                arguments.context = new object();
+                typeof(VoxelSurfacePainterWindow).GetMethod("UndoShortcut", flags).Invoke(null, new object[] { arguments });
+                Assert.That(edit.PendingCells, Is.EqualTo(1), "A different shortcut context must not edit this window.");
+            }
+            finally
+            {
+                EditorGUIUtility.editingTextField = editingText;
+                window.DiscardChanges(); UnityEngine.Object.DestroyImmediate(window);
             }
         }
 
