@@ -60,6 +60,12 @@ namespace LocalModels.VoxelBridge
                 return false;
             }
 
+            if (VoxelSurfaceEditStore.HasPending(voxAssetPath))
+            {
+                error = "An interrupted surface save requires recovery. Open Surface Painter and choose Recover Interrupted Save.";
+                return false;
+            }
+
             string metadataAssetPath = GetMetadataAssetPath(voxAssetPath);
             string projectRoot = Directory.GetParent(Application.dataPath)?.FullName;
             if (string.IsNullOrEmpty(projectRoot))

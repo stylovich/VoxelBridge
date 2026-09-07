@@ -24,11 +24,32 @@ Las paletas, el transporte de `ColorID + SurfaceID` y las familias semánticas d
 | `Resolution-Based Conversion` | Conversión individual con una resolución explícita |
 | `VOX to Unity` | Sincronización de `.vox`, exportación semántica LOD0, familias de producción o retorno desde OBJ |
 | `Bind Semantic IDs` | Asignación de ColorID y SurfaceID a los slots de un `.vox` |
+| `Surface Painter` | Selección visual de voxels, asignación de SurfaceID y guardado recuperable de la fuente |
 | `Global Palettes` | Administración de las paletas globales y sus LUT |
 | `Sync All Generated VOX Assets` | Resincronización explícita de los `.vox` con sidecar |
 | `Compatibility` | Aplicación controlada de los parches de integración |
 
-`Bind Semantic IDs` edita slots completos. La selección y pintura de superficies sobre voxels individuales todavía no está implementada; su alcance se define en [Autoría visual de superficies en Unity](ROADMAP.md#autoría-visual-de-superficies-en-unity).
+`Bind Semantic IDs` edita slots completos. `Surface Painter` permite cambiar la superficie de una parte de esos voxels sin modificar su ColorID.
+
+## Edición visual de superficies
+
+1. Seleccionar un prefab de producción y pulsar `Edit Surfaces` en la fila del LOD correspondiente. LOD0 es el punto de partida recomendado. También se puede abrir `Tools > Voxel Bridge > Surface Painter` y asignar un `.vox` con sidecar semántico v4.
+2. Comprobar que las LUT estén actualizadas. La previsualización utiliza una malla y un material temporales; no modifica las instancias de la escena. Las piezas `Keep Original`, incluido el vidrio retenido, quedan fuera de esta vista.
+3. Seleccionar voxels con clic izquierdo o arrastre. `Shift` quita celdas de la selección. `Alt` + arrastre o botón derecho rota la vista; la rueda controla el zoom y `Frame` encuadra el volumen.
+4. Elegir `Surface` y pulsar `Apply Surface`. La asignación afecta al voxel completo, no sólo a la cara señalada. Conserva ColorID, ocupación, escala y pivote.
+5. Utilizar los botones locales `Undo` y `Redo` para revisar cambios pendientes. No utilizar el Undo global del Editor como sustituto de este historial. `Clear Selection` no elimina las asignaciones aplicadas.
+6. Pulsar `Save Source` para guardar conjuntamente `.vox` y sidecar. La operación conserva los `.meta`, reutiliza slots existentes y sólo crea otra entrada local cuando hace falta otro par ColorID + SurfaceID.
+7. Pulsar `Rebuild Edited LOD` cuando la ventana se haya abierto desde un prefab. Esto actualiza ese nivel compartido por sus instancias. Los descendientes requieren revisión y regeneración explícita para heredar los cambios; sus retoques no se sobrescriben al guardar.
+
+La ventana mantiene una sola fuente, independientemente de la selección de la escena. Guardar reinicia el historial local. Cerrar o cambiar de fuente con cambios pendientes requiere guardar o descartar; cancelar conserva la sesión. Durante Play Mode, la herramienta conserva el borrador y deshabilita la edición. La serialización de la ventana conserva el borrador durante una recarga de scripts, pero reinicia Undo/Redo; no sustituye el guardado ni garantiza recuperar cambios sin guardar tras un cierre abrupto del Editor.
+
+Los cambios externos del `.vox`, sidecar o paletas bloquean el guardado para evitar sobrescrituras. `Reload Source` requiere resolver el borrador pendiente; `Discard Changes` lo descarta explícitamente. No hay fusión automática con cambios de MagicaVoxel. Los slots con RGB idéntico y superficies distintas mantienen una advertencia hasta certificar su intercambio externo.
+
+El guardado conserva copias de recuperación bajo `Library/VoxelBridgeSurfaceEdits`. Una interrupción bloquea las lecturas semánticas de producción hasta ejecutar `Recover Interrupted Save`. La recuperación restaura ambos archivos originales y rechaza sobrescribir modificaciones externas posteriores. No borrar `Library` ni mover las fuentes mientras exista una recuperación pendiente. Un fallo de importación posterior al guardado informa que la fuente está guardada y requiere reimportación.
+
+Límites: 131.072 celdas por selección, 1.048.576 celdas modificadas pendientes, historial de hasta 64 operaciones y 1.048.576 cambios de celda. El resaltado dibuja como máximo 512 celdas de la selección, además de la celda bajo el cursor; el contador y la asignación consideran la selección completa. Se mantienen los límites de lectura y meshing de producción. Superar 255 pares locales bloquea el guardado sin aproximar colores o superficies. La vista es una referencia de autoría; la iluminación definitiva se comprueba en la escena después de reconstruir.
+
+La selección asistida de grupos y la preasignación por semejanza PBR son fases posteriores descritas en [ROADMAP.md](ROADMAP.md).
 
 ## Combinación de modelos voxel
 

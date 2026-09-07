@@ -244,9 +244,11 @@ namespace LocalModels.VoxelBridge
         {
             public Vector3Int Size;
             public readonly List<(byte X, byte Y, byte Z, byte Palette)> Voxels = new();
+            public List<int> SlotOffsets;
         }
 
-        public static VoxelGrid Read(string path, VoxelBridgeMetadata metadata)
+        public static VoxelGrid Read(string path, VoxelBridgeMetadata metadata,
+            Action<int, int> visitRecord = null)
         {
             if (metadata == null) throw new ArgumentNullException(nameof(metadata));
             if (metadata.formatVersion != 3 && metadata.formatVersion != 4)
@@ -319,12 +321,15 @@ namespace LocalModels.VoxelBridge
                 {
                     if (contentBytes < 4 || pendingSize == Vector3Int.zero)
                         throw new InvalidDataException("The XYZI chunk is truncated or has no preceding SIZE chunk.");
-                    var model = new Model { Size = pendingSize };
+                    var model = new Model { Size = pendingSize, SlotOffsets = visitRecord == null ? null : new List<int>() };
                     int count = reader.ReadInt32();
                     if (count < 0 || 4L + count * 4L != contentBytes)
                         throw new InvalidDataException("The XYZI voxel count does not match its chunk size.");
                     for (int i = 0; i < count; i++)
+                    {
+                        model.SlotOffsets?.Add(checked((int)stream.Position + 3));
                         model.Voxels.Add((reader.ReadByte(), reader.ReadByte(), reader.ReadByte(), reader.ReadByte()));
+                    }
                     models.Add(model);
                     pendingSize = Vector3Int.zero;
                 }
@@ -368,8 +373,9 @@ namespace LocalModels.VoxelBridge
             {
                 VoxelChunkMetadata chunk = chunks[chunkIndex];
                 Model model = models[modelMapping[chunkIndex]];
-                foreach ((byte x, byte voxY, byte voxZ, byte paletteIndex) in model.Voxels)
+                for (int record = 0; record < model.Voxels.Count; record++)
                 {
+                    (byte x, byte voxY, byte voxZ, byte paletteIndex) = model.Voxels[record];
                     if (x >= model.Size.x || voxZ >= model.Size.y || voxY >= model.Size.z)
                         throw new InvalidDataException($"Model {chunk.modelIndex} contains a voxel outside its SIZE bounds.");
                     if (paletteIndex == 0)
@@ -383,6 +389,8 @@ namespace LocalModels.VoxelBridge
                             $"Model {chunk.modelIndex} contains a voxel outside the saved grid at ({gx}, {gy}, {gz}). " +
                             "Re-export the model and its sidecar with matching bounds before generating LODs.");
                     int index = grid.Index((int)gx, (int)gy, (int)gz);
+                    if (visitRecord != null && grid.Occupied[index])
+                        throw new InvalidDataException("Multiple VOX records occupy the same cell; per-cell editing is ambiguous.");
                     grid.Occupied[index] = true;
                     if (isSemantic)
                     {
@@ -392,6 +400,7 @@ namespace LocalModels.VoxelBridge
                     {
                         grid.Colors[index] = palette[paletteIndex - 1];
                     }
+                    visitRecord?.Invoke(index, model.SlotOffsets[record]);
                 }
             }
             return grid;

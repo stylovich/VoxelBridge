@@ -33,6 +33,7 @@ namespace LocalModels.VoxelBridge
                 if (GUILayout.Button("Select Source VOX")) SelectSource(path);
             }
             if (GUILayout.Button("Rebuild")) Rebuild(path);
+            if (GUILayout.Button("Edit Surfaces")) Run(() => VoxelSurfacePainterWindow.OpenForSource(VoxelProductionLink.Load(path).SourcePath, path));
             if (GUILayout.Button("Semantic Bindings")) Run(() =>
                 VoxelSemanticBindingWindow.OpenForSource(VoxelProductionLink.Load(path).SourcePath));
             if (GUILayout.Button("Create LOD Family...")) Run(() =>
@@ -60,6 +61,7 @@ namespace LocalModels.VoxelBridge
                         if (GUILayout.Button("Rebuild")) Run(() => VoxelProductionFamily.RebuildLevel(manifestPath, entry.lodIndex, Progress));
                     }
                     if (GUILayout.Button("Semantic Bindings")) Run(() => VoxelSemanticBindingWindow.OpenForSource(source));
+                    if (GUILayout.Button("Edit Surfaces")) Run(() => VoxelSurfacePainterWindow.OpenForSource(source, manifest.prefabAssetPath, entry.lodIndex));
                     if (entry.lodIndex > 0)
                         using (new EditorGUILayout.HorizontalScope())
                         {

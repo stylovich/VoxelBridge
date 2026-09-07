@@ -175,11 +175,11 @@ La edición admite pintar, añadir y eliminar voxels dentro de las cajas de los 
 
 El mismo RGB puede ocupar dos slots locales cuando necesita superficies diferentes. Voxel Bridge conserva esos slots mientras controla la escritura. MagicaVoxel puede reordenar slots visualmente idénticos al volver a guardar; este caso no se considera certificado hasta completar una prueba controlada de round-trip.
 
-## Autoría visual de superficies planificada
+## Autoría visual de superficies
 
-La asignación disponible en `Semantic Bindings` afecta a todos los voxels que utilizan un slot. Para cambiar la superficie de una parte de ellos conservando el mismo ColorID, se planifica `Surface Painter` dentro de Unity. Esta herramienta todavía no está implementada y no figura entre los menús disponibles.
+La asignación en `Semantic Bindings` afecta a todos los voxels que utilizan un slot. `Surface Painter`, disponible desde `Edit Surfaces` en el prefab o desde `Tools > Voxel Bridge`, modifica la superficie de las celdas seleccionadas conservando su ColorID. El [procedimiento de edición](README.md#edición-visual-de-superficies) describe selección, guardado, recuperación y reconstrucción.
 
-El [diseño de autoría visual](ROADMAP.md#autoría-visual-de-superficies-en-unity) define selección visible, previsualización, historial local, escritura por celda y recuperación. Reutiliza el `.vox`, el sidecar y el mesher existentes. La superficie pertenece al voxel completo, no a cada cara. Guardar no regenerará LODs descendientes ni modificará definiciones PBR globales. El intercambio externo de slots con RGB idéntico requiere certificación específica antes de considerarse seguro.
+La herramienta reutiliza el `.vox`, el sidecar v4 y el mesher existentes. La superficie pertenece al voxel completo, no a cada cara. Guardar no regenera LODs descendientes ni modifica definiciones PBR globales. Los pares supervivientes conservan sus slots; los pares nuevos reutilizan slots libres. El intercambio externo de slots con RGB idéntico requiere certificación específica antes de considerarse seguro. La preasignación PBR y las ayudas de selección permanecen en [ROADMAP.md](ROADMAP.md#preasignación-de-superficies-por-semejanza-pbr).
 
 ## Mesh semántico LOD0
 
