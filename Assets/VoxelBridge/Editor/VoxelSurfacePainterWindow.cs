@@ -23,6 +23,7 @@ namespace LocalModels.VoxelBridge
         [SerializeField] private VoxelSelectionTool selectionTool;
         [SerializeField] private VoxelSelectionMode selectionMode = VoxelSelectionMode.Add;
         [SerializeField] private int brushDiameter = 16;
+        [SerializeField] private bool showHelp;
         [SerializeField] private string draftFingerprint;
         [SerializeField] private int[] draftCells = Array.Empty<int>();
         [SerializeField] private int[] draftSurfaces = Array.Empty<int>();
@@ -43,6 +44,12 @@ namespace LocalModels.VoxelBridge
         private Vector2 gestureStart, gestureEnd;
         private int selectionControl;
         private double nextSelectionRepaint;
+        private readonly List<Mesh> selectionMeshes = new();
+        private readonly List<Mesh> hoverMeshes = new();
+        private Material selectionMaterial, hoverMaterial;
+        private IReadOnlyCollection<int> overlaySource;
+        private int overlayCount = -1, overlayHover = -1;
+        private GUIStyle glyphStyle;
         private string SourcePath => AssetDatabase.GUIDToAssetPath(sourceGuid);
 
         [MenuItem("Tools/Voxel Bridge/Surface Painter")]
@@ -178,6 +185,11 @@ namespace LocalModels.VoxelBridge
 
         private void ReleasePreview()
         {
+            VoxelSelectionOverlay.Destroy(selectionMeshes); VoxelSelectionOverlay.Destroy(hoverMeshes);
+            if (selectionMaterial != null) DestroyImmediate(selectionMaterial);
+            if (hoverMaterial != null) DestroyImmediate(hoverMaterial);
+            selectionMaterial = null; hoverMaterial = null;
+            overlaySource = null; overlayCount = overlayHover = -1;
             preview?.Cleanup(); preview = null;
             if (mesh != null) DestroyImmediate(mesh);
             if (material != null) DestroyImmediate(material);
@@ -200,79 +212,115 @@ namespace LocalModels.VoxelBridge
 
         private bool DrawControls()
         {
-            Object candidate = EditorGUILayout.ObjectField("Source VOX", source, typeof(Object), false);
+            Object candidate;
+            using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
+            {
+                GUILayout.Label("Source", GUILayout.Width(44));
+                candidate = EditorGUILayout.ObjectField(source, typeof(Object), false);
+                if (GUILayout.Button(new GUIContent("Source Actions", "Recargar, descartar, guardar sólo la fuente o reconstruir el LOD vinculado."), EditorStyles.toolbarDropDown, GUILayout.Width(110))) ShowSourceActions();
+                showHelp = GUILayout.Toggle(showHelp, new GUIContent("?", "Controls & external editing\nControles, límites de la vista y precauciones de intercambio con MagicaVoxel."), EditorStyles.toolbarButton, GUILayout.Width(25));
+            }
             if (candidate != source)
             {
                 string path = AssetDatabase.GetAssetPath(candidate);
                 if (!path.EndsWith(".vox", StringComparison.OrdinalIgnoreCase)) status = "Choose a VOX source with semantic bindings.";
                 else if (ConfirmLeave()) { ResetDraft(); source = candidate; sourceGuid = AssetDatabase.AssetPathToGUID(path); prefabGuid = null; level = 0; LoadSource(false); }
             }
-            EditorGUILayout.HelpBox("Pincel o rectángulo selecciona voxels visibles; Shift al iniciar resta. Esc cancela. Alt + arrastre o botón derecho rota; botón central desplaza; rueda acerca/aleja. Apply Surface confirma la asignación. Keep Original queda fuera de esta vista.", MessageType.Info);
-            EditorGUILayout.HelpBox("Los slots con RGB idéntico y superficies distintas requieren una prueba de intercambio con MagicaVoxel. No se debe asumir que un guardado externo conserva su identidad.", MessageType.Warning);
+            if (showHelp)
+            {
+                EditorGUILayout.HelpBox("Pincel o rectángulo selecciona voxels visibles; Shift al iniciar resta. Esc cancela. Alt + arrastre o botón derecho rota; botón central desplaza; rueda acerca/aleja. Apply Surface modifica el voxel completo. Keep Original queda fuera de esta vista. La emisión de referencia no reproduce bloom ni exposición.", MessageType.Info);
+                EditorGUILayout.HelpBox("Intercambio externo: los slots con RGB idéntico y superficies distintas requieren una prueba en MagicaVoxel. No se debe asumir que un guardado externo conserva su identidad. Las validaciones y el bloqueo ante conflictos permanecen activos.", MessageType.Warning);
+            }
             if (!string.IsNullOrEmpty(SourcePath) && VoxelSurfaceEditStore.HasPending(SourcePath))
                 if (GUILayout.Button("Recover Interrupted Save")) Run(() => { VoxelSurfaceEditStore.Recover(SourcePath); LoadSource(true); });
-            using (new EditorGUILayout.HorizontalScope())
-            {
-                if (GUILayout.Button("Reload Source") && ConfirmLeave()) { ResetDraft(); LoadSource(false); }
-                if (GUILayout.Button("Discard Changes") && EditorUtility.DisplayDialog("Discard Surface Changes", "Se descartará el borrador local. Los archivos guardados no cambian.", "Discard", "Cancel"))
-                { ResetDraft(); LoadSource(false); }
-            }
-            if (!string.IsNullOrEmpty(status)) EditorGUILayout.HelpBox(status, statusType);
+            if (!string.IsNullOrEmpty(status) && (statusType != MessageType.Info || showHelp)) EditorGUILayout.HelpBox(status, statusType);
             if (EditorApplication.isPlayingOrWillChangePlaymode)
             { EditorGUILayout.HelpBox("La edición está deshabilitada en Play Mode. Los cambios pendientes se conservan.", MessageType.Info); return false; }
             if (edit == null) return false;
             if (!edit.Surfaces.TryValidate(out string surfaceError))
             { EditorGUILayout.HelpBox(surfaceError, MessageType.Error); return false; }
-            using (new EditorGUILayout.HorizontalScope())
+            using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
             {
-                selectionTool = (VoxelSelectionTool)EditorGUILayout.EnumPopup("Selection Tool", selectionTool);
-                selectionMode = (VoxelSelectionMode)GUILayout.Toolbar((int)selectionMode, new[] { "Replace", "Add", "Subtract" });
+                selectionTool = (VoxelSelectionTool)GUILayout.Toolbar((int)selectionTool, new[] { "Brush", "Rectangle" }, EditorStyles.toolbarButton, GUILayout.Width(160));
+                GUILayout.Space(8);
+                selectionMode = (VoxelSelectionMode)GUILayout.Toolbar((int)selectionMode, new[] { "Replace", "Add", "Subtract" }, EditorStyles.toolbarButton, GUILayout.Width(205));
+                if (selectionTool == VoxelSelectionTool.Brush)
+                {
+                    GUILayout.Space(8);
+                    GUILayout.Label(new GUIContent("Size", "Diámetro en píxeles de interfaz. Acercar la cámara para seleccionar detalles subpíxel."), GUILayout.Width(28));
+                    brushDiameter = Mathf.RoundToInt(GUILayout.HorizontalSlider(brushDiameter, 1, 128, GUILayout.Width(90)));
+                    brushDiameter = Mathf.Clamp(EditorGUILayout.IntField(brushDiameter, GUILayout.Width(38)), 1, 128);
+                }
+                GUILayout.FlexibleSpace();
             }
-            if (selectionTool == VoxelSelectionTool.Brush)
-                brushDiameter = EditorGUILayout.IntSlider(new GUIContent("Brush Size",
-                    "Diámetro en píxeles de interfaz, independiente del zoom. Acercar la vista para seleccionar detalles menores de un píxel."), brushDiameter, 1, 128);
             var options = edit.Surfaces.Entries.Where(s => s.RenderClass == VoxelSurfaceRenderClass.Opaque).OrderBy(s => s.Id).ToArray();
             int choice = Array.FindIndex(options, s => s.Id == surfaceId);
-            choice = EditorGUILayout.Popup(new GUIContent("Surface",
-                "La emisión de esta vista está normalizada para identificar colores; no reproduce el bloom ni la exposición de la escena. Los materiales de producción no cambian."),
-                Mathf.Max(0, choice), options.Select(s => new GUIContent($"{s.Id:000} · {s.DisplayName}")).ToArray());
-            if (choice >= 0 && choice < options.Length)
-            {
-                var surface = options[choice]; surfaceId = surface.Id;
-                EditorGUILayout.LabelField($"Metallic {surface.Metallic:0.##}   Smoothness {surface.Smoothness:0.##}   Emission {surface.Emission:0.##}");
-            }
             using (new EditorGUILayout.HorizontalScope())
             {
+                GUILayout.Label("Surface", GUILayout.Width(48));
+                choice = EditorGUILayout.Popup(Mathf.Max(0, choice), options.Select(s => new GUIContent($"{s.Id:000} · {s.DisplayName}")).ToArray(), GUILayout.MinWidth(170), GUILayout.MaxWidth(340));
+                if (choice >= 0 && choice < options.Length)
+                {
+                    var surface = options[choice]; surfaceId = surface.Id;
+                    GUILayout.Label(new GUIContent($"M {surface.Metallic:0.##}   S {surface.Smoothness:0.##}   E {surface.Emission:0.##}",
+                        "Metallic / Smoothness / Emission\nValores de referencia de la superficie, sin bloom ni exposición de escena."), EditorStyles.miniLabel, GUILayout.Width(145));
+                }
+                GUILayout.FlexibleSpace();
                 using (new EditorGUI.DisabledScope(selected.Count == 0))
-                    if (GUILayout.Button("Apply Surface")) Run(() => Change(() => edit.Apply(selected, surfaceId)));
-                if (GUILayout.Button("Clear Selection")) { selected.Clear(); Repaint(); }
-                using (new EditorGUI.DisabledScope(!edit.CanUndo)) if (GUILayout.Button(new GUIContent("Undo", "Ctrl+Z en esta ventana. Deshace asignaciones pendientes; no revierte archivos guardados."))) Run(() => Change(edit.Undo));
-                using (new EditorGUI.DisabledScope(!edit.CanRedo)) if (GUILayout.Button(new GUIContent("Redo", "Ctrl+Y o Ctrl+Shift+Z en esta ventana."))) Run(() => Change(edit.Redo));
-                if (GUILayout.Button("Frame")) { distance = radius * 4; panOffset = Vector3.zero; Repaint(); }
-                using (new EditorGUI.DisabledScope(selected.Count == 0))
-                    if (GUILayout.Button("Frame Selection")) Run(FrameSelection);
+                    if (GUILayout.Button("Apply Surface", GUILayout.Width(108))) Run(() => Change(() => edit.Apply(selected, surfaceId)));
             }
-            using (new EditorGUILayout.HorizontalScope())
+            using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
             {
+                using (new EditorGUI.DisabledScope(!edit.CanUndo)) if (GlyphButton("↶", "Undo — Ctrl+Z\nDeshace asignaciones pendientes; no revierte archivos guardados.")) Run(() => Change(edit.Undo));
+                using (new EditorGUI.DisabledScope(!edit.CanRedo)) if (GlyphButton("↷", "Redo — Ctrl+Y / Ctrl+Shift+Z")) Run(() => Change(edit.Redo));
+                using (new EditorGUI.DisabledScope(selected.Count == 0))
+                    if (GlyphButton("×", "Clear Selection\nQuita la selección sin modificar las asignaciones.")) { selected.Clear(); Repaint(); }
+                GUILayout.Space(8);
+                if (GUILayout.Button("Frame All", EditorStyles.toolbarButton, GUILayout.Width(75))) { distance = radius * 4; panOffset = Vector3.zero; Repaint(); }
+                using (new EditorGUI.DisabledScope(selected.Count == 0))
+                    if (GUILayout.Button("Frame Selection", EditorStyles.toolbarButton, GUILayout.Width(108))) Run(FrameSelection);
+                GUILayout.FlexibleSpace();
                 using (new EditorGUI.DisabledScope(string.IsNullOrEmpty(prefabGuid)))
-                    if (GUILayout.Button(new GUIContent("Save & Rebuild", "Guarda la fuente y reconstruye este LOD del prefab. No regenera los LODs descendientes."))) Run(SaveAndRebuild);
-                using (new EditorGUI.DisabledScope(edit.PendingCells == 0)) if (GUILayout.Button("Save Source Only")) Run(SaveSource);
-                using (new EditorGUI.DisabledScope(edit.PendingCells != 0 || string.IsNullOrEmpty(prefabGuid)))
-                    if (GUILayout.Button("Rebuild Edited LOD")) Run(Rebuild);
+                    if (GUILayout.Button(new GUIContent("Save & Rebuild", "Guarda la fuente y reconstruye este LOD del prefab. No regenera los LODs descendientes."), EditorStyles.toolbarButton, GUILayout.Width(125))) Run(SaveAndRebuild);
             }
             return true;
+        }
+
+        private bool GlyphButton(string symbol, string tooltip)
+        {
+            glyphStyle ??= new GUIStyle(EditorStyles.toolbarButton) { fontSize = 16 };
+            return GUILayout.Button(new GUIContent(symbol, tooltip), glyphStyle, GUILayout.Width(28));
+        }
+
+        private void ShowSourceActions()
+        {
+            var menu = new GenericMenu();
+            menu.AddItem(new GUIContent("Reload Source"), false, () => { if (ConfirmLeave()) { ResetDraft(); LoadSource(false); } });
+            if (edit != null && edit.PendingCells > 0) menu.AddItem(new GUIContent("Save Source Only"), false, () => Run(SaveSource));
+            else menu.AddDisabledItem(new GUIContent("Save Source Only"));
+            if (edit != null && edit.PendingCells == 0 && !string.IsNullOrEmpty(prefabGuid)) menu.AddItem(new GUIContent("Rebuild Edited LOD"), false, () => Run(Rebuild));
+            else menu.AddDisabledItem(new GUIContent("Rebuild Edited LOD"));
+            menu.AddSeparator("");
+            menu.AddItem(new GUIContent("Discard Changes..."), false, () =>
+            {
+                if (EditorUtility.DisplayDialog("Discard Surface Changes", "Se descartará el borrador local. Los archivos guardados no cambian.", "Discard", "Cancel"))
+                { ResetDraft(); LoadSource(false); }
+            });
+            menu.AddItem(new GUIContent("External Editing Notice"), showHelp, () => { showHelp = true; Repaint(); });
+            menu.ShowAsContext();
         }
 
         private void OnGUI()
         {
             using (new EditorGUI.DisabledScope(selectionJob != null))
                 if (!DrawControls()) return;
-            using (new EditorGUILayout.HorizontalScope())
+            using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
             {
-                EditorGUILayout.LabelField(selectionJob == null ? $"Selected {selected.Count:N0}   Pending {edit.PendingCells:N0}   LOD {level}" :
-                    $"Selecting {selectionJob.Result.Count:N0}   Samples {selectionJob.Samples:N0}   Esc to cancel");
+                EditorGUILayout.LabelField(new GUIContent(selectionJob == null ? $"Selected {selected.Count:N0}   Pending {edit.PendingCells:N0}   LOD {level}" :
+                    $"Selecting {selectionJob.Result.Count:N0}   Samples {selectionJob.Samples:N0}   Esc to cancel", status), EditorStyles.miniLabel);
+                // Keep the control present while dragging so IMGUI control IDs stay stable.
                 using (new EditorGUI.DisabledScope(selectionJob == null))
-                    if (GUILayout.Button("Cancel Selection", GUILayout.Width(125))) CancelSelection();
+                    if (GUILayout.Button(new GUIContent("Cancel", "Cancel Selection — Esc\nConserva la selección anterior al gesto."), EditorStyles.toolbarButton, GUILayout.Width(60))) CancelSelection();
             }
             Rect viewport = GUILayoutUtility.GetRect(100, 100, GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true));
             DrawPreview(viewport);
@@ -299,7 +347,10 @@ namespace LocalModels.VoxelBridge
                 bool failed = false;
                 try
                 {
+                    UpdateSelectionOverlay();
                     preview.DrawMesh(mesh, Matrix4x4.identity, material, 0);
+                    foreach (var faces in selectionMeshes) preview.DrawMesh(faces, Matrix4x4.identity, selectionMaterial, 0);
+                    foreach (var faces in hoverMeshes) preview.DrawMesh(faces, Matrix4x4.identity, hoverMaterial, 0);
                     preview.Render(true, false);
                 }
                 catch (Exception exception)
@@ -308,15 +359,8 @@ namespace LocalModels.VoxelBridge
                 if (failed) { CancelSelection(); ReleasePreview(); Repaint(); return; }
                 GUI.DrawTexture(rect, texture, ScaleMode.StretchToFill, false);
                 Handles.BeginGUI();
-                Color previous = Handles.color; Handles.color = Color.yellow;
-                // A bounded overlay keeps large selections from stalling the editor.
+                Color previous = Handles.color;
                 GUI.BeginClip(rect);
-                var localRect = new Rect(0, 0, rect.width, rect.height);
-                var overlay = selectionJob?.Result ?? selected;
-                int stride = Mathf.Max(1, Mathf.CeilToInt(overlay.Count / 512f)), ordinal = 0;
-                foreach (int index in overlay)
-                    if (ordinal++ % stride == 0) DrawCell(index, localRect, camera);
-                if (hover >= 0) { Handles.color = Color.cyan; DrawCell(hover, localRect, camera); }
                 Handles.color = Color.cyan;
                 if (selecting && selectionTool == VoxelSelectionTool.Rectangle)
                 {
@@ -422,6 +466,9 @@ namespace LocalModels.VoxelBridge
             EditorApplication.update -= ProcessSelection;
             selecting = false;
             ReleaseSelectionControl();
+            // A completed replacement may have the same count and reuse the committed set.
+            // Invalidate even if the provisional result never received a Repaint event.
+            if (selectionJob != null) overlayCount = -1;
             selectionJob?.Dispose(); selectionJob = null;
             Repaint();
         }
@@ -470,19 +517,30 @@ namespace LocalModels.VoxelBridge
             if (redo ? edit.CanRedo : edit.CanUndo) Run(() => Change(redo ? edit.Redo : edit.Undo));
         }
 
-        private void DrawCell(int index, Rect rect, Camera camera)
+        private void UpdateSelectionOverlay()
         {
-            edit.Grid.Coordinates(index, out int x, out int y, out int z);
-            Vector3 min = edit.Grid.Origin + new Vector3(x, y, z) * edit.Grid.VoxelSize;
-            var points = new Vector3[8];
-            for (int i = 0; i < 8; i++)
+            if (selectionMaterial == null)
             {
-                Vector3 p = camera.WorldToViewportPoint(min + new Vector3(i & 1, (i >> 1) & 1, (i >> 2) & 1) * edit.Grid.VoxelSize);
-                if (p.z <= 0) return;
-                points[i] = new Vector3(rect.x + p.x * rect.width, rect.y + (1 - p.y) * rect.height, 0);
+                var shader = AssetDatabase.LoadAssetAtPath<Shader>(VoxelSelectionOverlay.ShaderPath);
+                if (shader == null || !shader.isSupported || ShaderUtil.ShaderHasError(shader)) throw new InvalidOperationException("Selection overlay shader is unavailable.");
+                selectionMaterial = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
+                hoverMaterial = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
+                selectionMaterial.SetColor("_Color", new Color(1, .8f, .05f, 1));
+                hoverMaterial.SetColor("_Color", Color.cyan);
             }
-            for (int i = 0; i < 8; i++) for (int axis = 0; axis < 3; axis++)
-                if ((i & (1 << axis)) == 0) Handles.DrawLine(points[i], points[i | (1 << axis)]);
+            var current = selectionJob?.Result ?? selected;
+            if (!ReferenceEquals(overlaySource, current) || overlayCount != current.Count)
+            {
+                var generated = VoxelSelectionOverlay.Build(edit.Grid, current);
+                VoxelSelectionOverlay.Destroy(selectionMeshes); selectionMeshes.AddRange(generated);
+                overlaySource = current; overlayCount = current.Count;
+            }
+            if (overlayHover != hover)
+            {
+                VoxelSelectionOverlay.Destroy(hoverMeshes);
+                if (hover >= 0) hoverMeshes.AddRange(VoxelSelectionOverlay.Build(edit.Grid, new[] { hover }));
+                overlayHover = hover;
+            }
         }
 
         private void Change(Action operation)

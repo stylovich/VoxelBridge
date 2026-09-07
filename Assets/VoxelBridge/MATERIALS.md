@@ -181,7 +181,7 @@ La asignación en `Semantic Bindings` afecta a todos los voxels que utilizan un 
 
 La herramienta reutiliza el `.vox`, el sidecar v4 y el mesher existentes. La superficie pertenece al voxel completo, no a cada cara. Guardar no regenera LODs descendientes ni modifica definiciones PBR globales. Los pares supervivientes conservan sus slots; los pares nuevos reutilizan slots libres. El intercambio externo de slots con RGB idéntico requiere certificación específica antes de considerarse seguro. La preasignación PBR y las ayudas de selección permanecen en [ROADMAP.md](ROADMAP.md#preasignación-de-superficies-por-semejanza-pbr).
 
-La emisión de la vista utiliza una referencia acotada sólo en su material temporal. El tooltip de `Surface` describe esta limitación. No representa la exposición ni el bloom de la escena; la intensidad de producción permanece intacta. `Save & Rebuild` guarda la fuente y reconstruye el LOD vinculado; los descendientes requieren regeneración explícita.
+La emisión de la vista utiliza una referencia acotada sólo en su material temporal. La ayuda `?` y el tooltip de las propiedades PBR describen esta limitación. No representa la exposición ni el bloom de la escena; la intensidad de producción permanece intacta. `Save & Rebuild` guarda la fuente y reconstruye el LOD vinculado; los descendientes requieren regeneración explícita.
 
 ## Mesh semántico LOD0
 

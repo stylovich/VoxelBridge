@@ -428,6 +428,44 @@ namespace LocalModels.VoxelBridge.Tests
             }
         }
 
+        [Test]
+        public void OverlayCache_RefreshesSameSizeReplacementAndReleasesTemporaryMeshes()
+        {
+            Create(8);
+            Assert.That(VoxelPaletteLutGenerator.TryRebuild(colors, out _, out string error), Is.True, error);
+            Assert.That(VoxelPaletteLutGenerator.TryRebuild(surfaces, out _, out error), Is.True, error);
+            AssetDatabase.ImportAsset(sidecarPath, ImportAssetOptions.ForceSynchronousImport);
+            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport);
+            var window = ScriptableObject.CreateInstance<VoxelSurfacePainterWindow>();
+            try
+            {
+                var state = new SerializedObject(window);
+                state.FindProperty("sourceGuid").stringValue = AssetDatabase.AssetPathToGUID(path);
+                state.ApplyModifiedPropertiesWithoutUndo(); InvokeWindow(window, "LoadSource", false);
+                var selected = (HashSet<int>)WindowField(window, "selected");
+                selected.Add(0); InvokeWindow(window, "UpdateSelectionOverlay");
+                var meshes = (List<Mesh>)WindowField(window, "selectionMeshes");
+                Mesh original = meshes[0];
+                InvokeWindow(window, "UpdateSelectionOverlay");
+                Assert.That(meshes[0], Is.SameAs(original), "Unchanged selections must reuse their temporary geometry.");
+                var edit = (VoxelSurfaceEdit)WindowField(window, "edit");
+                var preview = (PreviewRenderUtility)WindowField(window, "preview");
+                var job = new VoxelSurfaceSelection(edit.Grid, preview.camera, new Vector2(64, 64), VoxelSelectionMode.Add, new[] { 1 });
+                typeof(VoxelSurfacePainterWindow).GetField("selectionJob", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).SetValue(window, job);
+                InvokeWindow(window, "ProcessSelection");
+                CollectionAssert.AreEquivalent(new[] { 1 }, selected);
+                InvokeWindow(window, "UpdateSelectionOverlay");
+                Assert.That(original == null, Is.True, "A same-count replacement must destroy the stale face geometry.");
+                Mesh replacement = meshes[0];
+                Material overlayMaterial = (Material)WindowField(window, "selectionMaterial");
+                InvokeWindow(window, "ReleasePreview");
+                Assert.That(meshes, Is.Empty);
+                Assert.That(replacement == null && overlayMaterial == null, Is.True);
+                Assert.That(window.hasUnsavedChanges, Is.False);
+            }
+            finally { window.DiscardChanges(); UnityEngine.Object.DestroyImmediate(window); }
+        }
+
         private VoxelBridgeMetadata Create(int width = 35, bool fullPalette = false)
         {
             var grid = new VoxelGrid(new Vector3Int(width, 2, 2), new Vector3(-2, 3, 5), .032f, true);
