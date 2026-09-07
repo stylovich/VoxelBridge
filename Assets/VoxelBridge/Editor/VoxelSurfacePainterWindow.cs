@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.HighDefinition;
 using Object = UnityEngine.Object;
 
 namespace LocalModels.VoxelBridge
@@ -149,10 +151,8 @@ namespace LocalModels.VoxelBridge
                     preview.camera.fieldOfView = 35;
                     preview.camera.clearFlags = CameraClearFlags.SolidColor;
                     preview.camera.backgroundColor = new Color(.16f, .17f, .19f);
-                    preview.lights[0].intensity = 1.4f;
-                    preview.lights[0].transform.rotation = Quaternion.Euler(40, 35, 0);
-                    preview.lights[1].intensity = .7f;
-                    preview.lights[1].transform.rotation = Quaternion.Euler(340, 218, 0);
+                    ConfigurePreviewLight(preview.lights[0], 4f, new Vector3(40, 35, 0));
+                    ConfigurePreviewLight(preview.lights[1], 2f, new Vector3(340, 218, 0));
                     preview.ambientColor = new Color(.4f, .4f, .4f);
                 }
             }
@@ -165,6 +165,20 @@ namespace LocalModels.VoxelBridge
             if (mesh != null) DestroyImmediate(mesh);
             if (material != null) DestroyImmediate(material);
             mesh = null; material = null;
+        }
+
+        private static void ConfigurePreviewLight(Light light, float lux, Vector3 rotation)
+        {
+            // Register HDRP data before rendering. Lazy initialization otherwise resets
+            // directional preview lights to 100,000 lux after the first cull.
+            if (light.GetComponent<HDAdditionalLightData>() == null)
+                light.gameObject.AddComponent<HDAdditionalLightData>();
+            light.lightUnit = LightUnit.Lux;
+            light.intensity = lux;
+            light.color = Color.white;
+            light.useColorTemperature = false;
+            light.shadows = LightShadows.None;
+            light.transform.rotation = Quaternion.Euler(rotation);
         }
 
         private void OnGUI()

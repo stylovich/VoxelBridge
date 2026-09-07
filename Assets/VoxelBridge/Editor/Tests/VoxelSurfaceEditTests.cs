@@ -203,10 +203,19 @@ namespace LocalModels.VoxelBridge.Tests
                 Vector3 center = mesh.bounds.center;
                 camera.transform.SetPositionAndRotation(center + new Vector3(0, .13f, -.35f), Quaternion.Euler(20, 0, 0));
                 camera.nearClipPlane = .001f; camera.farClipPlane = 10; camera.aspect = 1.5f;
-                preview.BeginStaticPreview(new Rect(0, 0, 384, 256));
-                preview.DrawMesh(mesh, Matrix4x4.identity, material, 0);
-                preview.Render(true, false);
-                capture = preview.EndStaticPreview();
+                float[] lightIntensities = preview.lights.Select(light => light.intensity).ToArray();
+                for (int frame = 0; frame < 3; frame++)
+                {
+                    if (capture != null) UnityEngine.Object.DestroyImmediate(capture);
+                    preview.BeginStaticPreview(new Rect(0, 0, 384, 256));
+                    preview.DrawMesh(mesh, Matrix4x4.identity, material, 0);
+                    preview.Render(true, false);
+                    capture = preview.EndStaticPreview();
+                    CollectionAssert.AreEqual(lightIntensities, preview.lights.Select(light => light.intensity).ToArray(),
+                        "HDRP must not replace the authoring light intensities when initializing its light data.");
+                    Assert.That(capture.GetPixels32().Count(pixel => pixel.r > 250 && pixel.g > 250 && pixel.b > 250),
+                        Is.LessThan(capture.width * capture.height / 100), "The colored fixture must not become a clipped white silhouette on subsequent renders.");
+                }
                 Assert.That(capture, Is.Not.Null);
                 Assert.That(capture.GetPixels32().Distinct().Count(), Is.GreaterThan(8), "The preview must contain rendered geometry, not only a solid clear color.");
                 Directory.CreateDirectory("Logs");
