@@ -20,6 +20,9 @@ namespace LocalModels.VoxelBridge
         [SerializeField] private Vector2 orbit = new(20, -30);
         [SerializeField] private float distance = 1;
         [SerializeField] private Vector3 panOffset;
+        [SerializeField] private VoxelSelectionTool selectionTool;
+        [SerializeField] private VoxelSelectionMode selectionMode = VoxelSelectionMode.Add;
+        [SerializeField] private int brushDiameter = 16;
         [SerializeField] private string draftFingerprint;
         [SerializeField] private int[] draftCells = Array.Empty<int>();
         [SerializeField] private int[] draftSurfaces = Array.Empty<int>();
@@ -35,6 +38,11 @@ namespace LocalModels.VoxelBridge
         private float radius;
         private int hover = -1;
         private bool selecting;
+        private VoxelSurfaceSelection selectionJob;
+        private Rect selectionViewport;
+        private Vector2 gestureStart, gestureEnd;
+        private int selectionControl;
+        private double nextSelectionRepaint;
         private string SourcePath => AssetDatabase.GUIDToAssetPath(sourceGuid);
 
         [MenuItem("Tools/Voxel Bridge/Surface Painter")]
@@ -79,6 +87,7 @@ namespace LocalModels.VoxelBridge
 
         private void OnDisable()
         {
+            CancelSelection();
             EditorApplication.playModeStateChanged -= OnPlayMode;
             EditorApplication.update -= RestoreAfterReload;
             ReleasePreview();
@@ -86,7 +95,7 @@ namespace LocalModels.VoxelBridge
 
         private void OnPlayMode(PlayModeStateChange state)
         {
-            selecting = false;
+            CancelSelection();
             if (state == PlayModeStateChange.ExitingEditMode) ReleasePreview();
             if (state == PlayModeStateChange.EnteredEditMode && edit != null) Run(BuildPreview);
             Repaint();
@@ -94,6 +103,7 @@ namespace LocalModels.VoxelBridge
 
         private void LoadSource(bool restoreDraft)
         {
+            CancelSelection();
             ReleasePreview(); edit = null; selected.Clear(); status = null; statusType = MessageType.Info;
             if (string.IsNullOrEmpty(SourcePath)) { status = "The source asset is missing."; statusType = MessageType.Error; return; }
             try
@@ -188,7 +198,7 @@ namespace LocalModels.VoxelBridge
             light.transform.rotation = Quaternion.Euler(rotation);
         }
 
-        private void OnGUI()
+        private bool DrawControls()
         {
             Object candidate = EditorGUILayout.ObjectField("Source VOX", source, typeof(Object), false);
             if (candidate != source)
@@ -197,7 +207,7 @@ namespace LocalModels.VoxelBridge
                 if (!path.EndsWith(".vox", StringComparison.OrdinalIgnoreCase)) status = "Choose a VOX source with semantic bindings.";
                 else if (ConfirmLeave()) { ResetDraft(); source = candidate; sourceGuid = AssetDatabase.AssetPathToGUID(path); prefabGuid = null; level = 0; LoadSource(false); }
             }
-            EditorGUILayout.HelpBox("Clic o arrastre selecciona; Shift quita celdas. Alt + arrastre o botón derecho rota; botón central desplaza; rueda acerca/aleja. Frame Selection encuadra la selección. Se modifica el voxel completo. Keep Original queda fuera de esta vista.", MessageType.Info);
+            EditorGUILayout.HelpBox("Pincel o rectángulo selecciona voxels visibles; Shift al iniciar resta. Esc cancela. Alt + arrastre o botón derecho rota; botón central desplaza; rueda acerca/aleja. Apply Surface confirma la asignación. Keep Original queda fuera de esta vista.", MessageType.Info);
             EditorGUILayout.HelpBox("Los slots con RGB idéntico y superficies distintas requieren una prueba de intercambio con MagicaVoxel. No se debe asumir que un guardado externo conserva su identidad.", MessageType.Warning);
             if (!string.IsNullOrEmpty(SourcePath) && VoxelSurfaceEditStore.HasPending(SourcePath))
                 if (GUILayout.Button("Recover Interrupted Save")) Run(() => { VoxelSurfaceEditStore.Recover(SourcePath); LoadSource(true); });
@@ -209,10 +219,18 @@ namespace LocalModels.VoxelBridge
             }
             if (!string.IsNullOrEmpty(status)) EditorGUILayout.HelpBox(status, statusType);
             if (EditorApplication.isPlayingOrWillChangePlaymode)
-            { EditorGUILayout.HelpBox("La edición está deshabilitada en Play Mode. Los cambios pendientes se conservan.", MessageType.Info); return; }
-            if (edit == null) return;
+            { EditorGUILayout.HelpBox("La edición está deshabilitada en Play Mode. Los cambios pendientes se conservan.", MessageType.Info); return false; }
+            if (edit == null) return false;
             if (!edit.Surfaces.TryValidate(out string surfaceError))
-            { EditorGUILayout.HelpBox(surfaceError, MessageType.Error); return; }
+            { EditorGUILayout.HelpBox(surfaceError, MessageType.Error); return false; }
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                selectionTool = (VoxelSelectionTool)EditorGUILayout.EnumPopup("Selection Tool", selectionTool);
+                selectionMode = (VoxelSelectionMode)GUILayout.Toolbar((int)selectionMode, new[] { "Replace", "Add", "Subtract" });
+            }
+            if (selectionTool == VoxelSelectionTool.Brush)
+                brushDiameter = EditorGUILayout.IntSlider(new GUIContent("Brush Size",
+                    "Diámetro en píxeles de interfaz, independiente del zoom. Acercar la vista para seleccionar detalles menores de un píxel."), brushDiameter, 1, 128);
             var options = edit.Surfaces.Entries.Where(s => s.RenderClass == VoxelSurfaceRenderClass.Opaque).OrderBy(s => s.Id).ToArray();
             int choice = Array.FindIndex(options, s => s.Id == surfaceId);
             choice = EditorGUILayout.Popup(new GUIContent("Surface",
@@ -242,7 +260,20 @@ namespace LocalModels.VoxelBridge
                 using (new EditorGUI.DisabledScope(edit.PendingCells != 0 || string.IsNullOrEmpty(prefabGuid)))
                     if (GUILayout.Button("Rebuild Edited LOD")) Run(Rebuild);
             }
-            EditorGUILayout.LabelField($"Selected {selected.Count:N0}   Pending {edit.PendingCells:N0}   LOD {level}");
+            return true;
+        }
+
+        private void OnGUI()
+        {
+            using (new EditorGUI.DisabledScope(selectionJob != null))
+                if (!DrawControls()) return;
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                EditorGUILayout.LabelField(selectionJob == null ? $"Selected {selected.Count:N0}   Pending {edit.PendingCells:N0}   LOD {level}" :
+                    $"Selecting {selectionJob.Result.Count:N0}   Samples {selectionJob.Samples:N0}   Esc to cancel");
+                using (new EditorGUI.DisabledScope(selectionJob == null))
+                    if (GUILayout.Button("Cancel Selection", GUILayout.Width(125))) CancelSelection();
+            }
             Rect viewport = GUILayoutUtility.GetRect(100, 100, GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true));
             DrawPreview(viewport);
         }
@@ -250,6 +281,10 @@ namespace LocalModels.VoxelBridge
         private void DrawPreview(Rect rect)
         {
             if (preview == null || mesh == null || material == null || rect.height <= 0) return;
+            int control = GUIUtility.GetControlID("VoxelSurfaceSelection".GetHashCode(), FocusType.Passive, rect);
+            // GUILayout returns a placeholder rectangle during Layout, not the viewport.
+            if (Event.current.type == EventType.Layout) return;
+            if (selectionJob != null && rect != selectionViewport) CancelSelection();
             Camera camera = preview.camera;
             Quaternion rotation = Quaternion.Euler(orbit.x, orbit.y, 0);
             camera.transform.SetPositionAndRotation(center + panOffset - rotation * Vector3.forward * distance, rotation);
@@ -270,19 +305,53 @@ namespace LocalModels.VoxelBridge
                 catch (Exception exception)
                 { status = "Preview rendering failed: " + exception.Message; statusType = MessageType.Error; failed = true; }
                 finally { texture = preview.EndPreview(); }
-                if (failed) { ReleasePreview(); Repaint(); return; }
+                if (failed) { CancelSelection(); ReleasePreview(); Repaint(); return; }
                 GUI.DrawTexture(rect, texture, ScaleMode.StretchToFill, false);
                 Handles.BeginGUI();
                 Color previous = Handles.color; Handles.color = Color.yellow;
                 // A bounded overlay keeps large selections from stalling the editor.
                 GUI.BeginClip(rect);
                 var localRect = new Rect(0, 0, rect.width, rect.height);
-                foreach (int index in selected.Take(512)) DrawCell(index, localRect, camera);
+                var overlay = selectionJob?.Result ?? selected;
+                int stride = Mathf.Max(1, Mathf.CeilToInt(overlay.Count / 512f)), ordinal = 0;
+                foreach (int index in overlay)
+                    if (ordinal++ % stride == 0) DrawCell(index, localRect, camera);
                 if (hover >= 0) { Handles.color = Color.cyan; DrawCell(hover, localRect, camera); }
+                Handles.color = Color.cyan;
+                if (selecting && selectionTool == VoxelSelectionTool.Rectangle)
+                {
+                    Rect area = VoxelSurfaceSelection.Area(gestureStart, gestureEnd);
+                    EditorGUI.DrawRect(area, new Color(0, 1, 1, .08f));
+                    Handles.DrawAAPolyLine(2, new Vector3(area.xMin, area.yMin), new Vector3(area.xMax, area.yMin),
+                        new Vector3(area.xMax, area.yMax), new Vector3(area.xMin, area.yMax), new Vector3(area.xMin, area.yMin));
+                }
+                else if (selectionTool == VoxelSelectionTool.Brush && rect.Contains(e.mousePosition))
+                    Handles.DrawWireDisc((Vector3)(e.mousePosition - rect.position), Vector3.forward, brushDiameter * .5f);
                 GUI.EndClip();
                 Handles.color = previous; Handles.EndGUI();
             }
-            if (!rect.Contains(e.mousePosition)) { if (e.type == EventType.MouseUp) selecting = false; return; }
+            if (selectionJob != null)
+            {
+                if (e.type == EventType.KeyDown && e.keyCode == KeyCode.Escape) { CancelSelection(); e.Use(); }
+                else if (selecting && (e.type == EventType.MouseDrag || e.type == EventType.MouseUp) && e.button == 0)
+                {
+                    Vector2 point = e.mousePosition - rect.position;
+                    RunSelection(() =>
+                    {
+                        if (selectionTool == VoxelSelectionTool.Brush) selectionJob.Brush(gestureEnd, point, brushDiameter);
+                        gestureEnd = point;
+                        if (e.type == EventType.MouseUp)
+                        {
+                            if (selectionTool == VoxelSelectionTool.Rectangle) selectionJob.Rectangle(gestureStart, gestureEnd);
+                            selecting = false;
+                            ReleaseSelectionControl();
+                        }
+                    });
+                    e.Use(); Repaint();
+                }
+                return;
+            }
+            if (!rect.Contains(e.mousePosition)) return;
             if (e.type == EventType.ScrollWheel)
             { distance = ZoomDistance(distance, e.delta.y, edit.Grid.VoxelSize, radius); e.Use(); Repaint(); }
             if (e.type == EventType.MouseDrag && (e.button == 2 || (e.alt && e.shift && e.button == 0)))
@@ -293,21 +362,68 @@ namespace LocalModels.VoxelBridge
             }
             if (e.type == EventType.MouseDrag && (e.alt || e.button == 1))
             { orbit = RotateView(orbit, e.delta); selecting = false; e.Use(); Repaint(); }
-            if (e.type == EventType.MouseDown && e.button == 0 && !e.alt) selecting = true;
+            if (e.type == EventType.MouseDown && e.button == 0 && !e.alt)
+            {
+                RunSelection(() =>
+                {
+                    selectionJob = new VoxelSurfaceSelection(edit.Grid, camera, rect.size,
+                        e.shift ? VoxelSelectionMode.Subtract : selectionMode, selected);
+                    selectionViewport = rect;
+                    gestureStart = gestureEnd = e.mousePosition - rect.position;
+                    selecting = true; selectionControl = control; GUIUtility.hotControl = control;
+                    if (selectionTool == VoxelSelectionTool.Brush) selectionJob.Brush(gestureStart, gestureEnd, brushDiameter);
+                    EditorApplication.update += ProcessSelection;
+                });
+                e.Use(); Repaint(); return;
+            }
             if ((e.type == EventType.MouseMove || e.type == EventType.MouseDown || e.type == EventType.MouseDrag) && !e.alt && e.button == 0)
             {
                 Vector2 uv = new((e.mousePosition.x - rect.x) / rect.width, 1 - (e.mousePosition.y - rect.y) / rect.height);
                 hover = VoxelSurfaceEdit.Pick(edit.Grid, camera.ViewportPointToRay(uv), out int index) ? index : -1;
-                if (selecting && hover >= 0)
-                {
-                    if (e.shift) selected.Remove(hover);
-                    else if (selected.Count < VoxelSurfaceEdit.MaximumSelection) selected.Add(hover);
-                    else status = "Selection limit reached. Apply or clear this selection first.";
-                    e.Use();
-                }
                 Repaint();
             }
-            if (e.type == EventType.MouseUp) { selecting = false; e.Use(); }
+        }
+
+        private void OnLostFocus() => CancelSelection();
+
+        private void ProcessSelection()
+        {
+            if (selectionJob == null) { EditorApplication.update -= ProcessSelection; return; }
+            if (EditorApplication.isCompiling || EditorApplication.isPlayingOrWillChangePlaymode) { CancelSelection(); return; }
+            RunSelection(() =>
+            {
+                var timer = System.Diagnostics.Stopwatch.StartNew();
+                do { selectionJob.Step(64); } while (!selectionJob.IsIdle && timer.Elapsed.TotalMilliseconds < 4);
+                if (selectionJob.IsIdle && !selecting)
+                {
+                    selected.Clear(); selected.UnionWith(selectionJob.Result);
+                    CancelSelection();
+                }
+                else if (EditorApplication.timeSinceStartup >= nextSelectionRepaint)
+                { nextSelectionRepaint = EditorApplication.timeSinceStartup + .1; Repaint(); }
+            });
+        }
+
+        private void RunSelection(Action action)
+        {
+            try { action(); }
+            catch (Exception exception)
+            { CancelSelection(); status = exception.Message; statusType = MessageType.Warning; Repaint(); }
+        }
+
+        private void ReleaseSelectionControl()
+        {
+            if (selectionControl != 0 && GUIUtility.hotControl == selectionControl) GUIUtility.hotControl = 0;
+            selectionControl = 0;
+        }
+
+        private void CancelSelection()
+        {
+            EditorApplication.update -= ProcessSelection;
+            selecting = false;
+            ReleaseSelectionControl();
+            selectionJob?.Dispose(); selectionJob = null;
+            Repaint();
         }
 
         internal static Vector2 RotateView(Vector2 angles, Vector2 delta) => new(
@@ -350,7 +466,7 @@ namespace LocalModels.VoxelBridge
 
         private void ApplyHistoryShortcut(bool redo)
         {
-            if (edit == null || EditorApplication.isPlayingOrWillChangePlaymode || EditorGUIUtility.editingTextField) return;
+            if (edit == null || selectionJob != null || EditorApplication.isPlayingOrWillChangePlaymode || EditorGUIUtility.editingTextField) return;
             if (redo ? edit.CanRedo : edit.CanUndo) Run(() => Change(redo ? edit.Redo : edit.Undo));
         }
 
