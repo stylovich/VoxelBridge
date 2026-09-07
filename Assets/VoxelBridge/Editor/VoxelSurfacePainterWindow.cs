@@ -342,6 +342,10 @@ namespace LocalModels.VoxelBridge
             var e = Event.current;
             if (e.type == EventType.Repaint)
             {
+                // BeginClip also changes Event.mousePosition's coordinate space. Snapshot
+                // both position and containment before entering the local viewport.
+                Vector2 localPointer = e.mousePosition - rect.position;
+                bool drawBrushCursor = selectionTool == VoxelSelectionTool.Brush && rect.Contains(e.mousePosition);
                 preview.BeginPreview(rect, GUIStyle.none);
                 Texture texture;
                 bool failed = false;
@@ -369,8 +373,8 @@ namespace LocalModels.VoxelBridge
                     Handles.DrawAAPolyLine(2, new Vector3(area.xMin, area.yMin), new Vector3(area.xMax, area.yMin),
                         new Vector3(area.xMax, area.yMax), new Vector3(area.xMin, area.yMax), new Vector3(area.xMin, area.yMin));
                 }
-                else if (selectionTool == VoxelSelectionTool.Brush && rect.Contains(e.mousePosition))
-                    Handles.DrawWireDisc((Vector3)(e.mousePosition - rect.position), Vector3.forward, brushDiameter * .5f);
+                else if (drawBrushCursor)
+                    Handles.DrawWireDisc((Vector3)localPointer, Vector3.forward, brushDiameter * .5f);
                 GUI.EndClip();
                 Handles.color = previous; Handles.EndGUI();
             }

@@ -466,6 +466,82 @@ namespace LocalModels.VoxelBridge.Tests
             finally { window.DiscardChanges(); UnityEngine.Object.DestroyImmediate(window); }
         }
 
+        private sealed class PointerCaptureWindow : EditorWindow
+        {
+            internal VoxelSurfacePainterWindow Painter;
+            internal Rect Viewport;
+            internal Vector2 Pointer;
+            internal Exception Error;
+            internal int Repaints;
+
+            private void OnGUI()
+            {
+                if (Event.current.type != EventType.Repaint || Painter == null) return;
+                Repaints++;
+                Vector2 previous = Event.current.mousePosition;
+                try
+                {
+                    Event.current.mousePosition = Pointer;
+                    InvokeWindow(Painter, "DrawPreview", Viewport);
+                }
+                catch (Exception exception) { Error = exception; }
+                finally { Event.current.mousePosition = previous; }
+            }
+        }
+
+        [TestCase(0, 60, 205, 180)]
+        [TestCase(35, 90, 205, 180)]
+        [TestCase(35, 90, 205, 120)]
+        public void BrushCursor_MatchesPointerWithOffsetViewport(float x, float y, float pointerX, float pointerY)
+        {
+            Create(8);
+            Assert.That(VoxelPaletteLutGenerator.TryRebuild(colors, out _, out string error), Is.True, error);
+            Assert.That(VoxelPaletteLutGenerator.TryRebuild(surfaces, out _, out error), Is.True, error);
+            AssetDatabase.ImportAsset(sidecarPath, ImportAssetOptions.ForceSynchronousImport);
+            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport);
+            var painter = ScriptableObject.CreateInstance<VoxelSurfacePainterWindow>();
+            var probe = ScriptableObject.CreateInstance<PointerCaptureWindow>();
+            var target = new RenderTexture(450, 360, 24);
+            var capture = new Texture2D(450, 360, TextureFormat.RGB24, false);
+            RenderTexture previous = RenderTexture.active;
+            try
+            {
+                var state = new SerializedObject(painter);
+                state.FindProperty("sourceGuid").stringValue = AssetDatabase.AssetPathToGUID(path);
+                state.FindProperty("brushDiameter").intValue = 24;
+                state.ApplyModifiedPropertiesWithoutUndo(); InvokeWindow(painter, "LoadSource", false);
+                probe.Painter = painter; probe.Viewport = new Rect(x, y, 360, 230); probe.Pointer = new Vector2(pointerX, pointerY);
+                probe.ShowUtility(); probe.position = new Rect(100, 100, 450, 360);
+                probe.SendEvent(new Event { type = EventType.Repaint });
+                target.Create();
+                var method = typeof(UnityEditorInternal.InternalEditorUtility).GetMethod("CaptureEditorWindow",
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+                Assert.That((bool)method.Invoke(null, new object[] { probe, target }), Is.True);
+                Assert.That(probe.Error, Is.Null);
+                Assert.That(probe.Repaints, Is.GreaterThan(0), "The native window must render before evaluating cursor pixels.");
+                RenderTexture.active = target; capture.ReadPixels(new Rect(0, 0, 450, 360), 0, 0); capture.Apply();
+                File.WriteAllBytes("Logs/brush-cursor-regression.png", capture.EncodeToPNG());
+                var pixels = capture.GetPixels32(); var cyan = new List<Vector2>();
+                for (int py = 0; py < 360; py++) for (int px = 0; px < 450; px++)
+                {
+                    var p = pixels[py * 450 + px];
+                    // Handles blends its cyan stroke with the viewport background.
+                    if (p.r < 30 && p.g > 180 && p.b > 180) cyan.Add(new Vector2(px + .5f, 360 - py - .5f));
+                }
+                Assert.That(cyan.Count, Is.GreaterThan(12), "The cursor must remain visible near the top of an offset viewport.");
+                Assert.That(cyan.Average(p => p.x), Is.EqualTo(pointerX).Within(1.5f));
+                Assert.That(cyan.Average(p => p.y), Is.EqualTo(pointerY).Within(1.5f));
+                Assert.That(cyan.Max(p => p.x) - cyan.Min(p => p.x), Is.InRange(22f, 26f));
+                Assert.That(cyan.Max(p => p.y) - cyan.Min(p => p.y), Is.InRange(22f, 26f));
+            }
+            finally
+            {
+                RenderTexture.active = previous; target.Release();
+                UnityEngine.Object.DestroyImmediate(target); UnityEngine.Object.DestroyImmediate(capture);
+                UnityEngine.Object.DestroyImmediate(probe); painter.DiscardChanges(); UnityEngine.Object.DestroyImmediate(painter);
+            }
+        }
+
         private VoxelBridgeMetadata Create(int width = 35, bool fullPalette = false)
         {
             var grid = new VoxelGrid(new Vector3Int(width, 2, 2), new Vector3(-2, 3, 5), .032f, true);

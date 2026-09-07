@@ -59,6 +59,8 @@ Un gesto admite hasta 1.048.576 muestras de pantalla únicas, 4.194.304 muestras
 
 La ventana limita el multiplicador de emisión de su material temporal al rango `0..1`; sin material vinculado utiliza `1`. Conserva la emisión relativa de cada SurfaceID y la emisión apagada si el multiplicador original es cero. Esto permite identificar el color sin saturarlo por intensidades HDR altas; no simula exposición, bloom ni luminosidad física final. La ayuda `?` y el tooltip de las propiedades PBR describen esta limitación. Guardar o reconstruir no la transfiere al material de producción. Comprobar el resultado luminoso definitivo en la escena.
 
+La vista utiliza HDRP Lit, no colores planos. Una superficie con `Metallic = 0` conserva respuesta especular; `Smoothness` influye en su apariencia bajo las luces de referencia. Comparar el brillo con otro editor, como MagicaVoxel, requiere considerar sus diferencias de sombreado e iluminación. No deducir un SurfaceID metálico únicamente por el aspecto de esa comparación; consultar la superficie asignada y sus valores PBR.
+
 El guardado y la reconstrucción son etapas separadas: un fallo de reconstrucción conserva la fuente guardada y la malla anterior. Reintentar la reconstrucción después de resolver el error; Undo no revierte los archivos guardados.
 
 La selección asistida de grupos y la preasignación por semejanza PBR son fases posteriores descritas en [ROADMAP.md](ROADMAP.md).
