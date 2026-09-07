@@ -24,6 +24,7 @@ namespace LocalModels.VoxelBridge
         [SerializeField] private VoxelSelectionMode selectionMode = VoxelSelectionMode.Add;
         [SerializeField] private int brushDiameter = 16;
         [SerializeField] private bool showHelp;
+        [SerializeField] private bool showSelectionTint = true;
         [SerializeField] private string draftFingerprint;
         [SerializeField] private int[] draftCells = Array.Empty<int>();
         [SerializeField] private int[] draftSurfaces = Array.Empty<int>();
@@ -279,6 +280,8 @@ namespace LocalModels.VoxelBridge
                 if (GUILayout.Button("Frame All", EditorStyles.toolbarButton, GUILayout.Width(75))) { distance = radius * 4; panOffset = Vector3.zero; Repaint(); }
                 using (new EditorGUI.DisabledScope(selected.Count == 0))
                     if (GUILayout.Button("Frame Selection", EditorStyles.toolbarButton, GUILayout.Width(108))) Run(FrameSelection);
+                bool tint = GUILayout.Toggle(showSelectionTint, new GUIContent("Tint", "Tinte suave sobre la selección. Desactivar para mostrar sólo el perímetro; no modifica materiales ni asignaciones."), EditorStyles.toolbarButton, GUILayout.Width(42));
+                if (tint != showSelectionTint) { showSelectionTint = tint; overlayCount = -1; Repaint(); }
                 GUILayout.FlexibleSpace();
                 using (new EditorGUI.DisabledScope(string.IsNullOrEmpty(prefabGuid)))
                     if (GUILayout.Button(new GUIContent("Save & Rebuild", "Guarda la fuente y reconstruye este LOD del prefab. No regenera los LODs descendientes."), EditorStyles.toolbarButton, GUILayout.Width(125))) Run(SaveAndRebuild);
@@ -535,8 +538,9 @@ namespace LocalModels.VoxelBridge
             var current = selectionJob?.Result ?? selected;
             if (!ReferenceEquals(overlaySource, current) || overlayCount != current.Count)
             {
-                var generated = VoxelSelectionOverlay.Build(edit.Grid, current);
+                var generated = VoxelSelectionOverlay.Build(edit.Grid, current, showSelectionTint);
                 VoxelSelectionOverlay.Destroy(selectionMeshes); selectionMeshes.AddRange(generated);
+                selectionMaterial.SetFloat("_FillOpacity", showSelectionTint ? .04f : 0);
                 overlaySource = current; overlayCount = current.Count;
             }
             if (overlayHover != hover)

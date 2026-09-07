@@ -10,13 +10,15 @@ namespace LocalModels.VoxelBridge
         internal const string ShaderPath = "Assets/VoxelBridge/Editor/Shaders/VoxelSelectionOverlay.shader";
         private const int FacesPerMesh = 16383;
 
-        internal static List<Mesh> Build(VoxelGrid grid, IReadOnlyCollection<int> cells)
+        internal static List<Mesh> Build(VoxelGrid grid, IReadOnlyCollection<int> cells, bool includeInterior = false)
         {
             if (cells.Count > VoxelSurfaceEdit.MaximumSelection) throw new ArgumentException("Selection limit exceeded.");
             var result = new List<Mesh>();
             var vertices = new List<Vector3>();
             var uv = new List<Vector2>();
+            var edges = new List<Vector4>();
             var indices = new List<int>();
+            var selected = cells as HashSet<int> ?? new HashSet<int>(cells);
             try
             {
                 foreach (int cell in cells)
@@ -30,6 +32,9 @@ namespace LocalModels.VoxelBridge
                         if (neighbor.x >= 0 && neighbor.y >= 0 && neighbor.z >= 0 &&
                             neighbor.x < grid.Size.x && neighbor.y < grid.Size.y && neighbor.z < grid.Size.z &&
                             grid.Occupied[grid.Index(neighbor.x, neighbor.y, neighbor.z)]) continue;
+                        int uAxis = (axis + 1) % 3, vAxis = (axis + 2) % 3;
+                        var mask = new Vector4(Boundary(uAxis, -1), Boundary(uAxis, 1), Boundary(vAxis, -1), Boundary(vAxis, 1));
+                        if (mask == Vector4.zero && !includeInterior) continue;
                         Vector3 origin = grid.Origin + (Vector3)position * grid.VoxelSize;
                         origin[axis] += ((side > 0 ? 1 : 0) + side * .0005f) * grid.VoxelSize;
                         Vector3 u = Vector3.zero, v = Vector3.zero;
@@ -37,9 +42,19 @@ namespace LocalModels.VoxelBridge
                         int start = vertices.Count;
                         vertices.Add(origin); vertices.Add(origin + u); vertices.Add(origin + u + v); vertices.Add(origin + v);
                         uv.Add(Vector2.zero); uv.Add(Vector2.right); uv.Add(Vector2.one); uv.Add(Vector2.up);
+                        for (int corner = 0; corner < 4; corner++) edges.Add(mask);
                         indices.Add(start); indices.Add(start + 1); indices.Add(start + 2);
                         indices.Add(start); indices.Add(start + 2); indices.Add(start + 3);
                         if (vertices.Count == FacesPerMesh * 4) Flush();
+
+                        float Boundary(int tangentAxis, int direction)
+                        {
+                            var adjacent = position; adjacent[tangentAxis] += direction;
+                            if (!Inside(adjacent) || !selected.Contains(grid.Index(adjacent.x, adjacent.y, adjacent.z))) return 1;
+                            var cover = adjacent; cover[axis] += side;
+                            // Merge only exposed coplanar faces. Changes of plane keep a contour.
+                            return Inside(cover) && grid.Occupied[grid.Index(cover.x, cover.y, cover.z)] ? 1 : 0;
+                        }
                     }
                 }
                 Flush();
@@ -52,10 +67,12 @@ namespace LocalModels.VoxelBridge
                 if (vertices.Count == 0) return;
                 var mesh = new Mesh { name = "Voxel Selection Faces", hideFlags = HideFlags.HideAndDontSave };
                 result.Add(mesh);
-                mesh.SetVertices(vertices); mesh.SetUVs(0, uv); mesh.SetTriangles(indices, 0);
+                mesh.SetVertices(vertices); mesh.SetUVs(0, uv); mesh.SetUVs(1, edges); mesh.SetTriangles(indices, 0);
                 mesh.UploadMeshData(false);
-                vertices.Clear(); uv.Clear(); indices.Clear();
+                vertices.Clear(); uv.Clear(); edges.Clear(); indices.Clear();
             }
+
+            bool Inside(Vector3Int p) => p.x >= 0 && p.y >= 0 && p.z >= 0 && p.x < grid.Size.x && p.y < grid.Size.y && p.z < grid.Size.z;
         }
 
         internal static void Destroy(List<Mesh> meshes)

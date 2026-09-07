@@ -11,7 +11,7 @@ namespace LocalModels.VoxelBridge.Tests
     public sealed class VoxelSelectionOverlayTests
     {
         [Test]
-        public void FaceOverlay_PreservesAll900CellsAndOmitsSharedFaces()
+        public void FaceOverlay_PreservesLargeRegionPerimeterAndOmitsSharedEdges()
         {
             var grid = new VoxelGrid(new Vector3Int(30, 30, 1), Vector3.zero, 1, true);
             Array.Fill(grid.Occupied, true);
@@ -19,7 +19,7 @@ namespace LocalModels.VoxelBridge.Tests
             var meshes = VoxelSelectionOverlay.Build(grid, selected);
             try
             {
-                Assert.That(meshes.Sum(m => m.vertexCount), Is.EqualTo((900 * 2 + 120) * 4));
+                Assert.That(meshes.Sum(m => m.vertexCount), Is.EqualTo((116 * 2 + 120) * 4));
                 var fronts = new HashSet<Vector2Int>();
                 foreach (var mesh in meshes)
                 {
@@ -31,7 +31,9 @@ namespace LocalModels.VoxelBridge.Tests
                         fronts.Add(new Vector2Int(Mathf.FloorToInt(center.x), Mathf.FloorToInt(center.y)));
                     }
                 }
-                Assert.That(fronts.Count, Is.EqualTo(900), "Every selected front face must be represented, including selections above 512 cells.");
+                Assert.That(fronts.Count, Is.EqualTo(116), "Only boundary faces need overlay geometry; no arbitrary sampling is permitted.");
+                Assert.That(fronts.All(p => p.x == 0 || p.x == 29 || p.y == 0 || p.y == 29), Is.True);
+                Assert.That(FrontEdgeCount(meshes), Is.EqualTo(120));
                 Assert.That(grid.Occupied.All(value => value), Is.True);
                 Assert.That(grid.SemanticIds.All(value => value == 0), Is.True);
             }
@@ -63,9 +65,11 @@ namespace LocalModels.VoxelBridge.Tests
             Assert.That(VoxelSelectionOverlay.Build(grid, Array.Empty<int>()), Is.Empty);
         }
 
-        [TestCase(false)]
-        [TestCase(true)]
-        public void HdrpOverlay_ShowsCompleteFaceGridAndRespectsOccluders(bool occlude)
+        [TestCase(false, false)]
+        [TestCase(true, false)]
+        [TestCase(false, true)]
+        [TestCase(true, true)]
+        public void HdrpOverlay_ShowsPerimeterWithOptionalTintAndRespectsOccluders(bool occlude, bool tint)
         {
             var grid = new VoxelGrid(new Vector3Int(30, 30, 1), Vector3.zero, 1, true);
             Array.Fill(grid.Occupied, true);
@@ -73,9 +77,10 @@ namespace LocalModels.VoxelBridge.Tests
             Assert.That(shader, Is.Not.Null); Assert.That(ShaderUtil.ShaderHasError(shader), Is.False);
             var overlay = new Material(shader);
             overlay.SetColor("_Color", new Color(1, .8f, .05f, 1));
+            overlay.SetFloat("_FillOpacity", tint ? .04f : 0);
             var baseMaterial = new Material(Shader.Find("HDRP/Unlit"));
             baseMaterial.SetColor("_UnlitColor", new Color(.08f, .08f, .08f, 1));
-            var meshes = VoxelSelectionOverlay.Build(grid, Enumerable.Range(0, 900).ToArray());
+            var meshes = VoxelSelectionOverlay.Build(grid, Enumerable.Range(0, 900).ToArray(), tint);
             Mesh model = VoxelSemanticMesher.Build(grid, false);
             var preview = new PreviewRenderUtility();
             Texture2D capture = null;
@@ -108,9 +113,12 @@ namespace LocalModels.VoxelBridge.Tests
                         }
                     if (found) highlightedTiles++;
                 }
-                Assert.That(highlightedTiles, Is.EqualTo(occlude ? 0 : 900), "The overlay must show each visible face and no face behind an occluder.");
+                Assert.That(highlightedTiles, Is.EqualTo(occlude ? 0 : 116), "Only perimeter tiles may contain a line, and no line may show through an occluder.");
+                var center = pixels[320 * 640 + 320];
+                if (tint && !occlude) Assert.That(center.r - center.b, Is.GreaterThan(4), "Tint must cover the selected interior without adding grid lines.");
+                else Assert.That(Math.Abs(center.r - center.g) + Math.Abs(center.g - center.b), Is.LessThanOrEqualTo(2), "With tint disabled or occluded, the gray interior must remain unchanged.");
                 Directory.CreateDirectory("Logs");
-                File.WriteAllBytes(occlude ? "Logs/overlay-occluded.png" : "Logs/overlay-900-faces.png", capture.EncodeToPNG());
+                File.WriteAllBytes($"Logs/perimeter-{(occlude ? "occluded" : "visible")}-{(tint ? "tint" : "outline")}.png", capture.EncodeToPNG());
             }
             finally
             {
@@ -118,6 +126,43 @@ namespace LocalModels.VoxelBridge.Tests
                 if (capture != null) UnityEngine.Object.DestroyImmediate(capture);
                 UnityEngine.Object.DestroyImmediate(model); UnityEngine.Object.DestroyImmediate(overlay); UnityEngine.Object.DestroyImmediate(baseMaterial);
             }
+        }
+
+        private static float FrontEdgeCount(List<Mesh> meshes)
+        {
+            float result = 0;
+            foreach (var mesh in meshes)
+            {
+                var positions = mesh.vertices; var masks = new List<Vector4>(); mesh.GetUVs(1, masks);
+                for (int i = 0; i < positions.Length; i += 4)
+                {
+                    if (positions[i].z >= 0 || positions[i + 1].z >= 0 || positions[i + 2].z >= 0 || positions[i + 3].z >= 0) continue;
+                    var m = masks[i]; result += m.x + m.y + m.z + m.w;
+                }
+            }
+            return result;
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public void Perimeter_PreservesHolesAndDisconnectedGroups(bool ring)
+        {
+            var grid = new VoxelGrid(new Vector3Int(5, 5, 1), Vector3.zero, 1, true);
+            Array.Fill(grid.Occupied, true);
+            var cells = ring ? Enumerable.Range(0, 25).Where(i => i != 12).ToArray() : new[] { 0, 24 };
+            var meshes = VoxelSelectionOverlay.Build(grid, cells);
+            try { Assert.That(FrontEdgeCount(meshes), Is.EqualTo(ring ? 24 : 8)); }
+            finally { VoxelSelectionOverlay.Destroy(meshes); }
+        }
+
+        [Test]
+        public void Perimeter_DoesNotMergeAcrossCoveredFacesOrDepthSteps()
+        {
+            var grid = new VoxelGrid(new Vector3Int(2, 1, 2), Vector3.zero, 1, true);
+            grid.Occupied[grid.Index(0, 0, 0)] = grid.Occupied[grid.Index(1, 0, 0)] = grid.Occupied[grid.Index(1, 0, 1)] = true;
+            var meshes = VoxelSelectionOverlay.Build(grid, new[] { grid.Index(0, 0, 0), grid.Index(1, 0, 1) });
+            try { Assert.That(FrontEdgeCount(meshes), Is.EqualTo(4), "The two selected faces are on different planes and must not erase one another's perimeter."); }
+            finally { VoxelSelectionOverlay.Destroy(meshes); }
         }
     }
 }

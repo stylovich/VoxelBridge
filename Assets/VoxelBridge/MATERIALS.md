@@ -183,6 +183,8 @@ La herramienta reutiliza el `.vox`, el sidecar v4 y el mesher existentes. La sup
 
 La emisión de la vista utiliza una referencia acotada sólo en su material temporal. La ayuda `?` y el tooltip de las propiedades PBR describen esta limitación. No representa la exposición ni el bloom de la escena; la intensidad de producción permanece intacta. `Save & Rebuild` guarda la fuente y reconstruye el LOD vinculado; los descendientes requieren regeneración explícita.
 
+El perfil recomendado `Default` utiliza Metallic 0, Smoothness 0, Emission 0 y AO 1. Es una superficie mate neutra, no un modo sin iluminación ni un sustituto de la asignación artística. Las otras superficies conservan sus propios valores. La vista de diagnóstico por SurfaceID está planificada para distinguir asignaciones con apariencias similares.
+
 ## Mesh semántico LOD0
 
 `Tools > Voxel Bridge > VOX to Unity > Semantic LOD0 Production Mesh` genera una malla mediante greedy meshing. Las caras adyacentes se unen sólo si coinciden orientación, ColorID y SurfaceID. Las caras entre celdas ocupadas se eliminan, incluso en fronteras de modelos internos del `.vox`. El campo `hideInternalCavities` del sidecar controla la eliminación de caras orientadas hacia cavidades cerradas; las cavidades abiertas permanecen visibles.

@@ -115,7 +115,7 @@ namespace LocalModels.VoxelBridge
 
         private static List<VoxelSurfaceDefinition> CreateRecommendedEntries() => new()
         {
-            Surface(0, "Default", 0f, 0.35f, 0f, 1f),
+            Surface(0, "Default", 0f, 0f, 0f, 1f),
             Surface(1, "Concrete", 0f, 0.15f, 0f, 0.9f),
             Surface(2, "Fabric", 0f, 0.10f, 0f, 0.95f),
             Surface(3, "Plastic Matte", 0f, 0.28f, 0f, 1f),

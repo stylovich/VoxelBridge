@@ -18,6 +18,9 @@ namespace LocalModels.VoxelBridge.Tests
                 Assert.That(colors.Entries, Has.Count.EqualTo(
                     VoxelRecommendedColorLibrary.ActiveEntryCount));
                 Assert.That(surfaces.TryValidate(out string surfaceError), Is.True, surfaceError);
+                Assert.That(surfaces.TryGetSurface(0, out VoxelSurfaceDefinition fallback), Is.True);
+                Assert.That(fallback.Metallic, Is.Zero); Assert.That(fallback.Smoothness, Is.Zero);
+                Assert.That(fallback.Emission, Is.Zero); Assert.That(fallback.OcclusionMultiplier, Is.EqualTo(1));
                 Assert.That(surfaces.TryGetSurface(7, out VoxelSurfaceDefinition aluminum), Is.True);
                 Assert.That(aluminum.DisplayName, Is.EqualTo("Aluminum"));
                 Assert.That(aluminum.Metallic, Is.EqualTo(1f));
