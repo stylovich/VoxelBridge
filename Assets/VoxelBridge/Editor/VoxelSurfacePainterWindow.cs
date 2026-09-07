@@ -27,6 +27,8 @@ namespace LocalModels.VoxelBridge
         private PreviewRenderUtility preview;
         private Mesh mesh;
         private Material material;
+        private float sourceEmissionIntensity = 1f;
+        private bool hasSourceEmissionMaterial;
         private string status;
         private MessageType statusType = MessageType.Info;
         private Vector3 center;
@@ -141,7 +143,13 @@ namespace LocalModels.VoxelBridge
                     material.hideFlags = HideFlags.HideAndDontSave;
                     material.SetTexture("_PaletteColor", edit.Colors.GeneratedLut);
                     material.SetTexture("_PaletteSurface", edit.Surfaces.GeneratedLut);
-                    if (shared == null) material.SetFloat("_EmissionIntensity", 1f);
+                    hasSourceEmissionMaterial = shared != null;
+                    sourceEmissionIntensity = hasSourceEmissionMaterial ? shared.GetFloat("_EmissionIntensity") : 1f;
+                    if (!float.IsFinite(sourceEmissionIntensity) || sourceEmissionIntensity < 0)
+                        throw new InvalidOperationException("The source material has an invalid emission intensity.");
+                    // Preview cameras have no HDRP exposure/tonemapping. Preserve hue using
+                    // a bounded authoring reference on this temporary material only.
+                    material.SetFloat("_EmissionIntensity", Mathf.Clamp01(sourceEmissionIntensity));
                 }
                 if (mesh != null) DestroyImmediate(mesh);
                 mesh = generated; generated = null;
@@ -204,6 +212,10 @@ namespace LocalModels.VoxelBridge
             if (EditorApplication.isPlayingOrWillChangePlaymode)
             { EditorGUILayout.HelpBox("La edición está deshabilitada en Play Mode. Los cambios pendientes se conservan.", MessageType.Info); return; }
             if (edit == null) return;
+            EditorGUILayout.LabelField(new GUIContent("Emission Preview",
+                "La vista usa un multiplicador de emisión entre 0 y 1 para evitar saturación a blanco. No reproduce la exposición ni el bloom de la escena y no modifica su material."),
+                hasSourceEmissionMaterial ? $"Reference ×{Mathf.Clamp01(sourceEmissionIntensity):0.###} · Source HDR ×{sourceEmissionIntensity:0.###}" :
+                    "Reference ×1 · No linked material");
             if (!edit.Surfaces.TryValidate(out string surfaceError))
             { EditorGUILayout.HelpBox(surfaceError, MessageType.Error); return; }
             var options = edit.Surfaces.Entries.Where(s => s.RenderClass == VoxelSurfaceRenderClass.Opaque).OrderBy(s => s.Id).ToArray();

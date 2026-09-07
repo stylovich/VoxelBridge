@@ -170,6 +170,7 @@ namespace LocalModels.VoxelBridge.Tests
                 Assert.That(previewMaterial.GetTexture("_PaletteSurface") == surfaces.GeneratedLut, Is.True);
                 Assert.That(AssetDatabase.GetAssetPath(previewMaterial.GetTexture("_PaletteColor")), Is.EqualTo(AssetDatabase.GetAssetPath(colors.GeneratedLut)));
                 Assert.That(previewMaterial.shader.name, Is.EqualTo("Voxel Bridge/VoxelWorldOpaque"));
+                Assert.That((bool)WindowField(restored, "hasSourceEmissionMaterial"), Is.False);
             }
             finally
             {
@@ -225,6 +226,86 @@ namespace LocalModels.VoxelBridge.Tests
             {
                 if (capture != null) UnityEngine.Object.DestroyImmediate(capture);
                 window.DiscardChanges(); UnityEngine.Object.DestroyImmediate(window);
+            }
+        }
+
+        [TestCase(0f)]
+        [TestCase(0.25f)]
+        [TestCase(1f)]
+        [TestCase(500f)]
+        public void Preview_NormalizesHdrEmissionWithoutChangingSourceMaterial(float intensity)
+        {
+            colors.MutableEntries[1] = new VoxelColorDefinition(1, "Signal Red", new Color(1f, .18f, .18f));
+            Create(8);
+            var edit = new VoxelSurfaceEdit(path);
+            edit.Apply(Enumerable.Range(0, 8).ToArray(), 13);
+            edit.BuildOutput(out var sourceBytes, out var sidecarBytes);
+            File.WriteAllBytes(path, sourceBytes); File.WriteAllBytes(sidecarPath, sidecarBytes);
+            Assert.That(VoxelPaletteLutGenerator.TryRebuild(colors, out _, out string error), Is.True, error);
+            Assert.That(VoxelPaletteLutGenerator.TryRebuild(surfaces, out _, out error), Is.True, error);
+            AssetDatabase.ImportAsset(sidecarPath, ImportAssetOptions.ForceSynchronousImport);
+            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport);
+            var previousScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+            var testScene = UnityEditor.SceneManagement.EditorSceneManager.NewScene(UnityEditor.SceneManagement.NewSceneSetup.EmptyScene,
+                UnityEditor.SceneManagement.NewSceneMode.Additive);
+            VoxelSurfacePainterWindow window = null;
+            Texture2D capture = null;
+            string materialPath = null;
+            try
+            {
+                UnityEngine.SceneManagement.SceneManager.SetActiveScene(testScene);
+                GameObject prefab = VoxelProductionExporter.Export(path, folder + "/Production");
+                Material original = prefab.GetComponent<MeshRenderer>().sharedMaterial;
+                materialPath = AssetDatabase.GetAssetPath(original);
+                byte[] savedMaterial = File.ReadAllBytes(materialPath);
+                original.SetFloat("_EmissionIntensity", intensity);
+                window = ScriptableObject.CreateInstance<VoxelSurfacePainterWindow>();
+                var data = new SerializedObject(window);
+                data.FindProperty("sourceGuid").stringValue = AssetDatabase.AssetPathToGUID(path);
+                data.FindProperty("prefabGuid").stringValue = AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(prefab));
+                data.ApplyModifiedPropertiesWithoutUndo(); InvokeWindow(window, "LoadSource", false);
+                var temporary = (Material)WindowField(window, "material");
+                Assert.That(temporary, Is.Not.Null, (string)WindowField(window, "status"));
+                Assert.That(AssetDatabase.Contains(temporary), Is.False);
+                Assert.That(temporary.GetFloat("_EmissionIntensity"), Is.EqualTo(Mathf.Clamp01(intensity)));
+                Assert.That((float)WindowField(window, "sourceEmissionIntensity"), Is.EqualTo(intensity));
+                Assert.That((bool)WindowField(window, "hasSourceEmissionMaterial"), Is.True);
+                Assert.That(original.GetFloat("_EmissionIntensity"), Is.EqualTo(intensity));
+                CollectionAssert.AreEqual(savedMaterial, File.ReadAllBytes(materialPath));
+                CollectionAssert.AreEqual(sourceBytes, File.ReadAllBytes(path));
+                CollectionAssert.AreEqual(sidecarBytes, File.ReadAllBytes(sidecarPath));
+                Assert.That(window.hasUnsavedChanges, Is.False);
+                var mesh = (Mesh)WindowField(window, "mesh");
+                Assert.That(mesh.uv.All(uv => uv.x == 1), Is.True);
+                Assert.That(mesh.uv4.All(uv => uv.x == 13), Is.True);
+                if (intensity > 1)
+                {
+                    var preview = (PreviewRenderUtility)WindowField(window, "preview");
+                    var camera = preview.camera;
+                    camera.transform.SetPositionAndRotation(mesh.bounds.center + new Vector3(0, .13f, -.35f), Quaternion.Euler(20, 0, 0));
+                    camera.nearClipPlane = .001f; camera.farClipPlane = 10; camera.aspect = 1.5f;
+                    for (int frame = 0; frame < 3; frame++)
+                    {
+                        if (capture != null) UnityEngine.Object.DestroyImmediate(capture);
+                        preview.BeginStaticPreview(new Rect(0, 0, 384, 256));
+                        preview.DrawMesh(mesh, Matrix4x4.identity, temporary, 0);
+                        preview.Render(true, false);
+                        capture = preview.EndStaticPreview();
+                    }
+                    Color32[] pixels = capture.GetPixels32();
+                    Assert.That(pixels.Count(pixel => pixel.r > 150 && pixel.g < 150 && pixel.b < 150), Is.GreaterThan(100),
+                        "The red emissive fixture must remain red instead of clipping all channels to white.");
+                    Directory.CreateDirectory("Logs");
+                    File.WriteAllBytes("Logs/surface-preview-red-emission.png", capture.EncodeToPNG());
+                }
+            }
+            finally
+            {
+                if (capture != null) UnityEngine.Object.DestroyImmediate(capture);
+                if (window != null) { window.DiscardChanges(); UnityEngine.Object.DestroyImmediate(window); }
+                if (previousScene.IsValid() && previousScene.isLoaded) UnityEngine.SceneManagement.SceneManager.SetActiveScene(previousScene);
+                UnityEditor.SceneManagement.EditorSceneManager.CloseScene(testScene, true);
+                if (materialPath != null) AssetDatabase.DeleteAsset(materialPath);
             }
         }
 

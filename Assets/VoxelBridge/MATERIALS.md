@@ -181,6 +181,8 @@ La asignación en `Semantic Bindings` afecta a todos los voxels que utilizan un 
 
 La herramienta reutiliza el `.vox`, el sidecar v4 y el mesher existentes. La superficie pertenece al voxel completo, no a cada cara. Guardar no regenera LODs descendientes ni modifica definiciones PBR globales. Los pares supervivientes conservan sus slots; los pares nuevos reutilizan slots libres. El intercambio externo de slots con RGB idéntico requiere certificación específica antes de considerarse seguro. La preasignación PBR y las ayudas de selección permanecen en [ROADMAP.md](ROADMAP.md#preasignación-de-superficies-por-semejanza-pbr).
 
+La emisión de la vista utiliza una referencia acotada sólo en su material temporal. El campo `Emission Preview` distingue esa referencia de la intensidad HDR del material vinculado. No representa la exposición ni el bloom de la escena; la intensidad de producción permanece intacta.
+
 ## Mesh semántico LOD0
 
 `Tools > Voxel Bridge > VOX to Unity > Semantic LOD0 Production Mesh` genera una malla mediante greedy meshing. Las caras adyacentes se unen sólo si coinciden orientación, ColorID y SurfaceID. Las caras entre celdas ocupadas se eliminan, incluso en fronteras de modelos internos del `.vox`. El campo `hideInternalCavities` del sidecar controla la eliminación de caras orientadas hacia cavidades cerradas; las cavidades abiertas permanecen visibles.

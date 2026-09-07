@@ -49,6 +49,8 @@ El guardado conserva copias de recuperación bajo `Library/VoxelBridgeSurfaceEdi
 
 Límites: 131.072 celdas por selección, 1.048.576 celdas modificadas pendientes, historial de hasta 64 operaciones y 1.048.576 cambios de celda. El resaltado dibuja como máximo 512 celdas de la selección, además de la celda bajo el cursor; el contador y la asignación consideran la selección completa. Se mantienen los límites de lectura y meshing de producción. Superar 255 pares locales bloquea el guardado sin aproximar colores o superficies. La vista es una referencia de autoría; la iluminación definitiva se comprueba en la escena después de reconstruir.
 
+`Emission Preview` muestra el multiplicador de referencia y el multiplicador HDR del material vinculado al abrir o recargar la fuente. Sin material vinculado, utiliza una referencia de `1` y lo indica expresamente. La ventana limita únicamente su copia temporal al rango `0..1`, conservando la emisión relativa de cada SurfaceID y la emisión apagada si el multiplicador original es cero. Esto permite identificar el color sin saturarlo por intensidades HDR altas; no simula exposición, bloom ni luminosidad física final. Guardar o reconstruir no transfiere esta limitación al material de producción. Comprobar el resultado luminoso definitivo en la escena.
+
 La selección asistida de grupos y la preasignación por semejanza PBR son fases posteriores descritas en [ROADMAP.md](ROADMAP.md).
 
 ## Combinación de modelos voxel

@@ -237,6 +237,8 @@ El resultado utiliza un submesh por comportamiento real de render, no por `Surfa
 
 El shader HDRP compartido muestrea ambas LUT y aplica la emisión como `BaseColor x SurfaceEmission x EmissionIntensity`. La escala HDR permanece en el material y puede cambiar sin regenerar meshes.
 
+La referencia emisiva normalizada de `Surface Painter` sirve únicamente para identificar colores durante la autoría. Las validaciones de iluminación y el horneado de impostores deben utilizar la intensidad HDR de producción, no la copia temporal de esa ventana.
+
 La validación debe cubrir HDRP, SRP Batcher, HTrace con Recursive Rendering y DOTS Instancing. No se utilizan `MaterialPropertyBlock` para seleccionar colores o superficies por renderer; los IDs pertenecen al vertex stream.
 
 El shader de horneado de Amplify Impostors debe leer las mismas LUT y los mismos canales del mesh. El atlas debe reproducir Base Color, Metallic, Smoothness, oclusión y emisión. Los materiales definitivos se validan antes de producir atlas finales de impostores.
