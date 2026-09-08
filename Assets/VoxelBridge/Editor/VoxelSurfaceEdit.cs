@@ -16,6 +16,7 @@ namespace LocalModels.VoxelBridge
 
         private sealed class Change
         {
+            internal bool IsSelection;
             internal int[] Cells;
             internal ushort[] Before;
             internal ushort[] After;
@@ -37,6 +38,7 @@ namespace LocalModels.VoxelBridge
         private readonly string metadataHash;
         private int cursor;
         private int historyCells;
+        private readonly HashSet<int> selection;
 
         internal VoxelGrid Grid { get; }
         internal string AssetPath { get; }
@@ -44,6 +46,7 @@ namespace LocalModels.VoxelBridge
         internal bool CanRedo => cursor < history.Count;
         internal int HistorySteps => history.Count;
         internal int PendingCells { get; private set; }
+        internal int SurfaceRevision { get; private set; }
         internal VoxelSurfacePalette Surfaces => surfaces;
         internal VoxelColorPalette Colors => colors;
         internal string Fingerprint => sourceHash + metadataHash + colorHash + surfaceHash;
@@ -61,8 +64,10 @@ namespace LocalModels.VoxelBridge
 
         internal void ClearHistory() { history.Clear(); cursor = 0; historyCells = 0; }
 
-        internal VoxelSurfaceEdit(string voxAssetPath)
+        internal VoxelSurfaceEdit(string voxAssetPath, HashSet<int> selection = null)
         {
+            // The painter shares this set; selection changes belong to the same local history.
+            this.selection = selection ?? new HashSet<int>();
             if (string.IsNullOrWhiteSpace(voxAssetPath) || !voxAssetPath.StartsWith("Assets/", StringComparison.Ordinal) ||
                 !voxAssetPath.EndsWith(".vox", StringComparison.OrdinalIgnoreCase))
                 throw new ArgumentException("Choose a VOX source under Assets.", nameof(voxAssetPath));
@@ -125,23 +130,52 @@ namespace LocalModels.VoxelBridge
             }
             if (pending > MaximumHistoryCells)
                 throw new InvalidOperationException("The pending edit limit was reached. Save or discard before editing more cells.");
-            // Validate the whole selection before changing any cell or truncating redo history.
+            Record(change);
+            Set(change, change.After);
+            return cells.Length;
+        }
+
+        internal void Select(IReadOnlyCollection<int> cells)
+        {
+            if (cells == null) throw new ArgumentNullException(nameof(cells));
+            if (cells.Count > MaximumSelection)
+                throw new InvalidOperationException($"Select at most {MaximumSelection:N0} cells per operation.");
+            var next = new HashSet<int>(cells);
+            foreach (int cell in next)
+                if (cell < 0 || cell >= Grid.Occupied.Length || !Grid.Occupied[cell] || recordOffsets[cell] == 0)
+                    throw new InvalidDataException("The selection contains an empty or invalid cell.");
+            var delta = new HashSet<int>(selection);
+            delta.SymmetricExceptWith(next);
+            if (delta.Count == 0) return;
+            int[] changed = delta.ToArray();
+            var change = new Change { IsSelection = true, Cells = changed,
+                Before = new ushort[changed.Length], After = new ushort[changed.Length] };
+            for (int i = 0; i < changed.Length; i++)
+            {
+                change.Before[i] = (ushort)(selection.Contains(changed[i]) ? 1 : 0);
+                change.After[i] = (ushort)(next.Contains(changed[i]) ? 1 : 0);
+            }
+            Record(change);
+            Set(change, change.After);
+        }
+
+        private void Record(Change change)
+        {
+            // Validate the whole operation before changing state or truncating redo history.
             while (history.Count > cursor)
             {
                 historyCells -= history[history.Count - 1].Cells.Length;
                 history.RemoveAt(history.Count - 1);
             }
-            while (history.Count >= MaximumHistorySteps || historyCells + cells.Length > MaximumHistoryCells)
+            while (history.Count >= MaximumHistorySteps || historyCells + change.Cells.Length > MaximumHistoryCells)
             {
                 historyCells -= history[0].Cells.Length;
                 history.RemoveAt(0);
                 cursor--;
             }
             history.Add(change);
-            historyCells += cells.Length;
+            historyCells += change.Cells.Length;
             cursor++;
-            Set(change, change.After);
-            return cells.Length;
         }
 
         internal void Undo()
@@ -160,6 +194,14 @@ namespace LocalModels.VoxelBridge
 
         private void Set(Change change, ushort[] pairs)
         {
+            if (change.IsSelection)
+            {
+                for (int i = 0; i < change.Cells.Length; i++)
+                    if (pairs[i] != 0) selection.Add(change.Cells[i]);
+                    else selection.Remove(change.Cells[i]);
+                return;
+            }
+            SurfaceRevision++;
             for (int i = 0; i < change.Cells.Length; i++)
             {
                 int cell = change.Cells[i];

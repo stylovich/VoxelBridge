@@ -420,6 +420,30 @@ namespace LocalModels.VoxelBridge.Tests
                 arguments.context = new object();
                 typeof(VoxelSurfacePainterWindow).GetMethod("UndoShortcut", flags).Invoke(null, new object[] { arguments });
                 Assert.That(edit.PendingCells, Is.EqualTo(1), "A different shortcut context must not edit this window.");
+                arguments.context = window;
+                InvokeWindow(window, "Change", (Action)(() => edit.Select(new[] { 0, 1 })));
+                var selected = (HashSet<int>)WindowField(window, "selected");
+                foreach (string method in new[] { "UndoShortcut", "RedoShortcut", "UndoShortcut", "RedoAlternateShortcut" })
+                {
+                    typeof(VoxelSurfacePainterWindow).GetMethod(method, flags).Invoke(null, new object[] { arguments });
+                    Assert.That(selected.Count, Is.EqualTo(method == "UndoShortcut" ? 0 : 2));
+                    Assert.That(edit.PendingCells, Is.EqualTo(1));
+                    Assert.That(window.hasUnsavedChanges, Is.True, "Selection undo must preserve the pending surface draft.");
+                }
+                EditorGUIUtility.editingTextField = true;
+                typeof(VoxelSurfacePainterWindow).GetMethod("UndoShortcut", flags).Invoke(null, new object[] { arguments });
+                Assert.That(selected.Count, Is.EqualTo(2));
+                EditorGUIUtility.editingTextField = false;
+                var preview = (PreviewRenderUtility)WindowField(window, "preview");
+                var job = new VoxelSurfaceSelection(edit.Grid, preview.camera, new Vector2(64, 64), VoxelSelectionMode.Replace, selected);
+                typeof(VoxelSurfacePainterWindow).GetField("selectionJob", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).SetValue(window, job);
+                typeof(VoxelSurfacePainterWindow).GetMethod("UndoShortcut", flags).Invoke(null, new object[] { arguments });
+                Assert.That(selected.Count, Is.EqualTo(2), "History is locked while a gesture is pending.");
+                InvokeWindow(window, "CancelSelection");
+                Assert.That(edit.HistorySteps, Is.EqualTo(2), "Cancelling a gesture must not record a history step.");
+                typeof(VoxelSurfacePainterWindow).GetMethod("UndoShortcut", flags).Invoke(null, new object[] { arguments });
+                Assert.That(selected, Is.Empty);
+                Assert.That(Undo.GetCurrentGroup(), Is.EqualTo(undoGroup));
             }
             finally
             {
@@ -454,9 +478,22 @@ namespace LocalModels.VoxelBridge.Tests
                 typeof(VoxelSurfacePainterWindow).GetField("selectionJob", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).SetValue(window, job);
                 InvokeWindow(window, "ProcessSelection");
                 CollectionAssert.AreEquivalent(new[] { 1 }, selected);
+                Assert.That(edit.HistorySteps, Is.EqualTo(1), "A completed gesture records exactly one step.");
                 InvokeWindow(window, "UpdateSelectionOverlay");
                 Assert.That(original == null, Is.True, "A same-count replacement must destroy the stale face geometry.");
                 Mesh replacement = meshes[0];
+                Mesh modelMesh = (Mesh)WindowField(window, "mesh");
+                InvokeWindow(window, "Change", (Action)edit.Undo);
+                CollectionAssert.AreEquivalent(new[] { 0 }, selected);
+                InvokeWindow(window, "UpdateSelectionOverlay");
+                Assert.That(replacement == null, Is.True, "Undo must invalidate same-count selection geometry.");
+                replacement = meshes[0];
+                InvokeWindow(window, "Change", (Action)edit.Redo);
+                CollectionAssert.AreEquivalent(new[] { 1 }, selected);
+                InvokeWindow(window, "UpdateSelectionOverlay");
+                Assert.That(replacement == null, Is.True);
+                Assert.That(WindowField(window, "mesh"), Is.SameAs(modelMesh), "Selection history must not remesh the model.");
+                replacement = meshes[0];
                 Material overlayMaterial = (Material)WindowField(window, "selectionMaterial");
                 InvokeWindow(window, "ReleasePreview");
                 Assert.That(meshes, Is.Empty);
@@ -636,6 +673,80 @@ namespace LocalModels.VoxelBridge.Tests
             Assert.That(revised.sourceName, Is.EqualTo(metadata.sourceName));
             CollectionAssert.AreEqual(original, File.ReadAllBytes(path));
             CollectionAssert.AreEqual(originalMetadata, File.ReadAllBytes(sidecarPath));
+        }
+
+        [Test]
+        public void SelectionAndSurfaceHistory_UndoRedoInChronologicalOrder()
+        {
+            Create();
+            var selection = new HashSet<int>();
+            var edit = new VoxelSurfaceEdit(path, selection);
+            edit.Select(new[] { 0, 1 });
+            edit.Apply(selection, 7);
+            edit.Select(new[] { 1, 2 });
+            edit.Select(Array.Empty<int>());
+            Assert.That(edit.HistorySteps, Is.EqualTo(4));
+            Assert.That(edit.PendingCells, Is.EqualTo(2));
+            edit.Undo(); CollectionAssert.AreEquivalent(new[] { 1, 2 }, selection);
+            edit.Undo(); CollectionAssert.AreEquivalent(new[] { 0, 1 }, selection);
+            Assert.That(edit.PendingCells, Is.EqualTo(2));
+            edit.Undo(); Assert.That(edit.PendingCells, Is.Zero);
+            CollectionAssert.AreEquivalent(new[] { 0, 1 }, selection);
+            edit.Undo(); Assert.That(selection, Is.Empty);
+            edit.BuildOutput(out var vox, out var sidecar);
+            CollectionAssert.AreEqual(File.ReadAllBytes(path), vox);
+            CollectionAssert.AreEqual(File.ReadAllBytes(sidecarPath), sidecar);
+            edit.Redo(); CollectionAssert.AreEquivalent(new[] { 0, 1 }, selection);
+            edit.Redo(); Assert.That(edit.PendingCells, Is.EqualTo(2));
+            edit.Redo(); CollectionAssert.AreEquivalent(new[] { 1, 2 }, selection);
+            edit.Redo(); Assert.That(selection, Is.Empty);
+            Assert.That(edit.CanRedo, Is.False);
+        }
+
+        [Test]
+        public void SelectionHistory_NoOpsAndInvalidInputPreserveRedoAndSource()
+        {
+            Create();
+            var selection = new HashSet<int>();
+            var edit = new VoxelSurfaceEdit(path, selection);
+            edit.Select(new[] { 0 }); edit.Select(new[] { 1 }); edit.Undo();
+            edit.Select(new[] { 0, 0 });
+            Assert.Throws<ArgumentNullException>(() => edit.Select(null));
+            foreach (int invalid in new[] { -1, 35, 100000 })
+                Assert.Throws<InvalidDataException>(() => edit.Select(new[] { 2, invalid }));
+            Assert.Throws<InvalidOperationException>(() => edit.Select(
+                Enumerable.Repeat(0, VoxelSurfaceEdit.MaximumSelection + 1).ToArray()));
+            Assert.That(edit.CanRedo, Is.True);
+            Assert.That(edit.HistorySteps, Is.EqualTo(2));
+            CollectionAssert.AreEquivalent(new[] { 0 }, selection);
+            Assert.That(edit.PendingCells, Is.Zero); Assert.That(edit.SurfaceRevision, Is.Zero);
+            edit.BuildOutput(out var vox, out var sidecar);
+            CollectionAssert.AreEqual(File.ReadAllBytes(path), vox);
+            CollectionAssert.AreEqual(File.ReadAllBytes(sidecarPath), sidecar);
+            edit.GetChanges(out var cells, out var ids);
+            Assert.That(cells, Is.Empty); Assert.That(ids, Is.Empty);
+        }
+
+        [Test]
+        public void SelectionHistory_BranchingAndEvictionShareSurfaceHistoryBudget()
+        {
+            Create();
+            var selection = new HashSet<int>();
+            var edit = new VoxelSurfaceEdit(path, selection);
+            edit.Apply(new[] { 0 }, 7); edit.Undo();
+            edit.Select(new[] { 1 }); Assert.That(edit.CanRedo, Is.False);
+            edit.Undo(); edit.Apply(new[] { 0 }, 7); Assert.That(edit.CanRedo, Is.False);
+            for (int i = 0; i < 80; i++) edit.Select(new[] { i % 2 });
+            Assert.That(edit.HistorySteps, Is.EqualTo(VoxelSurfaceEdit.MaximumHistorySteps));
+            while (edit.CanUndo) edit.Undo();
+            Assert.That(edit.PendingCells, Is.EqualTo(1), "Selection history eviction cannot undo older surface assignments.");
+            CollectionAssert.AreEquivalent(new[] { 1 }, selection);
+            while (edit.CanRedo) edit.Redo();
+            CollectionAssert.AreEquivalent(new[] { 1 }, selection);
+            edit.ClearHistory();
+            Assert.That(edit.CanUndo || edit.CanRedo, Is.False);
+            Assert.That(edit.PendingCells, Is.EqualTo(1));
+            CollectionAssert.AreEquivalent(new[] { 1 }, selection);
         }
 
         [Test]

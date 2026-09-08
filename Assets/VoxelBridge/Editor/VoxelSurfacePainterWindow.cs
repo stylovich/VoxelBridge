@@ -121,7 +121,7 @@ namespace LocalModels.VoxelBridge
             if (string.IsNullOrEmpty(SourcePath)) { status = "The source asset is missing."; statusType = MessageType.Error; return; }
             try
             {
-                edit = new VoxelSurfaceEdit(SourcePath);
+                edit = new VoxelSurfaceEdit(SourcePath, selected);
                 level = edit.LodIndex;
                 if (restoreDraft && draftCells.Length > 0)
                 {
@@ -297,10 +297,10 @@ namespace LocalModels.VoxelBridge
             }
             using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
             {
-                using (new EditorGUI.DisabledScope(!edit.CanUndo)) if (GlyphButton("↶", "Undo — Ctrl+Z\nDeshace asignaciones pendientes; no revierte archivos guardados.")) Run(() => Change(edit.Undo));
+                using (new EditorGUI.DisabledScope(!edit.CanUndo)) if (GlyphButton("↶", "Undo — Ctrl+Z\nDeshace selecciones y asignaciones en orden; no revierte archivos guardados.")) Run(() => Change(edit.Undo));
                 using (new EditorGUI.DisabledScope(!edit.CanRedo)) if (GlyphButton("↷", "Redo — Ctrl+Y / Ctrl+Shift+Z")) Run(() => Change(edit.Redo));
                 using (new EditorGUI.DisabledScope(selected.Count == 0))
-                    if (GlyphButton("×", "Clear Selection\nQuita la selección sin modificar las asignaciones.")) { selected.Clear(); Repaint(); }
+                    if (GlyphButton("×", "Clear Selection\nQuita la selección sin modificar las asignaciones. Admite Undo.")) Run(() => Change(() => edit.Select(Array.Empty<int>())));
                 GUILayout.Space(8);
                 if (GUILayout.Button("Frame All", EditorStyles.toolbarButton, GUILayout.Width(75))) { distance = radius * 4; panOffset = Vector3.zero; Repaint(); }
                 using (new EditorGUI.DisabledScope(selected.Count == 0))
@@ -309,7 +309,9 @@ namespace LocalModels.VoxelBridge
                 if (tint != showSelectionTint) { showSelectionTint = tint; overlayCount = -1; Repaint(); }
                 GUILayout.FlexibleSpace();
                 using (new EditorGUI.DisabledScope(string.IsNullOrEmpty(prefabGuid)))
-                    if (GUILayout.Button(new GUIContent("Save & Rebuild", "Guarda la fuente y reconstruye este LOD del prefab. No regenera los LODs descendientes."), EditorStyles.toolbarButton, GUILayout.Width(125))) Run(SaveAndRebuild);
+                    if (GUILayout.Button(new GUIContent("Save & Rebuild", string.IsNullOrEmpty(prefabGuid)
+                        ? "Sin prefab vinculado. Abrir desde Edit Surfaces del prefab de producción. Para guardar sólo el VOX: Source Actions > Save Source Only."
+                        : "Guarda la fuente y reconstruye este LOD del prefab. No regenera los LODs descendientes."), EditorStyles.toolbarButton, GUILayout.Width(125))) Run(SaveAndRebuild);
             }
             return true;
         }
@@ -532,7 +534,7 @@ namespace LocalModels.VoxelBridge
                 do { selectionJob.Step(64); } while (!selectionJob.IsIdle && timer.Elapsed.TotalMilliseconds < 4);
                 if (selectionJob.IsIdle && !selecting)
                 {
-                    selected.Clear(); selected.UnionWith(selectionJob.Result);
+                    Change(() => edit.Select(selectionJob.Result));
                     CancelSelection();
                 }
                 else if (EditorApplication.timeSinceStartup >= nextSelectionRepaint)
@@ -638,10 +640,16 @@ namespace LocalModels.VoxelBridge
 
         private void Change(Action operation)
         {
+            int revision = edit.SurfaceRevision;
             operation();
-            edit.GetChanges(out draftCells, out draftSurfaces);
-            draftFingerprint = edit.Fingerprint; hasUnsavedChanges = draftCells.Length > 0;
-            Run(BuildPreview); Repaint();
+            overlayCount = -1;
+            if (revision != edit.SurfaceRevision)
+            {
+                edit.GetChanges(out draftCells, out draftSurfaces);
+                draftFingerprint = edit.Fingerprint; hasUnsavedChanges = draftCells.Length > 0;
+                Run(BuildPreview);
+            }
+            Repaint();
         }
 
         private void SaveSource()
