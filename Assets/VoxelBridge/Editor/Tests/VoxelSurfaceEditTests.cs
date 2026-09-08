@@ -310,7 +310,7 @@ namespace LocalModels.VoxelBridge.Tests
         private static object WindowField(VoxelSurfacePainterWindow window, string name) =>
             typeof(VoxelSurfacePainterWindow).GetField(name, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).GetValue(window);
 
-        private static void InvokeWindow(VoxelSurfacePainterWindow window, string name, params object[] args) =>
+        private static object InvokeWindow(VoxelSurfacePainterWindow window, string name, params object[] args) =>
             typeof(VoxelSurfacePainterWindow).GetMethod(name, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).Invoke(window, args);
 
         [TestCase(false)]
@@ -363,6 +363,103 @@ namespace LocalModels.VoxelBridge.Tests
                 if (window != null) { window.DiscardChanges(); UnityEngine.Object.DestroyImmediate(window); }
                 if (previousScene.IsValid() && previousScene.isLoaded) UnityEngine.SceneManagement.SceneManager.SetActiveScene(previousScene);
                 UnityEditor.SceneManagement.EditorSceneManager.CloseScene(testScene, true);
+                if (sharedMaterialPath != null) AssetDatabase.DeleteAsset(sharedMaterialPath);
+            }
+        }
+
+        [Test]
+        public void PrefabDrop_RejectsNonProductionAssets()
+        {
+            Create(8);
+            Assert.Throws<ArgumentException>(() => VoxelSurfacePainterWindow.PrefabLevels(path));
+            Assert.Throws<ArgumentException>(() => VoxelSurfacePainterWindow.PrefabLevels(folder + "/Missing.prefab"));
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void PrefabDrop_PreservesDraftAndRebuildsChosenLevel(bool family)
+        {
+            Create(8);
+            Assert.That(VoxelPaletteLutGenerator.TryRebuild(colors, out _, out string error), Is.True, error);
+            Assert.That(VoxelPaletteLutGenerator.TryRebuild(surfaces, out _, out error), Is.True, error);
+            AssetDatabase.ImportAsset(sidecarPath, ImportAssetOptions.ForceSynchronousImport);
+            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport);
+            var window = ScriptableObject.CreateInstance<VoxelSurfacePainterWindow>();
+            string sharedMaterialPath = null;
+            try
+            {
+                string prefabPath;
+                if (family)
+                {
+                    var profile = ScriptableObject.CreateInstance<VoxelStyleProfile>();
+                    AssetDatabase.CreateAsset(profile, folder + "/Profile.asset");
+                    string manifestPath = VoxelProductionFamily.Create(path, profile, folder + "/Production");
+                    VoxelProductionFamily.DeriveLevel(manifestPath, 1, VoxelLodGenerationMode.DuplicateParent);
+                    prefabPath = VoxelProductionFamily.Load(manifestPath).prefabAssetPath;
+                }
+                else prefabPath = AssetDatabase.GetAssetPath(VoxelProductionExporter.Export(path, folder + "/Production"));
+                var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
+                sharedMaterialPath = AssetDatabase.GetAssetPath(prefab.GetComponentInChildren<MeshRenderer>().sharedMaterial);
+                string prefabGuid = AssetDatabase.AssetPathToGUID(prefabPath);
+                var entries = VoxelSurfacePainterWindow.PrefabLevels(prefabPath);
+                CollectionAssert.AreEqual(family ? new[] { 0, 1 } : new[] { 0 }, entries.Select(e => e.lodIndex));
+                Assert.That(entries[0].sourceGuid, Is.EqualTo(AssetDatabase.AssetPathToGUID(path)));
+
+                InvokeWindow(window, "SetSource", path, null, 0);
+                var edit = (VoxelSurfaceEdit)WindowField(window, "edit");
+                InvokeWindow(window, "Change", (Action)(() => edit.Select(new[] { 0 })));
+                InvokeWindow(window, "Change", (Action)(() => edit.Apply(new[] { 0 }, 7)));
+                string draft = EditorJsonUtility.ToJson(window);
+                byte[] original = File.ReadAllBytes(path);
+                Assert.That(InvokeWindow(window, "PrefabSourceMenu", prefabPath), Is.Not.Null);
+                Assert.That(EditorJsonUtility.ToJson(window), Is.EqualTo(draft), "Opening or dismissing the LOD menu must not replace the current session.");
+                Assert.That(WindowField(window, "edit"), Is.SameAs(edit));
+                CollectionAssert.AreEqual(original, File.ReadAllBytes(path));
+
+                Assert.That(AssetDatabase.CopyAsset(prefabPath, folder + "/Copied.prefab"), Is.True);
+                Assert.Throws<InvalidDataException>(() => VoxelSurfacePainterWindow.PrefabLevels(folder + "/Copied.prefab"));
+                string moved = folder + "/Moved.prefab";
+                Assert.That(AssetDatabase.MoveAsset(prefabPath, moved), Is.Empty);
+                prefabPath = moved;
+                InvokeWindow(window, "OpenPrefabLevel", prefabGuid, 0, entries[0].sourceGuid);
+                Assert.That(WindowField(window, "prefabGuid"), Is.EqualTo(prefabGuid));
+                Assert.That(WindowField(window, "edit"), Is.SameAs(edit), "Relinking the current source must preserve its edit buffer.");
+                Assert.That(edit.HistorySteps, Is.EqualTo(2)); Assert.That(edit.PendingCells, Is.EqualTo(1));
+                CollectionAssert.AreEquivalent(new[] { 0 }, (HashSet<int>)WindowField(window, "selected"));
+                InvokeWindow(window, "SaveAndRebuild");
+                Assert.That(WindowField(window, "statusType"), Is.EqualTo(MessageType.Info), (string)WindowField(window, "status"));
+                Assert.That(window.hasUnsavedChanges, Is.False);
+                Assert.That(new VoxelSurfaceEdit(path).Grid.SemanticIds[0], Is.EqualTo(VoxelSemanticEncoding.Pack(1, 7)));
+
+                if (family)
+                {
+                    byte[] savedBase = File.ReadAllBytes(path);
+                    string secondPath = VoxelProductionFamily.SourcePath(entries[1]);
+                    InvokeWindow(window, "OpenPrefabLevel", prefabGuid, 1, entries[1].sourceGuid);
+                    Assert.That(WindowField(window, "level"), Is.EqualTo(1));
+                    Assert.That(WindowField(window, "sourceGuid"), Is.EqualTo(entries[1].sourceGuid));
+                    edit = (VoxelSurfaceEdit)WindowField(window, "edit");
+                    InvokeWindow(window, "Change", (Action)(() => edit.Apply(new[] { 0 }, 13)));
+                    InvokeWindow(window, "SaveAndRebuild");
+                    Assert.That(window.hasUnsavedChanges, Is.False);
+                    CollectionAssert.AreEqual(savedBase, File.ReadAllBytes(path), "Rebuilding LOD1 must not overwrite LOD0.");
+                    Assert.That(new VoxelSurfaceEdit(secondPath).Grid.SemanticIds[0], Is.EqualTo(VoxelSemanticEncoding.Pack(1, 13)));
+                    var manifest = VoxelProductionFamily.Load(AssetDatabase.GUIDToAssetPath(VoxelProductionLink.Load(prefabPath).manifestGuid));
+                    var mesh = AssetDatabase.LoadAssetAtPath<Mesh>(AssetDatabase.GUIDToAssetPath(manifest.lods[1].meshGuids[0]));
+                    Assert.That(mesh.uv4.Any(uv => uv.x == 13), Is.True);
+                    edit = (VoxelSurfaceEdit)WindowField(window, "edit");
+                    Assert.That(AssetDatabase.DeleteAsset(secondPath), Is.True);
+                    Assert.That(InvokeWindow(window, "PrefabSourceMenu", prefabPath), Is.Not.Null, "Missing sources remain listed but cannot be opened.");
+                    Assert.Throws<System.Reflection.TargetInvocationException>(() => InvokeWindow(window, "OpenPrefabLevel", prefabGuid, 1, entries[1].sourceGuid));
+                    Assert.That(WindowField(window, "edit"), Is.SameAs(edit), "The saved buffer remains loaded after a rejected source change.");
+                }
+                string currentGuid = (string)WindowField(window, "sourceGuid");
+                Assert.Throws<System.Reflection.TargetInvocationException>(() => InvokeWindow(window, "OpenPrefabLevel", prefabGuid, 0, "changed-source-guid"));
+                Assert.That(WindowField(window, "sourceGuid"), Is.EqualTo(currentGuid));
+            }
+            finally
+            {
+                window.DiscardChanges(); UnityEngine.Object.DestroyImmediate(window);
                 if (sharedMaterialPath != null) AssetDatabase.DeleteAsset(sharedMaterialPath);
             }
         }

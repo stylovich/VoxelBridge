@@ -69,18 +69,89 @@ namespace LocalModels.VoxelBridge
         internal static void OpenForSource(string path, string prefabPath = null, int lod = 0)
         {
             var window = GetWindow<VoxelSurfacePainterWindow>("Surface Painter");
-            if (window.SourcePath != path && !window.ConfirmLeave()) return;
-            window.prefabGuid = string.IsNullOrEmpty(prefabPath) ? null : AssetDatabase.AssetPathToGUID(prefabPath);
-            window.level = lod;
-            if (window.SourcePath != path)
-            {
-                window.ResetDraft();
-                window.sourceGuid = AssetDatabase.AssetPathToGUID(path);
-                window.source = AssetDatabase.LoadMainAssetAtPath(path);
-                window.LoadSource(false);
-            }
+            if (!window.SetSource(path, prefabPath, lod)) return;
             window.minSize = new Vector2(680, 560);
             window.Show();
+        }
+
+        private bool SetSource(string path, string prefabPath, int lod)
+        {
+            if (EditorApplication.isPlayingOrWillChangePlaymode || selectionJob != null) return false;
+            bool changedSource = SourcePath != path;
+            if (changedSource && !ConfirmLeave()) return false;
+            string nextPrefabGuid = string.IsNullOrEmpty(prefabPath) ? null : AssetDatabase.AssetPathToGUID(prefabPath);
+            bool changedPrefab = prefabGuid != nextPrefabGuid;
+            prefabGuid = nextPrefabGuid;
+            level = lod;
+            if (changedSource)
+            {
+                ResetDraft();
+                sourceGuid = AssetDatabase.AssetPathToGUID(path);
+                source = AssetDatabase.LoadMainAssetAtPath(path);
+                LoadSource(false);
+            }
+            else if (changedPrefab && edit != null)
+            {
+                // Relinking the current source keeps its draft, history and selection.
+                ReleasePreview();
+                BuildPreview();
+            }
+            Repaint();
+            return true;
+        }
+
+        internal static VoxelLodEntry[] PrefabLevels(string path)
+        {
+            if (string.IsNullOrEmpty(path) || !path.EndsWith(".prefab", StringComparison.OrdinalIgnoreCase) ||
+                AssetDatabase.LoadAssetAtPath<GameObject>(path) == null)
+                throw new ArgumentException("Choose a production prefab from Project.");
+            var link = VoxelProductionLink.Load(path);
+            if (!string.IsNullOrEmpty(link.manifestGuid))
+            {
+                var manifest = VoxelProductionFamily.Load(AssetDatabase.GUIDToAssetPath(link.manifestGuid));
+                if (manifest.prefabAssetPath != path || manifest.lods[0].sourceGuid != link.sourceGuid)
+                    throw new InvalidOperationException("The prefab and its LOD manifest do not share the same production link.");
+                return manifest.lods;
+            }
+            string vox = link.SourcePath;
+            if (!VoxelImporterIntegration.TryLoadMetadata(vox, out var metadata, out string error))
+                throw new InvalidOperationException(error);
+            return new[] { new VoxelLodEntry { lodIndex = metadata.lodIndex, sourceGuid = link.sourceGuid } };
+        }
+
+        private GenericMenu PrefabSourceMenu(string path)
+        {
+            var levels = PrefabLevels(path);
+            string guid = AssetDatabase.AssetPathToGUID(path);
+            var menu = new GenericMenu();
+            menu.AddDisabledItem(new GUIContent("Edit LOD"));
+            menu.AddSeparator("");
+            foreach (var entry in levels)
+            {
+                string vox;
+                try { vox = VoxelProductionFamily.SourcePath(entry); }
+                catch (Exception exception)
+                {
+                    menu.AddDisabledItem(new GUIContent($"LOD {entry.lodIndex} — Source missing", exception.Message));
+                    continue;
+                }
+                int lod = entry.lodIndex;
+                string expectedSourceGuid = entry.sourceGuid;
+                menu.AddItem(new GUIContent($"LOD {lod} · {System.IO.Path.GetFileNameWithoutExtension(vox)}", vox),
+                    prefabGuid == guid && sourceGuid == expectedSourceGuid && level == lod,
+                    () => { if (this != null) Run(() => OpenPrefabLevel(guid, lod, expectedSourceGuid)); });
+            }
+            return menu;
+        }
+
+        private void OpenPrefabLevel(string guid, int lod, string expectedSourceGuid)
+        {
+            string path = AssetDatabase.GUIDToAssetPath(guid);
+            // Resolve again: assets may be moved or the family changed while the menu was open.
+            var entry = PrefabLevels(path).SingleOrDefault(value => value.lodIndex == lod);
+            if (entry == null || entry.sourceGuid != expectedSourceGuid)
+                throw new InvalidOperationException("The LOD source link changed. Drop the production prefab again.");
+            SetSource(VoxelProductionFamily.SourcePath(entry), path, lod);
         }
 
         private void OnEnable()
@@ -221,7 +292,7 @@ namespace LocalModels.VoxelBridge
             Object candidate;
             using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
             {
-                GUILayout.Label("Source", GUILayout.Width(44));
+                GUILayout.Label(new GUIContent("Source", "Arrastrar un prefab de producción desde Project para elegir su LOD, o un .vox para editar sólo la fuente."), GUILayout.Width(44));
                 candidate = EditorGUILayout.ObjectField(source, typeof(Object), false);
                 if (GUILayout.Button(new GUIContent("Source Actions", "Recargar, descartar, guardar sólo la fuente o reconstruir el LOD vinculado."), EditorStyles.toolbarDropDown, GUILayout.Width(110))) ShowSourceActions();
                 showHelp = GUILayout.Toggle(showHelp, new GUIContent("?", "Controls & external editing\nControles, límites de la vista y precauciones de intercambio con MagicaVoxel."), EditorStyles.toolbarButton, GUILayout.Width(25));
@@ -229,8 +300,10 @@ namespace LocalModels.VoxelBridge
             if (candidate != source)
             {
                 string path = AssetDatabase.GetAssetPath(candidate);
-                if (!path.EndsWith(".vox", StringComparison.OrdinalIgnoreCase)) status = "Choose a VOX source with semantic bindings.";
-                else if (ConfirmLeave()) { ResetDraft(); source = candidate; sourceGuid = AssetDatabase.AssetPathToGUID(path); prefabGuid = null; level = 0; LoadSource(false); }
+                if (path.EndsWith(".vox", StringComparison.OrdinalIgnoreCase)) Run(() => SetSource(path, null, 0));
+                else if (candidate is GameObject && AssetDatabase.IsMainAsset(candidate) && path.EndsWith(".prefab", StringComparison.OrdinalIgnoreCase))
+                    Run(() => PrefabSourceMenu(path).ShowAsContext());
+                else { status = "Choose a production prefab from Project or a VOX source with semantic bindings."; statusType = MessageType.Warning; }
             }
             if (showHelp)
             {
@@ -310,7 +383,7 @@ namespace LocalModels.VoxelBridge
                 GUILayout.FlexibleSpace();
                 using (new EditorGUI.DisabledScope(string.IsNullOrEmpty(prefabGuid)))
                     if (GUILayout.Button(new GUIContent("Save & Rebuild", string.IsNullOrEmpty(prefabGuid)
-                        ? "Sin prefab vinculado. Abrir desde Edit Surfaces del prefab de producción. Para guardar sólo el VOX: Source Actions > Save Source Only."
+                        ? "Sin prefab vinculado. Arrastrar el prefab de producción a Source o abrir desde Edit Surfaces. Para guardar sólo el VOX: Source Actions > Save Source Only."
                         : "Guarda la fuente y reconstruye este LOD del prefab. No regenera los LODs descendientes."), EditorStyles.toolbarButton, GUILayout.Width(125))) Run(SaveAndRebuild);
             }
             return true;

@@ -37,7 +37,7 @@ La consolidación artística de las paletas puede continuar durante la validaci�
 
 `Surface Painter` es una extensión de Editor para asignar superficies sobre una fuente semántica existente. No sustituye a MagicaVoxel para modelado ni a `Semantic Bindings` para asignaciones de slots completos. El [procedimiento de uso](README.md#edición-visual-de-superficies) detalla las operaciones disponibles y sus límites. No requiere paquetes nuevos ni cambios en el shader de producción.
 
-- Entrada desde el Inspector del prefab de producción mediante `Edit Surfaces`, indicando fuente y LOD. LOD0 es la entrada recomendada; seleccionar otro nivel requiere una elección explícita.
+- Entrada desde el Inspector del prefab de producción mediante `Edit Surfaces`, o arrastrando el prefab padre desde Project al campo `Source` y eligiendo un nivel en `Edit LOD`. Ambas entradas conservan el vínculo de reconstrucción. LOD0 es la entrada recomendada; seleccionar otro nivel requiere una elección explícita.
 - Una sola fuente por sesión, identificada por GUID y fijada aunque cambie la selección de la escena. Los prefabs combinados se editan sobre su propia fuente, no sobre los modelos utilizados para construirlos.
 - Vista aislada del volumen con órbita, desplazamiento, zoom hasta escala de celda, encuadre del volumen o selección, pincel de tamaño ajustable y rectángulo. Selección visible con reemplazo, adición y sustracción; cálculo por tandas, vista provisional y cancelación sin alterar la selección anterior.
 - Selector de `SurfaceID` con ID, nombre y propiedades PBR de referencia. `Apply Surface` modifica únicamente la superficie de las celdas seleccionadas; no edita la definición global, el ColorID, la ocupación, la escala ni el pivote.

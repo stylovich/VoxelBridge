@@ -33,7 +33,7 @@ Las paletas, el transporte de `ColorID + SurfaceID` y las familias semánticas d
 
 ## Edición visual de superficies
 
-1. Seleccionar un prefab de producción y pulsar `Edit Surfaces` en la fila del LOD correspondiente. LOD0 es el punto de partida recomendado. También se puede abrir `Tools > Voxel Bridge > Surface Painter` y asignar un `.vox` con sidecar semántico v4.
+1. Seleccionar un prefab de producción y pulsar `Edit Surfaces` en la fila del LOD correspondiente, o abrir `Tools > Voxel Bridge > Surface Painter`, arrastrar el prefab padre desde Project a `Source` y elegir un nivel en `Edit LOD`. El menú muestra los niveles existentes, no genera otros. LOD0 es el punto de partida recomendado. También se puede asignar un `.vox` con sidecar semántico v4 para editar sólo la fuente.
 2. Comprobar que las LUT estén actualizadas. La previsualización utiliza una malla y un material temporales; no modifica las instancias de la escena. Las piezas `Keep Original`, incluido el vidrio retenido, quedan fuera de esta vista.
 3. Elegir `Brush` o `Rectangle` en la barra de herramientas y marcar voxels con clic izquierdo o arrastre. `Replace` sustituye la selección, `Add` acumula celdas y `Subtract` las quita; mantener `Shift` al iniciar el gesto activa sustracción temporal. `Size` controla el diámetro de pantalla entre 1 y 128 píxeles de interfaz. `Alt` + arrastre o botón derecho rota la vista; botón central o `Alt+Shift` + arrastre izquierdo desplaza la cámara. La rueda permite acercarse a escala de celda. `Frame All` encuadra el volumen y `Frame Selection` centra la órbita en la selección.
 4. Elegir `Surface` y pulsar `Apply Surface`. La asignación afecta al voxel completo, no sólo a la cara señalada. Conserva ColorID, ocupación, escala y pivote.
@@ -61,7 +61,9 @@ El muestreo de `Match` no cambia la superficie elegida como destino. `Use Surfac
 
 ### Guardado y límites
 
-`Save & Rebuild` requiere abrir la fuente desde `Edit Surfaces` del prefab de producción. Cargar un `.vox` directamente deja la sesión sin prefab vinculado y deshabilita ese botón; `Source Actions > Save Source Only` permite guardar la fuente sin reconstruir. La ausencia de cambios pendientes no bloquea la reconstrucción de una fuente vinculada.
+`Save & Rebuild` requiere vincular un prefab de producción mediante `Edit Surfaces` o arrastrándolo a `Source` y eligiendo su LOD. Cargar un `.vox` directamente deja la sesión sin prefab vinculado y deshabilita ese botón; `Source Actions > Save Source Only` permite guardar la fuente sin reconstruir. La ausencia de cambios pendientes no bloquea la reconstrucción de una fuente vinculada.
+
+Cerrar el menú `Edit LOD` sin elegir conserva la sesión actual. Elegir otra fuente con cambios pendientes solicita guardar, descartar o cancelar. Vincular un prefab a la misma fuente conserva el borrador, la selección y el historial. Los niveles con fuentes ausentes permanecen deshabilitados; los prefabs sin vínculo de producción o con vínculos copiados se rechazan sin sustituir la sesión. Los assets se resuelven por GUID, no por nombres de archivo.
 
 Los cambios externos del `.vox`, sidecar o paletas bloquean el guardado para evitar sobrescrituras. `Source Actions > Reload Source` requiere resolver el borrador pendiente; `Discard Changes...` lo descarta explícitamente. No hay fusión automática con cambios de MagicaVoxel. La advertencia sobre slots con RGB idéntico y superficies distintas se consulta en `?` o `Source Actions > External Editing Notice`; ese intercambio externo permanece sin certificar.
 
