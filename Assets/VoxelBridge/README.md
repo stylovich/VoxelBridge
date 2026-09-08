@@ -49,6 +49,18 @@ La selección se calcula por tandas y se confirma al soltar el ratón y terminar
 
 El pincel interpola el recorrido del ratón; el rectángulo admite ambas direcciones de arrastre. Cada muestra de pantalla toma únicamente el primer voxel alcanzado, sin atravesar superficies. El muestreo tiene resolución de un píxel de interfaz: acercar la vista para incluir detalles subpíxel. El radio del pincel es de pantalla, no un radio tridimensional ni un número fijo de voxels.
 
+### Cuentagotas y selección asistida
+
+- `Pick`: pulsar un voxel visible para consultar su ColorID, muestra de color y SurfaceID. El tooltip de la muestra incluye coordenadas y propiedades PBR. Su superficie se carga como destino en `Surface`, sin modificar la selección ni aplicar cambios. No copia ni pinta ColorID.
+- `Match`: elegir `ColorID`, `SurfaceID` o `Similar Color` y pulsar el voxel de referencia. ColorID ignora la superficie; SurfaceID ignora el color. `Similar Color` compara los colores globales mediante distancia OKLab, en la misma escala que los perfiles cromáticos, sin alterar los IDs.
+- `Connected` limita la búsqueda a vecinos por caras que cumplan el criterio; no une esquinas ni cruza colores o superficies rechazados. `All Matching` busca coincidencias en todo el volumen. La tolerancia siempre se compara con el color inicial, no con el último vecino, para evitar extenderse gradualmente por un degradado.
+- `Visible Only`, activado por defecto, exige un centro de cara expuesta visible desde la cámara. No atraviesa oclusores ni incluye interiores. Una cara parcialmente visible cuyo centro esté oculto puede quedar excluida: cambiar el encuadre o utilizar el pincel para estos detalles. Desactivarlo incluye coincidencias ocultas, interiores y fuera de cámara; la interfaz indica `Includes Hidden`.
+- `Replace`, `Add`, `Subtract` y `Shift` al iniciar conservan su significado. La búsqueda muestra celdas comprobadas y admite cancelación; superar el límite de selección conserva la selección anterior, sin aceptar resultados parciales. Las búsquedas grandes pueden requerir varios frames.
+
+El muestreo de `Match` no cambia la superficie elegida como destino. `Use Surface` permite tomarla explícitamente desde la muestra. Después de revisar el perímetro y el contador, utilizar `Apply Surface` y `Save & Rebuild`. Cambiar el criterio o la tolerancia requiere otro clic; no modifica retroactivamente una selección confirmada. Estas herramientas no generan entradas de Undo: el historial corresponde a las asignaciones aplicadas.
+
+### Guardado y límites
+
 Los cambios externos del `.vox`, sidecar o paletas bloquean el guardado para evitar sobrescrituras. `Source Actions > Reload Source` requiere resolver el borrador pendiente; `Discard Changes...` lo descarta explícitamente. No hay fusión automática con cambios de MagicaVoxel. La advertencia sobre slots con RGB idéntico y superficies distintas se consulta en `?` o `Source Actions > External Editing Notice`; ese intercambio externo permanece sin certificar.
 
 El guardado conserva copias de recuperación bajo `Library/VoxelBridgeSurfaceEdits`. Una interrupción bloquea las lecturas semánticas de producción hasta ejecutar `Recover Interrupted Save`. La recuperación restaura ambos archivos originales y rechaza sobrescribir modificaciones externas posteriores. No borrar `Library` ni mover las fuentes mientras exista una recuperación pendiente. Un fallo de importación posterior al guardado informa que la fuente está guardada y requiere reimportación.
@@ -65,7 +77,7 @@ El perfil recomendado `Default` (SurfaceID 0) utiliza Metallic 0, Smoothness 0, 
 
 El guardado y la reconstrucción son etapas separadas: un fallo de reconstrucción conserva la fuente guardada y la malla anterior. Reintentar la reconstrucción después de resolver el error; Undo no revierte los archivos guardados.
 
-La selección asistida de grupos y la preasignación por semejanza PBR son fases posteriores descritas en [ROADMAP.md](ROADMAP.md).
+Las vistas de diagnóstico y la preasignación por semejanza PBR son fases posteriores descritas en [ROADMAP.md](ROADMAP.md).
 
 ## Combinación de modelos voxel
 

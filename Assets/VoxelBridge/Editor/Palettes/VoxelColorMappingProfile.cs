@@ -204,6 +204,8 @@ namespace LocalModels.VoxelBridge
     {
         private const double TieTolerance = 0.000000001;
 
+        public static float Distance(Color32 left, Color32 right) => (float)(Distance(ToOklab(left), ToOklab(right)) * 100.0);
+
         public static bool TryFindNearest(Color32 source,
             IReadOnlyList<VoxelColorDefinition> candidates, out VoxelColorMatch match)
         {

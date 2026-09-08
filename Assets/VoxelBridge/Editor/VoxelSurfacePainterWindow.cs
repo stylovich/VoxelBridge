@@ -25,6 +25,11 @@ namespace LocalModels.VoxelBridge
         [SerializeField] private int brushDiameter = 16;
         [SerializeField] private bool showHelp;
         [SerializeField] private bool showSelectionTint = true;
+        [SerializeField] private VoxelSelectionMatch matchCriterion;
+        [SerializeField] private bool matchConnected = true;
+        [SerializeField] private bool matchVisibleOnly = true;
+        [SerializeField] private float matchTolerance = 8;
+        private int sampledCell = -1;
         [SerializeField] private string draftFingerprint;
         [SerializeField] private int[] draftCells = Array.Empty<int>();
         [SerializeField] private int[] draftSurfaces = Array.Empty<int>();
@@ -112,7 +117,7 @@ namespace LocalModels.VoxelBridge
         private void LoadSource(bool restoreDraft)
         {
             CancelSelection();
-            ReleasePreview(); edit = null; selected.Clear(); status = null; statusType = MessageType.Info;
+            ReleasePreview(); edit = null; selected.Clear(); sampledCell = -1; hover = -1; status = null; statusType = MessageType.Info;
             if (string.IsNullOrEmpty(SourcePath)) { status = "The source asset is missing."; statusType = MessageType.Error; return; }
             try
             {
@@ -229,7 +234,7 @@ namespace LocalModels.VoxelBridge
             }
             if (showHelp)
             {
-                EditorGUILayout.HelpBox("Pincel o rectángulo selecciona voxels visibles; Shift al iniciar resta. Esc cancela. Alt + arrastre o botón derecho rota; botón central desplaza; rueda acerca/aleja. Apply Surface modifica el voxel completo. Keep Original queda fuera de esta vista. La emisión de referencia no reproduce bloom ni exposición.", MessageType.Info);
+                EditorGUILayout.HelpBox("Brush y Rectangle seleccionan voxels visibles. Match busca coincidencias desde el voxel pulsado; Pick consulta sus IDs y toma su superficie. Shift al iniciar resta; Esc cancela. Alt + arrastre o botón derecho rota; botón central desplaza; rueda acerca/aleja. Apply Surface modifica el voxel completo. Keep Original queda fuera de esta vista.", MessageType.Info);
                 EditorGUILayout.HelpBox("Intercambio externo: los slots con RGB idéntico y superficies distintas requieren una prueba en MagicaVoxel. No se debe asumir que un guardado externo conserva su identidad. Las validaciones y el bloqueo ante conflictos permanecen activos.", MessageType.Warning);
             }
             if (!string.IsNullOrEmpty(SourcePath) && VoxelSurfaceEditStore.HasPending(SourcePath))
@@ -242,18 +247,38 @@ namespace LocalModels.VoxelBridge
             { EditorGUILayout.HelpBox(surfaceError, MessageType.Error); return false; }
             using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
             {
-                selectionTool = (VoxelSelectionTool)GUILayout.Toolbar((int)selectionTool, new[] { "Brush", "Rectangle" }, EditorStyles.toolbarButton, GUILayout.Width(160));
+                selectionTool = (VoxelSelectionTool)GUILayout.Toolbar((int)selectionTool, new[] { "Brush", "Rectangle", "Match", "Pick" }, EditorStyles.toolbarButton, GUILayout.Width(240));
                 GUILayout.Space(8);
-                selectionMode = (VoxelSelectionMode)GUILayout.Toolbar((int)selectionMode, new[] { "Replace", "Add", "Subtract" }, EditorStyles.toolbarButton, GUILayout.Width(205));
+                using (new EditorGUI.DisabledScope(selectionTool == VoxelSelectionTool.Pick))
+                    selectionMode = (VoxelSelectionMode)GUILayout.Toolbar((int)selectionMode, new[] { "Replace", "Add", "Subtract" }, EditorStyles.toolbarButton, GUILayout.Width(205));
                 if (selectionTool == VoxelSelectionTool.Brush)
                 {
                     GUILayout.Space(8);
                     GUILayout.Label(new GUIContent("Size", "Diámetro en píxeles de interfaz. Acercar la cámara para seleccionar detalles subpíxel."), GUILayout.Width(28));
-                    brushDiameter = Mathf.RoundToInt(GUILayout.HorizontalSlider(brushDiameter, 1, 128, GUILayout.Width(90)));
+                    brushDiameter = Mathf.RoundToInt(GUILayout.HorizontalSlider(brushDiameter, 1, 128, GUILayout.Width(70)));
                     brushDiameter = Mathf.Clamp(EditorGUILayout.IntField(brushDiameter, GUILayout.Width(38)), 1, 128);
                 }
                 GUILayout.FlexibleSpace();
             }
+            if (selectionTool == VoxelSelectionTool.Match)
+            {
+                using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
+                {
+                    matchCriterion = (VoxelSelectionMatch)EditorGUILayout.Popup((int)matchCriterion,
+                        new[] { "ColorID", "SurfaceID", "Similar Color" }, GUILayout.Width(115));
+                    matchConnected = EditorGUILayout.Popup(matchConnected ? 0 : 1, new[] { "Connected", "All Matching" }, GUILayout.Width(112)) == 0;
+                    matchVisibleOnly = GUILayout.Toggle(matchVisibleOnly, new GUIContent("Visible Only",
+                        "Sólo caras visibles desde esta cámara. Desactivar incluye voxels ocultos e interiores. Connected recorre vecinos por caras que cumplan el mismo criterio."), EditorStyles.toolbarButton, GUILayout.Width(90));
+                    if (matchCriterion == VoxelSelectionMatch.SimilarColor)
+                    {
+                        GUILayout.Label(new GUIContent("Tolerance", "Distancia OKLab respecto al color global del voxel pulsado, en la misma escala que los perfiles cromáticos."), GUILayout.Width(60));
+                        matchTolerance = EditorGUILayout.Slider(matchTolerance, 0, 100, GUILayout.Width(145));
+                    }
+                    GUILayout.FlexibleSpace();
+                    if (!matchVisibleOnly) GUILayout.Label(new GUIContent("Includes Hidden", "La selección puede incluir voxels fuera de cámara y del interior del modelo."), EditorStyles.miniLabel, GUILayout.Width(100));
+                }
+            }
+            if (selectionTool == VoxelSelectionTool.Match || selectionTool == VoxelSelectionTool.Pick) DrawSample();
             var options = edit.Surfaces.Entries.Where(s => s.RenderClass == VoxelSurfaceRenderClass.Opaque).OrderBy(s => s.Id).ToArray();
             int choice = Array.FindIndex(options, s => s.Id == surfaceId);
             using (new EditorGUILayout.HorizontalScope())
@@ -295,6 +320,45 @@ namespace LocalModels.VoxelBridge
             return GUILayout.Button(new GUIContent(symbol, tooltip), glyphStyle, GUILayout.Width(28));
         }
 
+        private void DrawSample()
+        {
+            bool valid = sampledCell >= 0 && sampledCell < edit.Grid.Occupied.Length && edit.Grid.Occupied[sampledCell];
+            using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
+            {
+                Rect swatch = GUILayoutUtility.GetRect(16, 16, GUILayout.Width(16));
+                string colorText = "Click a voxel to sample", surfaceText = "", details = "";
+                if (valid)
+                {
+                    ushort pair = edit.Grid.SemanticIds[sampledCell];
+                    int color = VoxelSemanticEncoding.ColorId(pair), surface = VoxelSemanticEncoding.SurfaceId(pair);
+                    if (edit.Colors.TryGetColor(color, out Color32 rgb)) EditorGUI.DrawRect(swatch, rgb);
+                    colorText = $"Color {color:000} · {edit.Colors.Entries.FirstOrDefault(entry => entry.Id == color)?.DisplayName}";
+                    if (edit.Surfaces.TryGetSurface(surface, out var definition))
+                    {
+                        surfaceText = $"Surface {surface:000} · {definition.DisplayName}";
+                        edit.Grid.Coordinates(sampledCell, out int x, out int y, out int z);
+                        details = $"Cell ({x}, {y}, {z})\nMetallic {definition.Metallic:0.##} · Smoothness {definition.Smoothness:0.##} · Emission {definition.Emission:0.##} · AO {definition.OcclusionMultiplier:0.##}";
+                    }
+                }
+                GUILayout.Label(new GUIContent(colorText, details), EditorStyles.miniLabel, GUILayout.MinWidth(160));
+                GUILayout.Label(new GUIContent(surfaceText, details), EditorStyles.miniLabel, GUILayout.MinWidth(150));
+                using (new EditorGUI.DisabledScope(!valid))
+                    if (GUILayout.Button(new GUIContent("Use Surface", "Carga esta superficie como destino, sin aplicarla a ningún voxel."), EditorStyles.toolbarButton, GUILayout.Width(88))) Run(() => SampleCell(sampledCell, true));
+            }
+        }
+
+        private void SampleCell(int cell, bool takeSurface)
+        {
+            if (edit == null || cell < 0 || cell >= edit.Grid.Occupied.Length || !edit.Grid.Occupied[cell]) throw new ArgumentException("Choose an occupied voxel.");
+            ushort pair = edit.Grid.SemanticIds[cell];
+            if (!edit.Colors.TryGetColor(VoxelSemanticEncoding.ColorId(pair), out _) ||
+                !edit.Surfaces.TryGetSurface(VoxelSemanticEncoding.SurfaceId(pair), out var surface))
+                throw new InvalidOperationException("The sampled voxel references an unknown color or surface.");
+            sampledCell = cell; hover = cell;
+            if (takeSurface) surfaceId = surface.Id;
+            Repaint();
+        }
+
         private void ShowSourceActions()
         {
             var menu = new GenericMenu();
@@ -320,6 +384,7 @@ namespace LocalModels.VoxelBridge
             using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
             {
                 EditorGUILayout.LabelField(new GUIContent(selectionJob == null ? $"Selected {selected.Count:N0}   Pending {edit.PendingCells:N0}   LOD {level}" :
+                    selectionJob.IsSemantic ? $"Selecting {selectionJob.Result.Count:N0}   Checked {selectionJob.EvaluatedCells:N0}   Esc to cancel" :
                     $"Selecting {selectionJob.Result.Count:N0}   Samples {selectionJob.Samples:N0}   Esc to cancel", status), EditorStyles.miniLabel);
                 // Keep the control present while dragging so IMGUI control IDs stay stable.
                 using (new EditorGUI.DisabledScope(selectionJob == null))
@@ -415,6 +480,26 @@ namespace LocalModels.VoxelBridge
             { orbit = RotateView(orbit, e.delta); selecting = false; e.Use(); Repaint(); }
             if (e.type == EventType.MouseDown && e.button == 0 && !e.alt)
             {
+                if (selectionTool == VoxelSelectionTool.Match || selectionTool == VoxelSelectionTool.Pick)
+                {
+                    Run(() =>
+                    {
+                        Vector2 point = e.mousePosition - rect.position;
+                        if (!VoxelSurfaceEdit.Pick(edit.Grid, camera.ViewportPointToRay(new Vector3(point.x / rect.width, 1 - point.y / rect.height, 0)), out int cell)) return;
+                        SampleCell(cell, selectionTool == VoxelSelectionTool.Pick);
+                        if (selectionTool == VoxelSelectionTool.Pick) return;
+                        if (matchVisibleOnly && !VoxelSemanticSelection.IsVisible(edit.Grid, camera, cell))
+                            throw new InvalidOperationException("No visible face center on the seed voxel. Reframe the view or disable Visible Only explicitly.");
+                        RunSelection(() =>
+                        {
+                            selectionJob = new VoxelSurfaceSelection(edit.Grid, camera, rect.size, e.shift ? VoxelSelectionMode.Subtract : selectionMode, selected);
+                            selectionJob.Match(cell, edit.Colors, matchCriterion, matchTolerance, matchConnected, matchVisibleOnly);
+                            selectionViewport = rect; selecting = false;
+                            EditorApplication.update += ProcessSelection;
+                        });
+                    });
+                    e.Use(); Repaint(); return;
+                }
                 RunSelection(() =>
                 {
                     selectionJob = new VoxelSurfaceSelection(edit.Grid, camera, rect.size,

@@ -7,7 +7,7 @@ Voxel Bridge debe producir familias voxel físicamente coherentes y editables, i
 ## Orden de trabajo recomendado
 
 1. Mantener la conversión individual y por lotes, las paletas globales, el transporte semántico y los prefabs de producción como base del flujo.
-2. Consolidar `Surface Painter` en Unity: navegación, atajos y guardado con reconstrucción; continuar con herramientas de selección y diagnóstico de superficies/emisión para la corrección artística.
+2. Validar artísticamente `Surface Painter`, sus herramientas de selección y el cuentagotas; completar las vistas de diagnóstico de color, superficies y emisión para la corrección artística.
 3. Verificar el intercambio con MagicaVoxel y la derivación de LODs después de editar superficies. Incorporar preasignación PBR revisable durante la conversión después de disponer de herramientas cómodas de corrección.
 4. Completar las validaciones funcionales pendientes de materiales especiales, iluminación y carga/descarga de subescenas sobre assets representativos.
 5. Retomar las mediciones de rendimiento por LOD, sombras, transparencias, culling y streaming cuando exista una distribución representativa del mapa.
@@ -25,7 +25,7 @@ La consolidación artística de las paletas puede continuar durante la validaci�
 | Materiales semánticos | Disponible: paletas, perfiles cromáticos, bindings por slot, LUT y mesher opaco compartido. |
 | Familias y combinación | Disponible: edición de fuentes, reconstrucción, derivación de LODs y unión exacta de conjuntos compactos. |
 | DOTS y subescenas | Integración y diagnóstico disponibles; validación funcional inicial de instancias, recursos compartidos y frustum. No equivale a certificar rendimiento, sombras, oclusión o streaming de producción. |
-| Autoría visual de superficies | Disponible: pincel ajustable, rectángulo, selección visible con Replace/Add/Subtract y cancelación, aplicación por voxel, Undo/Redo con atajos contextuales, navegación y guardado recuperable con reconstrucción explícita. Pendientes: selección semántica asistida y vistas de diagnóstico. |
+| Autoría visual de superficies | Disponible: pincel, rectángulo, cuentagotas, selección por ColorID/SurfaceID/color similar y regiones conectadas, Replace/Add/Subtract, cancelación, aplicación por voxel, Undo/Redo y guardado recuperable con reconstrucción explícita. Pendientes: vistas de diagnóstico e aislamiento de selección. |
 | Intercambio de RGB duplicados | Pendiente de certificar en MagicaVoxel; la escritura y lectura controladas por Voxel Bridge conservan los pares. |
 | Preasignación PBR | Planificada después del editor de corrección: candidatos por perfil, comparación de propiedades y revisión de coincidencias ambiguas. |
 | Impostores semánticos | Horneado bloqueado hasta adaptar la captura a las LUT y los canales de IDs. La ruta RGB existente no demuestra compatibilidad semántica. |
@@ -87,17 +87,17 @@ Los descendientes existentes nunca se sobrescriben al guardar una superficie. `R
 1. **Edición y transporte por celda:** mismo ColorID con dos superficies, cambios parciales de un slot, varios chunks, reutilización de pares, límite de 255, no-op y preservación de geometría/metadatos.
 2. **Interfaz mínima:** selección visible, aplicación, previsualización, Undo/Redo, cancelación, cambio de fuente, recarga de scripts y liberación de recursos temporales.
 3. **Integración de autoría:** guardado y recuperación ante fallo entre archivos, rechazo de conflictos externos, reconstrucción del prefab manteniendo referencias y avisos de LODs derivados. Prueba de round-trip real con MagicaVoxel antes de certificarlo.
-4. **Asistencia posterior:** selección por ColorID, SurfaceID o regiones conectadas, según necesidad artística. La clasificación como LED, neón u otro material sigue siendo explícita. La intensidad emisiva original no se conserva como atributo por voxel en el formato actual; agrupar por esa intensidad exigiría ampliar su captura y transporte.
+4. **Asistencia de selección:** selección por ColorID, SurfaceID, color similar y regiones conectadas, con alcance visible u oculto explícito. La clasificación como LED, neón u otro material sigue siendo explícita. La intensidad emisiva original no se conserva como atributo por voxel en el formato actual; agrupar por esa intensidad exigiría ampliar su captura y transporte.
 
 Quedan fuera de esta primera versión la modificación de geometría, pintura por cara, selección a través del volumen, edición de vidrio/follaje voxel, un editor general de materiales, clasificación automática por intensidad y reemplazar MagicaVoxel, Blender o Vengi.
 
-### Herramientas de corrección previstas
+### Estado de las herramientas de corrección
 
 Implementar por bloques verificables, manteniendo las selecciones separadas de la aplicación de cambios:
 
 1. **Selección espacial — disponible:** tamaño de pincel ajustable y selección rectangular, con reemplazo, adición y sustracción. El muestreo de pantalla selecciona la primera celda por rayo y no atraviesa geometría; los detalles subpíxel requieren acercar la vista. El gesto es cancelable y respeta límites de selección y trabajo. Evaluar la comodidad artística sobre modelos representativos antes de considerar un modo de selección a través del volumen.
-2. **Selección semántica:** ColorID exacto, color parecido con tolerancia perceptual reutilizando la comparación cromática existente, SurfaceID y región conectada por caras. Diferenciar seleccionar todos los coincidentes de seleccionar sólo una región conectada para no alterar piezas lejanas accidentalmente.
-3. **Inspección:** cuentagotas que muestre ColorID y SurfaceID del voxel, vistas de color base sin iluminación, diagnóstico por superficie y emisión, e aislamiento de selección. Separar la comprobación de color de la vista PBR para no atribuir los reflejos de la iluminación a cambios de ColorID o SurfaceID. El diagnóstico emisivo debe distinguir superficies sin depender del bloom ni cambiar la intensidad HDR compartida; no clasifica LED o neón por luminosidad.
+2. **Selección semántica — disponible:** `Match` por ColorID, SurfaceID o color similar mediante OKLab. `Connected` recorre vecinos por caras; `All Matching` consulta todo el volumen. `Visible Only` limita la búsqueda a centros de caras visibles, con una elección explícita para incluir ocultos. La búsqueda es cancelable y conserva los límites de selección.
+3. **Inspección:** `Pick` y `Use Surface` están disponibles para consultar ambos IDs y tomar la superficie sin pintar. Pendientes: vistas de color base sin iluminación, diagnóstico por superficie y emisión, e aislamiento de selección. Separar la comprobación de color de la vista PBR para no atribuir los reflejos de la iluminación a cambios de ColorID o SurfaceID. El diagnóstico emisivo debe distinguir superficies sin depender del bloom ni cambiar la intensidad HDR compartida; no clasifica LED o neón por luminosidad.
 4. **Edición visual de ColorID:** operación independiente que conserve SurfaceID, seleccione colores de la paleta global y respete el perfil cromático cuando corresponda. Ampliar el historial, la escritura y sus pruebas para este contrato; no eliminar simplemente la protección actual que impide modificar ColorID durante la pintura de superficies.
 
 La representación HDR con bloom y una comparación visual antes/después pueden evaluarse después de estas herramientas. La referencia normalizada actual no constituye una vista de iluminación final. La captura de grupos emisivos de origen y la preasignación PBR requieren trabajo propio durante la conversión; las herramientas de selección no recuperan atributos que no estén almacenados en el `.vox` y su sidecar.

@@ -466,6 +466,42 @@ namespace LocalModels.VoxelBridge.Tests
             finally { window.DiscardChanges(); UnityEngine.Object.DestroyImmediate(window); }
         }
 
+        [Test]
+        public void Eyedropper_ReadsBothIdsAndChangesOnlyTheTargetSurface()
+        {
+            Create(8);
+            Assert.That(VoxelPaletteLutGenerator.TryRebuild(colors, out _, out string error), Is.True, error);
+            Assert.That(VoxelPaletteLutGenerator.TryRebuild(surfaces, out _, out error), Is.True, error);
+            AssetDatabase.ImportAsset(sidecarPath, ImportAssetOptions.ForceSynchronousImport);
+            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport);
+            byte[] beforeVox = File.ReadAllBytes(path), beforeSidecar = File.ReadAllBytes(sidecarPath);
+            var window = ScriptableObject.CreateInstance<VoxelSurfacePainterWindow>();
+            try
+            {
+                var state = new SerializedObject(window);
+                state.FindProperty("sourceGuid").stringValue = AssetDatabase.AssetPathToGUID(path);
+                state.ApplyModifiedPropertiesWithoutUndo(); InvokeWindow(window, "LoadSource", false);
+                var edit = (VoxelSurfaceEdit)WindowField(window, "edit");
+                var selected = (HashSet<int>)WindowField(window, "selected"); selected.Add(0); selected.Add(1);
+                InvokeWindow(window, "Change", (Action)(() => edit.Apply(new[] { 0 }, 7)));
+                ushort[] pairs = (ushort[])edit.Grid.SemanticIds.Clone();
+                InvokeWindow(window, "SampleCell", 0, true);
+                Assert.That(WindowField(window, "sampledCell"), Is.EqualTo(0));
+                Assert.That(WindowField(window, "surfaceId"), Is.EqualTo(7));
+                InvokeWindow(window, "SampleCell", 1, false);
+                Assert.That(WindowField(window, "sampledCell"), Is.EqualTo(1));
+                Assert.That(WindowField(window, "surfaceId"), Is.EqualTo(7), "Match sampling must not replace the chosen target surface.");
+                InvokeWindow(window, "SampleCell", 1, true);
+                Assert.That(WindowField(window, "surfaceId"), Is.EqualTo(0));
+                CollectionAssert.AreEquivalent(new[] { 0, 1 }, selected);
+                CollectionAssert.AreEqual(pairs, edit.Grid.SemanticIds);
+                Assert.That(edit.HistorySteps, Is.EqualTo(1)); Assert.That(edit.PendingCells, Is.EqualTo(1));
+                CollectionAssert.AreEqual(beforeVox, File.ReadAllBytes(path));
+                CollectionAssert.AreEqual(beforeSidecar, File.ReadAllBytes(sidecarPath));
+            }
+            finally { window.DiscardChanges(); UnityEngine.Object.DestroyImmediate(window); }
+        }
+
         private sealed class PointerCaptureWindow : EditorWindow
         {
             internal VoxelSurfacePainterWindow Painter;

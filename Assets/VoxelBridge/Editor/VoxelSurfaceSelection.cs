@@ -4,11 +4,11 @@ using UnityEngine;
 
 namespace LocalModels.VoxelBridge
 {
-    internal enum VoxelSelectionTool { Brush, Rectangle }
+    internal enum VoxelSelectionTool { Brush, Rectangle, Match, Pick }
     internal enum VoxelSelectionMode { Replace, Add, Subtract }
 
-    // Screen-space selection transaction. Only the nearest cell at each GUI-pixel sample
-    // is considered. The caller commits Result after the complete gesture succeeds.
+    // A bounded transaction for screen-space gestures or semantic queries.
+    // The caller commits Result only after the complete operation succeeds.
     internal sealed class VoxelSurfaceSelection : IDisposable
     {
         internal const int MaximumSamples = 1048576;
@@ -21,9 +21,12 @@ namespace LocalModels.VoxelBridge
         private readonly HashSet<Vector2Int> visited = new();
         private int segmentCount;
         private int work;
+        private IEnumerator<int> semanticCandidates;
         internal HashSet<int> Result { get; }
         internal int Samples => visited.Count;
-        internal bool IsIdle => segments.Count == 0;
+        internal int EvaluatedCells { get; private set; }
+        internal bool IsSemantic { get; private set; }
+        internal bool IsIdle => segments.Count == 0 && semanticCandidates == null;
 
         internal VoxelSurfaceSelection(VoxelGrid grid, Camera camera, Vector2 size,
             VoxelSelectionMode mode, IEnumerable<int> original)
@@ -39,6 +42,7 @@ namespace LocalModels.VoxelBridge
 
         internal void Brush(Vector2 from, Vector2 to, float diameter)
         {
+            if (IsSemantic) throw new InvalidOperationException("Cannot append a brush stroke to a semantic selection.");
             ValidatePoint(from); ValidatePoint(to);
             if (!float.IsFinite(diameter) || diameter < 1 || diameter > 128) throw new ArgumentOutOfRangeException(nameof(diameter));
             Enqueue(BrushSamples(from, to, diameter * .5f));
@@ -46,8 +50,16 @@ namespace LocalModels.VoxelBridge
 
         internal void Rectangle(Vector2 from, Vector2 to)
         {
+            if (IsSemantic) throw new InvalidOperationException("Cannot append a rectangle to a semantic selection.");
             ValidatePoint(from); ValidatePoint(to);
             Enqueue(RectangleSamples(Clamp(from), Clamp(to)));
+        }
+
+        internal void Match(int seed, VoxelColorPalette colors, VoxelSelectionMatch criterion, float tolerance, bool connected, bool visibleOnly)
+        {
+            if (IsSemantic || segmentCount > 0) throw new InvalidOperationException("Start a new transaction for semantic selection.");
+            semanticCandidates = VoxelSemanticSelection.Create(grid, camera, colors, seed, criterion, tolerance, connected, visibleOnly);
+            IsSemantic = true;
         }
 
         private void Enqueue(IEnumerable<Vector2> samples)
@@ -59,6 +71,17 @@ namespace LocalModels.VoxelBridge
         internal void Step(int maximumWork)
         {
             if (maximumWork < 1) throw new ArgumentOutOfRangeException(nameof(maximumWork));
+            if (semanticCandidates != null)
+            {
+                while (maximumWork-- > 0)
+                {
+                    if (!semanticCandidates.MoveNext()) { semanticCandidates.Dispose(); semanticCandidates = null; break; }
+                    EvaluatedCells++;
+                    int cell = semanticCandidates.Current;
+                    if (cell >= 0) Include(cell);
+                }
+                return;
+            }
             while (maximumWork-- > 0 && segments.Count > 0)
             {
                 var segment = segments.Peek();
@@ -70,13 +93,18 @@ namespace LocalModels.VoxelBridge
                 if (visited.Count > MaximumSamples) throw new InvalidOperationException("Selection area exceeds 1,048,576 GUI pixels. Select a smaller area.");
                 Ray ray = camera.ViewportPointToRay(new Vector3(point.x / size.x, 1 - point.y / size.y, 0));
                 if (!VoxelSurfaceEdit.Pick(grid, ray, out int cell)) continue;
-                if (mode == VoxelSelectionMode.Subtract) Result.Remove(cell);
-                else if (!Result.Contains(cell))
-                {
-                    if (Result.Count == VoxelSurfaceEdit.MaximumSelection)
-                        throw new InvalidOperationException("Selection limit reached. Use a smaller area or clear the selection.");
-                    Result.Add(cell);
-                }
+                Include(cell);
+            }
+        }
+
+        private void Include(int cell)
+        {
+            if (mode == VoxelSelectionMode.Subtract) Result.Remove(cell);
+            else if (!Result.Contains(cell))
+            {
+                if (Result.Count == VoxelSurfaceEdit.MaximumSelection)
+                    throw new InvalidOperationException("Selection limit reached. Narrow the scope or use a smaller area.");
+                Result.Add(cell);
             }
         }
 
@@ -120,6 +148,7 @@ namespace LocalModels.VoxelBridge
 
         public void Dispose()
         {
+            semanticCandidates?.Dispose(); semanticCandidates = null;
             while (segments.Count > 0) segments.Dequeue().Dispose();
         }
     }
