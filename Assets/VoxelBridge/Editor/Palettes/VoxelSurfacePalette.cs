@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -38,6 +39,36 @@ namespace LocalModels.VoxelBridge
 
         public bool TryValidate(out string error) =>
             VoxelPaletteValidation.TryValidate(this, out error);
+
+        // Explicit opt-in only: existing assignments and retired IDs keep their meaning.
+        // The caller owns Undo, asset persistence, and rebuilding the generated LUT.
+        internal bool TryAppendRecommendedEntries(out int addedCount, out string error)
+        {
+            addedCount = 0;
+            if (!TryValidate(out error)) return false;
+
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (VoxelSurfaceDefinition entry in entries)
+                names.Add(entry.DisplayName.Trim());
+
+            var additions = new List<VoxelSurfaceDefinition>();
+            foreach (VoxelSurfaceDefinition recommended in CreateRecommendedEntries())
+            {
+                if (ContainsId(recommended.Id) ||
+                    (retiredIds != null && retiredIds.Contains(recommended.Id)) ||
+                    !names.Add(recommended.DisplayName.Trim())) continue;
+                additions.Add(recommended);
+            }
+
+            if (additions.Count > 0)
+            {
+                entries.AddRange(additions);
+                generatedContentHash = null;
+            }
+            addedCount = additions.Count;
+            error = null;
+            return true;
+        }
 
         internal bool TryAddEntry(out int addedId, out string error)
         {
@@ -130,7 +161,36 @@ namespace LocalModels.VoxelBridge
             Surface(12, "LED", 0f, 0.68f, 0.60f, 1f),
             Surface(13, "Neon", 0f, 0.45f, 1f, 1f),
             Surface(14, "Rough Metal", 1f, 0.24f, 0f, 0.95f),
-            Surface(15, "Polished Metal", 1f, 0.92f, 0f, 1f)
+            Surface(15, "Polished Metal", 1f, 0.92f, 0f, 1f),
+            // Artistic starting points, not measured material identities. See SURFACE_CATALOG.md.
+            Surface(16, "Asphalt Dry", 0f, 0.04f, 0f, 1f),
+            Surface(17, "Brick", 0f, 0.12f, 0f, 1f),
+            Surface(18, "Plaster", 0f, 0.08f, 0f, 1f),
+            Surface(19, "Stone Rough", 0f, 0.18f, 0f, 1f),
+            Surface(20, "Stone Honed", 0f, 0.42f, 0f, 1f),
+            Surface(21, "Stone Polished", 0f, 0.88f, 0f, 1f),
+            Surface(22, "Concrete Sealed", 0f, 0.38f, 0f, 1f),
+            Surface(23, "Terracotta", 0f, 0.20f, 0f, 1f),
+            Surface(24, "Tile Satin", 0f, 0.55f, 0f, 1f),
+            Surface(25, "Wood Raw", 0f, 0.16f, 0f, 1f),
+            Surface(26, "Wood Oiled", 0f, 0.40f, 0f, 1f),
+            Surface(27, "Wood Varnished", 0f, 0.72f, 0f, 1f),
+            Surface(28, "Leather Matte", 0f, 0.30f, 0f, 1f),
+            Surface(29, "Leather Polished", 0f, 0.60f, 0f, 1f),
+            Surface(30, "Vinyl", 0f, 0.50f, 0f, 1f),
+            Surface(31, "Rubber Smooth", 0f, 0.32f, 0f, 1f),
+            Surface(32, "Plastic Satin", 0f, 0.48f, 0f, 1f),
+            Surface(33, "Paint Matte", 0f, 0.22f, 0f, 1f),
+            Surface(34, "Paint Satin", 0f, 0.52f, 0f, 1f),
+            Surface(35, "Paint Gloss", 0f, 0.86f, 0f, 1f),
+            Surface(36, "Metal Cast", 1f, 0.14f, 0f, 1f),
+            Surface(37, "Metal Satin", 1f, 0.54f, 0f, 1f),
+            Surface(38, "Metal Machined", 1f, 0.74f, 0f, 1f),
+            Surface(39, "Metal Mirror", 1f, 0.98f, 0f, 1f),
+            Surface(40, "Rust", 0f, 0.13f, 0f, 1f),
+            Surface(41, "Emissive Indicator", 0f, 0.55f, 0.35f, 1f),
+            Surface(42, "Emissive Panel", 0f, 0.25f, 0.75f, 1f),
+            Surface(43, "Emissive Tube", 0f, 0.80f, 1f, 1f)
         };
 
         private static VoxelSurfaceDefinition Surface(int id, string displayName,

@@ -227,7 +227,8 @@ namespace LocalModels.VoxelBridge
                     VoxelLodBatchSourceEstimate estimate = EstimateAtMultiplier(
                         reuseKey, sourceName, profile,
                         batchOptions, bounds, sourceOverhead,
-                        initialLodIndex, initialMultiplier, lodOptions.GenerateLod0Only, lodOptions.ConversionProfile != null);
+                        initialLodIndex, initialMultiplier, lodOptions.GenerateLod0Only, lodOptions.ConversionProfile != null,
+                        lodOptions.ConversionProfile?.assignSurfacesFromPbr == true);
                     lastValid = estimate;
                     if (!estimate.IsOverBudget) return estimate;
                 }
@@ -254,7 +255,7 @@ namespace LocalModels.VoxelBridge
             VoxelStyleProfile profile,
             VoxelLodBatchOptions batchOptions,
             Bounds bounds, long sourceOverhead, int initialLodIndex,
-            int initialMultiplier, bool lod0Only, bool productionMeshes)
+            int initialMultiplier, bool lod0Only, bool productionMeshes, bool pbrMapping)
         {
             var lodPlans = new List<VoxelGridPlan>(profile.LodCount);
             long peakBytes = 0;
@@ -262,6 +263,7 @@ namespace LocalModels.VoxelBridge
             int bytesPerCell = profile.FillInterior
                 ? DenseBytesPerCellWithFill
                 : DenseBytesPerCellWithoutFill;
+            if (pbrMapping) { bytesPerCell++; sourceOverhead += 4L * 1024 * 1024; } // Decision buffer and bounded PBR match cache.
             for (int lodIndex = 0; lodIndex < (lod0Only ? 1 : profile.LodCount); lodIndex++)
             {
                 int effectiveMultiplier = checked(
@@ -341,11 +343,12 @@ namespace LocalModels.VoxelBridge
             foreach (Material material in materials)
             {
                 if (colorMode == VoxelColorMode.MaterialAndTexture) AddTexture(material.mainTexture);
-                if (profile != null && profile.detectEmission && colorMode != VoxelColorMode.SingleColor)
+                if (profile != null && profile.detectEmission && (colorMode != VoxelColorMode.SingleColor || profile.assignSurfacesFromPbr))
                 {
                     if (material.HasProperty("_EmissiveColorMap")) AddTexture(material.GetTexture("_EmissiveColorMap"));
                     else if (material.HasProperty("_EmissionMap")) AddTexture(material.GetTexture("_EmissionMap"));
                 }
+                if (profile?.assignSurfacesFromPbr == true && material.HasProperty("_MaskMap")) AddTexture(material.GetTexture("_MaskMap"));
             }
             void AddTexture(Texture texture)
             {

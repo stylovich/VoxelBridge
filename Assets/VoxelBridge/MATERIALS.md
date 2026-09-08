@@ -56,7 +56,7 @@ El multiplicador de oclusión controla cuánto participa la oclusión calculada 
 
 `Render Class` clasifica la superficie según su comportamiento de render: opaca, follaje, transparente o especial. La clase no forma parte de la LUT PBR; en una fase posterior determinará el material o submesh compartido correspondiente.
 
-Los perfiles iniciales son valores de partida estilísticos. Deben calibrarse visualmente con el shader HDRP definitivo antes de producir materiales e impostores finales.
+El catálogo recomendado contiene 44 perfiles opacos, con IDs `0–43`. `Append Recommended` incorpora presets ausentes sin sobrescribir entradas ni reutilizar IDs retirados. `Preview Selected Surface` abre un visor temporal de esfera/cubo con los valores actuales, sin requerir una LUT reconstruida. Los valores son puntos de partida estilísticos: calibrarlos con el shader HDRP definitivo antes de producir materiales e impostores finales. Consultar [SURFACE_CATALOG.md](SURFACE_CATALOG.md).
 
 ## Flujo de edición
 
@@ -79,15 +79,18 @@ La prioridad de SurfaceID es:
 1. ID explícito del componente `Conversion Rule` habilitado más cercano.
 2. ID explícito de la regla del material.
 3. `Emissive Surface ID` cuando se reconoce emisión sobre el umbral.
-4. `Default Surface ID`.
+4. Candidato PBR suficientemente cercano y diferenciado, si `Assign Surfaces From Pbr` está habilitado.
+5. `Default Surface ID` para las muestras restantes.
+
+La preasignación opcional compara metallic y smoothness de HDRP/Lit Standard con los candidatos del `Surface Mapping Profile`; los casos ambiguos o no compatibles conservan el fallback. Cada LOD incluye un informe de la conversión. Consultar [SURFACE_MAPPING.md](SURFACE_MAPPING.md) para configuración, límites y revisión.
 
 El perfil rechaza IDs desconocidos y superficies no opacas destinadas a voxelización. `Keep Original` conserva vidrio u otras piezas con sus materiales originales fuera del volumen semántico. Los materiales temporales de autoría pueden asignarse a caras en Blender; en Unity se vinculan por referencia desde `Material Rules`. No existe resolución automática mediante prefijos `SURF_`.
 
-`Detect Emission` admite HDRP/Lit y Standard, con emisión uniforme o mapa en UV0. Respeta la activación del mapa en HDRP y la palabra clave de emisión en Standard. Las texturas se muestrean con su escala y desplazamiento, con una resolución de lectura máxima de 512 × 512. `Single Color` omite la inferencia de emisión. Los shaders no compatibles y las configuraciones HDRP con emisión dependiente del albedo o mapeo distinto de UV0 requieren asignación explícita y producen una advertencia.
+`Detect Emission` admite HDRP/Lit y Standard, con emisión uniforme o mapa en UV0. Respeta la activación del mapa en HDRP y la palabra clave de emisión en Standard. Las texturas se muestrean con su escala y desplazamiento, con una resolución de lectura máxima de 512 × 512. `Single Color` omite esta inferencia salvo cuando PBR está habilitado: en ese caso también separa las muestras emisivas antes de clasificar superficies. Los shaders no compatibles y las configuraciones HDRP con emisión dependiente del albedo o mapeo distinto de UV0 requieren asignación explícita y producen una advertencia.
 
 `Emission Threshold` se aplica a la emisión lineal antes de normalizar su color HDR. La intensidad original sirve para reconocer una muestra emisiva, no para crear superficies diferentes por intensidad. El color resultante pasa por el perfil de colores globales; la intensidad final procede de la superficie y del material de producción. Las muestras emisivas utilizan el mismo ColorID para base y emisión: un albedo azul con emisión roja independiente requiere otra representación, fuera de este flujo.
 
-La conversión no amplía automáticamente la paleta global. Una muestra fuera de `Maximum Automatic Distance` detiene la fuente con un error; las coincidencias sobre `Warning Distance` producen un aviso resumido por LOD. Cada `.vox` admite hasta 255 pares locales; superar ese límite requiere reducir el conjunto de colores o superficies del modelo.
+La conversión no amplía automáticamente la paleta global. Una muestra de color fuera de `Maximum Automatic Distance` detiene la fuente con un error; las coincidencias de color sobre `Warning Distance` producen un aviso resumido por LOD. Estos límites cromáticos son independientes del fallback por semejanza PBR. Cada `.vox` admite hasta 255 pares locales; superar ese límite requiere reducir el conjunto de colores o superficies del modelo.
 
 El sidecar conserva la tabla de slots y las referencias a las paletas y al perfil de color. Duplicar un LOD mantiene estos datos; reducirlo selecciona el par mayoritario mediante el desempate estable del reductor. Los descendientes reconstruidos desde el modelo original aplican otra vez las reglas de conversión, sin heredar ediciones posteriores realizadas en otro `.vox`.
 

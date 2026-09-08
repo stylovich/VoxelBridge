@@ -8,7 +8,7 @@ Voxel Bridge debe producir familias voxel físicamente coherentes y editables, i
 
 1. Mantener la conversión individual y por lotes, las paletas globales, el transporte semántico y los prefabs de producción como base del flujo.
 2. Validar artísticamente `Surface Painter`, sus herramientas de selección, cuentagotas, vistas de diagnóstico y aislamiento sobre modelos representativos. La edición visual de ColorID permanece como ampliación independiente.
-3. Verificar el intercambio con MagicaVoxel y la derivación de LODs después de editar superficies. Incorporar preasignación PBR revisable durante la conversión después de disponer de herramientas cómodas de corrección.
+3. Validar artísticamente la preasignación PBR opcional y sus perfiles de candidatos; verificar el intercambio con MagicaVoxel y la derivación de LODs después de editar superficies.
 4. Completar las validaciones funcionales pendientes de materiales especiales, iluminación y carga/descarga de subescenas sobre assets representativos.
 5. Retomar las mediciones de rendimiento por LOD, sombras, transparencias, culling y streaming cuando exista una distribución representativa del mapa.
 6. Adaptar el horneado de impostores a las paletas semánticas antes de evaluar su calidad y coste. Comparar agrupación manual, HLOD e impostores sin imponer una técnica a todos los assets.
@@ -22,12 +22,12 @@ La consolidación artística de las paletas puede continuar durante la validaci�
 | Bloque | Estado y alcance pendiente |
 |---|---|
 | Conversión y reglas | Disponible: flujo físico individual y por lotes, exclusión, `Keep Original` y detección de emisión con superficie de respaldo. |
-| Materiales semánticos | Disponible: paletas, perfiles cromáticos, bindings por slot, LUT y mesher opaco compartido. |
+| Materiales semánticos | Disponible: paletas, catálogo recomendado de 44 superficies, visor HDRP temporal, perfiles cromáticos, bindings por slot, LUT y mesher opaco compartido. |
 | Familias y combinación | Disponible: edición de fuentes, reconstrucción, derivación de LODs y unión exacta de conjuntos compactos. |
 | DOTS y subescenas | Integración y diagnóstico disponibles; validación funcional inicial de instancias, recursos compartidos y frustum. No equivale a certificar rendimiento, sombras, oclusión o streaming de producción. |
 | Autoría visual de superficies | Disponible: pincel, rectángulo, cuentagotas, selección semántica y regiones conectadas, Replace/Add/Subtract, vistas Lit/Base Color/SurfaceID/Emission, aislamiento, aplicación por voxel, Undo/Redo y guardado recuperable con reconstrucción explícita. Pendiente: edición visual de ColorID. |
 | Intercambio de RGB duplicados | Pendiente de certificar en MagicaVoxel; la escritura y lectura controladas por Voxel Bridge conservan los pares. |
-| Preasignación PBR | Planificada después del editor de corrección: candidatos por perfil, comparación de propiedades y revisión de coincidencias ambiguas. |
+| Preasignación PBR | Disponible y opcional para HDRP/Lit Standard: candidatos por perfil, muestreo de constantes o Mask Map UV0, distancia y separación mínimas, fallback e informe por LOD. Pendientes: validación artística y ampliación de shaders/configuraciones según casos reales. |
 | Impostores semánticos | Horneado bloqueado hasta adaptar la captura a las LUT y los canales de IDs. La ruta RGB existente no demuestra compatibilidad semántica. |
 | Rendimiento, HLOD y presupuesto | Fase diferida; requiere escenas, cámaras y plataformas objetivo representativas. |
 
@@ -101,18 +101,18 @@ Implementar por bloques verificables, manteniendo las selecciones separadas de l
 3. **Inspección — disponible:** `Pick` y `Use Surface` consultan ambos IDs y toman la superficie sin pintar. `Base Color` separa el color de la iluminación PBR; `SurfaceID` muestra colores de diagnóstico por ID y `Emission` resalta presencia emisiva en la LUT, sin bloom ni clasificación por luminosidad. El aislamiento utiliza un grupo fijo, con selección coherente con las caras visibles, y no recorta los archivos guardados. La validación artística debe revisar legibilidad y comodidad sobre assets representativos.
 4. **Edición visual de ColorID:** operación independiente que conserve SurfaceID, seleccione colores de la paleta global y respete el perfil cromático cuando corresponda. Ampliar el historial, la escritura y sus pruebas para este contrato; no eliminar simplemente la protección actual que impide modificar ColorID durante la pintura de superficies.
 
-La representación HDR con bloom y una comparación visual antes/después pueden evaluarse después de estas herramientas. La referencia normalizada actual no constituye una vista de iluminación final. La captura de grupos emisivos de origen y la preasignación PBR requieren trabajo propio durante la conversión; las herramientas de selección no recuperan atributos que no estén almacenados en el `.vox` y su sidecar.
+La representación HDR con bloom y una comparación visual antes/después pueden evaluarse después de estas herramientas. La referencia normalizada actual no constituye una vista de iluminación final. La captura de grupos emisivos de origen permanece pendiente; la preasignación PBR utiliza los materiales durante la conversión. Las herramientas de selección no recuperan atributos que no estén almacenados en el `.vox` y su sidecar.
 
 ## Preasignación de superficies por semejanza PBR
 
-Esta fase es posterior al editor básico de corrección. Su objetivo es proponer superficies existentes a partir de la apariencia del material fuente, no identificar su composición física ni crear definiciones PBR por voxel.
+La preasignación está disponible como opción del Conversion Profile. Propone superficies existentes a partir de la apariencia del material fuente, sin identificar su composición física ni crear definiciones PBR por voxel. [SURFACE_MAPPING.md](SURFACE_MAPPING.md) describe configuración, compatibilidad, prioridades e informes.
 
-- Un perfil de mapeo seleccionará los SurfaceIDs candidatos de la paleta global, sin duplicar definiciones ni LUT. Podrán existir perfiles para vehículos, arquitectura u otros conjuntos artísticos.
+- `VoxelSurfaceMappingProfile` selecciona SurfaceIDs candidatos opacos no emisivos de la paleta global, sin duplicar definiciones ni LUT. `SurfaceProfile_Vehicles` ofrece un conjunto inicial; los perfiles pueden adaptarse a otros contextos artísticos.
 - Muestrear metallic y smoothness durante la voxelización, con los valores del material cuando no haya mapa y con las UV, transformaciones de textura y remapeos propios del shader cuando sí lo haya. Comenzar con HDRP/Lit; configuraciones no compatibles conservan el fallback y producen un aviso resumido.
 - En el Mask Map de HDRP, R representa metallic, G oclusión, B máscara de detalle y A smoothness. No utilizar AO ni la máscara de detalle como evidencia de identidad física. No interpretar texturas de shaders diferentes mediante este esquema sin soporte explícito.
 - Comparar las muestras con los candidatos permitidos mediante distancia ponderada de metallic y smoothness. Exigir tanto proximidad suficiente como separación respecto a la segunda mejor alternativa. Los umbrales son criterios artísticos configurables, no probabilidades estadísticas de acierto.
 - Aplicar primero las reglas explícitas de componente y material. Separar muestras emisivas de no emisivas; conservar el fallback emisivo cuando no exista una elección explícita. No inferir LED o neón a partir de la intensidad.
-- Identificar las propuestas automáticas y los casos ambiguos en un informe de autoría revisable. La procedencia y los avisos no deben confundirse con la identidad SurfaceID ni imponer atributos adicionales en runtime. Definir su persistencia y granularidad al implementar esta fase.
+- El informe `.surface-report.json` conserva conteos de celdas superficiales finales por SurfaceID y decisión, separa el relleno interior y resume incompatibilidades. Es una instantánea de conversión; no persiste procedencia por voxel ni se actualiza con retoques posteriores. No impone atributos adicionales en runtime.
 - La asignación automática debe ser explícitamente habilitable, determinista y respetar el límite de 255 pares por `.vox`. No aproximar colores o fusionar superficies silenciosamente para superar ese límite.
 
 La clasificación debe ocurrir antes de exportar a `.vox`, mientras están disponibles los materiales fuente y sus mapas. Los `.vox` existentes no permiten reconstruir las muestras PBR originales; requerirán una conversión nueva o asignación manual. El volumen final mantiene `ColorID + SurfaceID`, mientras las propiedades físicas proceden de la paleta global.

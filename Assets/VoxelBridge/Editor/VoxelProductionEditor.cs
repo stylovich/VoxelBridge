@@ -34,10 +34,19 @@ namespace LocalModels.VoxelBridge
             }
             if (GUILayout.Button("Rebuild")) Rebuild(path);
             if (GUILayout.Button("Edit Surfaces")) Run(() => VoxelSurfacePainterWindow.OpenForSource(VoxelProductionLink.Load(path).SourcePath, path));
+            DrawSurfaceReport(AssetDatabase.GUIDToAssetPath(VoxelProductionLink.Load(path).sourceGuid));
             if (GUILayout.Button("Semantic Bindings")) Run(() =>
                 VoxelSemanticBindingWindow.OpenForSource(VoxelProductionLink.Load(path).SourcePath));
             if (GUILayout.Button("Create LOD Family...")) Run(() =>
                 VoxToUnityWindow.OpenProductionFamily(VoxelProductionLink.Load(path).SourcePath));
+        }
+
+        private static void DrawSurfaceReport(string sourcePath)
+        {
+            if (string.IsNullOrEmpty(sourcePath)) return;
+            var report = AssetDatabase.LoadAssetAtPath<TextAsset>(System.IO.Path.ChangeExtension(sourcePath, ".surface-report.json"));
+            if (report != null && GUILayout.Button(new GUIContent("Surface Assignment Report", "Informe de la conversión original. Los retoques posteriores del VOX no modifican este informe.")))
+                AssetDatabase.OpenAsset(report);
         }
 
         private static void DrawFamily(string manifestPath)
@@ -62,6 +71,7 @@ namespace LocalModels.VoxelBridge
                     }
                     if (GUILayout.Button("Semantic Bindings")) Run(() => VoxelSemanticBindingWindow.OpenForSource(source));
                     if (GUILayout.Button("Edit Surfaces")) Run(() => VoxelSurfacePainterWindow.OpenForSource(source, manifest.prefabAssetPath, entry.lodIndex));
+                    DrawSurfaceReport(source);
                     if (entry.lodIndex > 0)
                         using (new EditorGUILayout.HorizontalScope())
                         {

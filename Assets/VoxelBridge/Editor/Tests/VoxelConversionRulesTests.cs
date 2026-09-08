@@ -86,6 +86,98 @@ namespace LocalModels.VoxelBridge.Tests
         private VoxelizationResult Voxelize() => MeshVoxelizer.Voxelize(root, new VoxelizationSettings
         { VoxelSize = .125f, Padding = 1, FillInterior = true, ConversionProfile = conversion });
 
+        private VoxelSurfaceMappingProfile EnablePbr()
+        {
+            var mapping = ScriptableObject.CreateInstance<VoxelSurfaceMappingProfile>(); mapping.surfacePalette = conversion.surfacePalette;
+            AssetDatabase.CreateAsset(mapping, folder + "/SurfaceMapping.asset");
+            conversion.surfaceMapping = mapping; conversion.assignSurfacesFromPbr = true; conversion.detectEmission = true;
+            return mapping;
+        }
+
+        [Test]
+        public void PbrMapping_PreservesExplicitAndEmissionPriorityAndInvalidatesCheckpoint()
+        {
+            var solid = Cube(Vector3.zero, body); Cube(new Vector3(2, 0, 0), glass);
+            body.SetFloat("_Metallic", 1); body.SetFloat("_Smoothness", .66f);
+            glass.SetColor("_EmissiveColor", Color.white * 4);
+            Assert.That(Voxelize().SurfaceReport, Is.Null, "PBR mapping is opt-in.");
+            var mapping = EnablePbr();
+            var result = Voxelize();
+            Assert.That(result.Grid.SemanticIds.Where((id, i) => result.Grid.Occupied[i]).Select(VoxelSemanticEncoding.SurfaceId).Distinct(), Is.EquivalentTo(new[] { 6, 13 }));
+            Assert.That(result.SurfaceReport.entries.Any(e => e.decision == "Automatic" && e.surfaceId == 6), Is.True);
+            Assert.That(result.SurfaceReport.entries.Any(e => e.decision == "EmissiveFallback" && e.surfaceId == 13), Is.True);
+            Assert.That(result.SurfaceReport.entries.Sum(e => e.cells), Is.EqualTo(result.SurfaceReport.sampledCells));
+            Assert.That(result.SurfaceReport.sampledCells + result.SurfaceReport.filledInteriorCells, Is.EqualTo(result.OccupiedVoxelCount));
+            string fingerprint = VoxelConversionProfile.Fingerprint(conversion);
+            mapping.maximumDistance *= .5f;
+            Assert.That(VoxelConversionProfile.Fingerprint(conversion), Is.Not.EqualTo(fingerprint));
+            conversion.materialRules.Add(new VoxelMaterialConversionRule { material = body, surfaceId = 7 });
+            SetRule(solid, VoxelConversionAction.Voxelize, 0);
+            result = Voxelize();
+            Assert.That(result.Grid.SemanticIds.Where((id, i) => result.Grid.Occupied[i]).Select(VoxelSemanticEncoding.SurfaceId).Distinct(), Is.EquivalentTo(new[] { 0, 13 }));
+            Assert.That(result.SurfaceReport.entries.Any(e => e.decision == "Explicit" && e.surfaceId == 0), Is.True);
+        }
+
+        [Test]
+        public void PbrMapping_SingleColorWithoutMaterialPreservesChosenColor()
+        {
+            var cube = Cube(Vector3.zero, body);
+            EnablePbr();
+            conversion.colorMapping.ColorPalette.TryGetColor(54, out var color);
+            int expectedColor = VoxelSemanticEncoding.ColorId(new VoxelConversionColorMapper(conversion).Map(color, -1));
+            var result = MeshVoxelizer.Voxelize(cube.GetComponent<MeshFilter>().sharedMesh, new VoxelizationSettings
+            { VoxelSize = .125f, ColorMode = VoxelColorMode.SingleColor, SingleColor = color, ConversionProfile = conversion });
+            Assert.That(result.Grid.SemanticIds.Where((id, i) => result.Grid.Occupied[i]).Select(VoxelSemanticEncoding.ColorId).Distinct(), Is.EquivalentTo(new[] { expectedColor }));
+            Assert.That(result.SurfaceReport.entries.All(e => e.decision == "Unsupported"), Is.True);
+        }
+
+        [Test]
+        public void PbrMapping_SingleColorKeepsColorWhileRecognizingEmission()
+        {
+            Cube(Vector3.zero, body); EnablePbr();
+            body.SetColor("_EmissiveColor", Color.red * 4);
+            conversion.colorMapping.ColorPalette.TryGetColor(54, out var color);
+            int expectedColor = VoxelSemanticEncoding.ColorId(new VoxelConversionColorMapper(conversion).Map(color, -1));
+            var result = MeshVoxelizer.Voxelize(root, new VoxelizationSettings
+            { VoxelSize = .125f, ColorMode = VoxelColorMode.SingleColor, SingleColor = color, ConversionProfile = conversion });
+            Assert.That(result.Grid.SemanticIds.Where((id, i) => result.Grid.Occupied[i]).Distinct(), Is.EquivalentTo(new[] { VoxelSemanticEncoding.Pack(expectedColor, 13) }));
+            Assert.That(result.SurfaceReport.entries.All(e => e.decision == "EmissiveFallback"), Is.True);
+        }
+
+        [Test]
+        public void PbrMapping_MaskRegionsReachVoxelIdsAndMissingUvsUseFallback()
+        {
+            var cube = Cube(Vector3.zero, body);
+            var mapping = EnablePbr(); mapping.candidateSurfaceIds = new System.Collections.Generic.List<int> { 3, 6 };
+            var texture = new Texture2D(2, 1, TextureFormat.RGBA32, false, true) { wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Point };
+            texture.SetPixels(new[] { new Color(0, .5f, .3f, .28f), new Color(1, .2f, .8f, .66f) }); texture.Apply();
+            AssetDatabase.CreateAsset(texture, folder + "/Mask.asset");
+            body.SetTexture("_MaskMap", texture); body.EnableKeyword("_MASKMAP");
+            var result = Voxelize();
+            Assert.That(result.Grid.SemanticIds.Where((id, i) => result.Grid.Occupied[i]).Select(VoxelSemanticEncoding.SurfaceId).Distinct(), Is.EquivalentTo(new[] { 3, 6 }));
+            Assert.That(result.SurfaceReport.entries.All(e => e.decision == "Automatic"), Is.True);
+            var mesh = Object.Instantiate(cube.GetComponent<MeshFilter>().sharedMesh); mesh.uv = Array.Empty<Vector2>();
+            AssetDatabase.CreateAsset(mesh, folder + "/NoUv.asset"); cube.GetComponent<MeshFilter>().sharedMesh = mesh;
+            result = Voxelize();
+            Assert.That(result.SurfaceReport.entries.All(e => e.decision == "Unsupported" && e.surfaceId == conversion.defaultSurfaceId), Is.True);
+        }
+
+        [Test]
+        public void PbrMapping_UnsupportedAndAmbiguousSamplesKeepFallback()
+        {
+            Cube(Vector3.zero, body);
+            var mapping = EnablePbr(); mapping.candidateSurfaceIds = new System.Collections.Generic.List<int> { 3, 9 };
+            body.SetFloat("_Metallic", 0); body.SetFloat("_Smoothness", .26f);
+            var result = Voxelize();
+            Assert.That(result.SurfaceReport.entries.All(e => e.decision == "Ambiguous" && e.surfaceId == conversion.defaultSurfaceId), Is.True);
+            body.SetTexture("_MaskMap", Texture2D.whiteTexture); body.EnableKeyword("_MASKMAP"); body.SetFloat("_UVBase", 2);
+            result = Voxelize();
+            Assert.That(result.SurfaceReport.entries.All(e => e.decision == "Unsupported" && e.surfaceId == conversion.defaultSurfaceId), Is.True);
+            Assert.That(result.SurfaceReport.warnings.Length, Is.GreaterThan(0));
+            conversion.detectEmission = false;
+            Assert.Throws<InvalidDataException>(() => conversion.Validate());
+        }
+
         [Test]
         public void Rules_ValidateIdsDuplicatesAndMarkerPrecedence()
         {
@@ -218,6 +310,8 @@ namespace LocalModels.VoxelBridge.Tests
         [Test]
         public void Batch_ReusesPrefabSourcesAndKeepsProfileAliveAcrossCleanup()
         {
+            EnablePbr();
+            body.SetFloat("_Metallic", 1); body.SetFloat("_Smoothness", .66f);
             var template = Cube(Vector3.zero, body);
             var prefab = PrefabUtility.SaveAsPrefabAsset(template, folder + "/Template.prefab");
             Object.DestroyImmediate(template);
@@ -233,12 +327,16 @@ namespace LocalModels.VoxelBridge.Tests
             Assert.That(result.CreatedFamilyCount, Is.EqualTo(2));
             Assert.That(result.ReusedCount, Is.EqualTo(1));
             Assert.That(conversion != null && conversion.colorMapping != null && conversion.surfacePalette != null, Is.True);
+            Assert.That(conversion.surfaceMapping != null, Is.True);
             foreach (var item in result.Items)
             {
                 Assert.That(VoxelImporterIntegration.TryLoadMetadata(item.BuildResult.VoxAssetPaths.Single(), out var metadata, out string error), Is.True, error);
                 Assert.That(metadata.formatVersion, Is.EqualTo(4));
                 Assert.That(VoxelProductionFamily.Load(item.BuildResult.ManifestAssetPath).productionMeshes, Is.True);
                 Assert.That(VoxelProductionLink.HasLink(item.BuildResult.PrefabAssetPath), Is.True);
+                string reportPath = Path.ChangeExtension(item.BuildResult.VoxAssetPaths.Single(), ".surface-report.json");
+                var report = JsonUtility.FromJson<VoxelSurfaceAssignmentReport>(File.ReadAllText(reportPath));
+                Assert.That(report.entries.Any(e => e.decision == "Automatic" && e.surfaceId == 6), Is.True);
             }
             SetRule(first, VoxelConversionAction.Voxelize, 7);
             batch.ModifiedPrefabHandling = VoxelPrefabOverrideHandling.ConvertInstanceSeparately;

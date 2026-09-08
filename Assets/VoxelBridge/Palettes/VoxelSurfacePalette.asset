@@ -125,6 +125,202 @@ MonoBehaviour:
     smoothness: 0.92
     emission: 0
     occlusionMultiplier: 1
+  - id: 16
+    displayName: Asphalt Dry
+    renderClass: 0
+    metallic: 0
+    smoothness: 0.04
+    emission: 0
+    occlusionMultiplier: 1
+  - id: 17
+    displayName: Brick
+    renderClass: 0
+    metallic: 0
+    smoothness: 0.12
+    emission: 0
+    occlusionMultiplier: 1
+  - id: 18
+    displayName: Plaster
+    renderClass: 0
+    metallic: 0
+    smoothness: 0.08
+    emission: 0
+    occlusionMultiplier: 1
+  - id: 19
+    displayName: Stone Rough
+    renderClass: 0
+    metallic: 0
+    smoothness: 0.18
+    emission: 0
+    occlusionMultiplier: 1
+  - id: 20
+    displayName: Stone Honed
+    renderClass: 0
+    metallic: 0
+    smoothness: 0.42
+    emission: 0
+    occlusionMultiplier: 1
+  - id: 21
+    displayName: Stone Polished
+    renderClass: 0
+    metallic: 0
+    smoothness: 0.88
+    emission: 0
+    occlusionMultiplier: 1
+  - id: 22
+    displayName: Concrete Sealed
+    renderClass: 0
+    metallic: 0
+    smoothness: 0.38
+    emission: 0
+    occlusionMultiplier: 1
+  - id: 23
+    displayName: Terracotta
+    renderClass: 0
+    metallic: 0
+    smoothness: 0.2
+    emission: 0
+    occlusionMultiplier: 1
+  - id: 24
+    displayName: Tile Satin
+    renderClass: 0
+    metallic: 0
+    smoothness: 0.55
+    emission: 0
+    occlusionMultiplier: 1
+  - id: 25
+    displayName: Wood Raw
+    renderClass: 0
+    metallic: 0
+    smoothness: 0.16
+    emission: 0
+    occlusionMultiplier: 1
+  - id: 26
+    displayName: Wood Oiled
+    renderClass: 0
+    metallic: 0
+    smoothness: 0.4
+    emission: 0
+    occlusionMultiplier: 1
+  - id: 27
+    displayName: Wood Varnished
+    renderClass: 0
+    metallic: 0
+    smoothness: 0.72
+    emission: 0
+    occlusionMultiplier: 1
+  - id: 28
+    displayName: Leather Matte
+    renderClass: 0
+    metallic: 0
+    smoothness: 0.3
+    emission: 0
+    occlusionMultiplier: 1
+  - id: 29
+    displayName: Leather Polished
+    renderClass: 0
+    metallic: 0
+    smoothness: 0.6
+    emission: 0
+    occlusionMultiplier: 1
+  - id: 30
+    displayName: Vinyl
+    renderClass: 0
+    metallic: 0
+    smoothness: 0.5
+    emission: 0
+    occlusionMultiplier: 1
+  - id: 31
+    displayName: Rubber Smooth
+    renderClass: 0
+    metallic: 0
+    smoothness: 0.32
+    emission: 0
+    occlusionMultiplier: 1
+  - id: 32
+    displayName: Plastic Satin
+    renderClass: 0
+    metallic: 0
+    smoothness: 0.48
+    emission: 0
+    occlusionMultiplier: 1
+  - id: 33
+    displayName: Paint Matte
+    renderClass: 0
+    metallic: 0
+    smoothness: 0.22
+    emission: 0
+    occlusionMultiplier: 1
+  - id: 34
+    displayName: Paint Satin
+    renderClass: 0
+    metallic: 0
+    smoothness: 0.52
+    emission: 0
+    occlusionMultiplier: 1
+  - id: 35
+    displayName: Paint Gloss
+    renderClass: 0
+    metallic: 0
+    smoothness: 0.86
+    emission: 0
+    occlusionMultiplier: 1
+  - id: 36
+    displayName: Metal Cast
+    renderClass: 0
+    metallic: 1
+    smoothness: 0.14
+    emission: 0
+    occlusionMultiplier: 1
+  - id: 37
+    displayName: Metal Satin
+    renderClass: 0
+    metallic: 1
+    smoothness: 0.54
+    emission: 0
+    occlusionMultiplier: 1
+  - id: 38
+    displayName: Metal Machined
+    renderClass: 0
+    metallic: 1
+    smoothness: 0.74
+    emission: 0
+    occlusionMultiplier: 1
+  - id: 39
+    displayName: Metal Mirror
+    renderClass: 0
+    metallic: 1
+    smoothness: 0.98
+    emission: 0
+    occlusionMultiplier: 1
+  - id: 40
+    displayName: Rust
+    renderClass: 0
+    metallic: 0
+    smoothness: 0.13
+    emission: 0
+    occlusionMultiplier: 1
+  - id: 41
+    displayName: Emissive Indicator
+    renderClass: 0
+    metallic: 0
+    smoothness: 0.55
+    emission: 0.35
+    occlusionMultiplier: 1
+  - id: 42
+    displayName: Emissive Panel
+    renderClass: 0
+    metallic: 0
+    smoothness: 0.25
+    emission: 0.75
+    occlusionMultiplier: 1
+  - id: 43
+    displayName: Emissive Tube
+    renderClass: 0
+    metallic: 0
+    smoothness: 0.8
+    emission: 1
+    occlusionMultiplier: 1
   retiredIds: 
   generatedLut: {fileID: 2800000, guid: af14a4934a593ec4bb81002b0900af49, type: 2}
-  generatedContentHash: 841661336a36a088c608603419603e4d
+  generatedContentHash: df11a1b60b60700d4df493152de84c62

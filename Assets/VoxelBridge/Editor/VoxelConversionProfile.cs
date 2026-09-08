@@ -29,6 +29,9 @@ namespace LocalModels.VoxelBridge
         [Range(0, 255)] public int emissiveSurfaceId = 13;
         [Tooltip("Umbral de emisión lineal, antes de normalizar el color HDR. No representa la intensidad final del shader de producción.")]
         [Min(0.0001f)] public float emissionThreshold = 0.01f;
+        [Tooltip("Preasignación revisable por semejanza PBR. No modifica fuentes existentes ni reemplaza reglas explícitas.")]
+        public bool assignSurfacesFromPbr;
+        public VoxelSurfaceMappingProfile surfaceMapping;
 
         internal void Validate()
         {
@@ -38,6 +41,13 @@ namespace LocalModels.VoxelBridge
             if (surfacePalette == null || !surfacePalette.TryValidate(out error))
                 throw new InvalidDataException(surfacePalette == null ? "Assign a surface palette." : error);
             ValidateSurface(defaultSurfaceId);
+            if (assignSurfacesFromPbr)
+            {
+                if (surfaceMapping == null || surfaceMapping.surfacePalette != surfacePalette)
+                    throw new InvalidDataException("Assign a surface mapping profile that uses the conversion surface palette.");
+                surfaceMapping.GetCandidates();
+                if (!detectEmission) throw new InvalidDataException("Enable Detect Emission with PBR mapping so emissive samples keep their dedicated fallback.");
+            }
             if (detectEmission)
             {
                 ValidateSurface(emissiveSurfaceId);
@@ -72,6 +82,8 @@ namespace LocalModels.VoxelBridge
             if (!AssetDatabase.Contains(this) || !AssetDatabase.Contains(colorMapping) ||
                 !AssetDatabase.Contains(colorMapping.ColorPalette) || !AssetDatabase.Contains(surfacePalette))
                 throw new InvalidDataException("Save the conversion profile, color mapping profile and global palettes as assets before exporting.");
+            if (assignSurfacesFromPbr && !AssetDatabase.Contains(surfaceMapping))
+                throw new InvalidDataException("Save the surface mapping profile as an asset before exporting.");
         }
 
         internal static void ValidateAction(VoxelConversionAction action)
@@ -84,7 +96,8 @@ namespace LocalModels.VoxelBridge
             if (profile == null) return "conversion:none";
             return Hash128.Compute(EditorJsonUtility.ToJson(profile) + ":" +
                 Dependency(profile) + ":" + Dependency(profile.colorMapping) + ":" +
-                Dependency(profile.colorMapping?.ColorPalette) + ":" + Dependency(profile.surfacePalette)).ToString();
+                Dependency(profile.colorMapping?.ColorPalette) + ":" + Dependency(profile.surfacePalette) + ":" +
+                (profile.assignSurfacesFromPbr ? Dependency(profile.surfaceMapping) : "pbr:off")).ToString();
         }
 
         private static string Dependency(UnityEngine.Object value) => value == null ? "null" :

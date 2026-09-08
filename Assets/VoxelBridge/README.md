@@ -12,7 +12,7 @@ La generación y la edición son procesos de autoría. Los prefabs contienen mes
 
 El diagnóstico de entidades requiere Entities 1.4 y Entities Graphics 1.4, incluidos en la configuración DOTS del proyecto.
 
-Las paletas, el transporte de `ColorID + SurfaceID` y las familias semánticas de producción se describen en [MATERIALS.md](MATERIALS.md). [ROADMAP.md](ROADMAP.md) distingue los sistemas disponibles de las fases pendientes: autoría visual de superficies, validación de producción, impostores semánticos y evaluación de HLOD y presupuestos.
+Las paletas, el transporte de `ColorID + SurfaceID` y las familias semánticas de producción se describen en [MATERIALS.md](MATERIALS.md). [ROADMAP.md](ROADMAP.md) distingue los sistemas disponibles de las fases pendientes de autoría, validación de producción, impostores semánticos y evaluación de HLOD y presupuestos.
 
 ## Herramientas
 
@@ -98,7 +98,7 @@ El perfil recomendado `Default` (SurfaceID 0) utiliza Metallic 0, Smoothness 0, 
 
 El guardado y la reconstrucción son etapas separadas: un fallo de reconstrucción conserva la fuente guardada y la malla anterior. Reintentar la reconstrucción después de resolver el error; Undo no revierte los archivos guardados.
 
-La edición visual de ColorID y la preasignación por semejanza PBR son fases posteriores descritas en [ROADMAP.md](ROADMAP.md).
+La preasignación opcional de SurfaceID durante la conversión se describe en [SURFACE_MAPPING.md](SURFACE_MAPPING.md). La paleta recomendada contiene 44 superficies y permite inspeccionarlas con `Preview Selected Surface`; consultar [SURFACE_CATALOG.md](SURFACE_CATALOG.md) para el catálogo y sus límites. La pintura visual de ColorID permanece como fase independiente en [ROADMAP.md](ROADMAP.md).
 
 ## Combinación de modelos voxel
 

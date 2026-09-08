@@ -544,6 +544,13 @@ namespace LocalModels.VoxelBridge
                         AssetDatabase.GetAssetPath(source), familyId, manifestAssetPath, lodIndex, multiplier,
                         VoxelLodGenerationMode.SourceMesh, null, profile, conversionProfile: options.ConversionProfile,
                         retainedGeometryGuid: retainedGuid);
+                    if (result.SurfaceReport != null)
+                    {
+                        string reportPath = Path.ChangeExtension(voxPath, ".surface-report.json");
+                        WriteJsonAsset(reportPath, result.SurfaceReport);
+                        AssetDatabase.ImportAsset(reportPath, ImportAssetOptions.ForceSynchronousImport);
+                        Debug.Log($"Voxel Bridge PBR mapping for '{source.name}' LOD{lodIndex}: {result.SurfaceReport.Summary}. Review {reportPath}");
+                    }
                     if (options.ConversionProfile != null && result.MaximumColorDistance > options.ConversionProfile.colorMapping.WarningDistance)
                         Debug.LogWarning($"Voxel Bridge color mapping for '{source.name}' LOD{lodIndex} reached OKLab distance {result.MaximumColorDistance:0.00}. Review the mapped colors.");
                     entries.Add(new VoxelLodEntry

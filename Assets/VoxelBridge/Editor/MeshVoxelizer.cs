@@ -25,6 +25,7 @@ namespace LocalModels.VoxelBridge
         public Bounds SourceBounds;
         public int OccupiedVoxelCount;
         public float MaximumColorDistance;
+        public VoxelSurfaceAssignmentReport SurfaceReport;
     }
 
     internal static class MeshVoxelizer
@@ -56,6 +57,8 @@ namespace LocalModels.VoxelBridge
 
             settings.ConversionProfile?.Validate();
             var mapper = settings.ConversionProfile != null ? new VoxelConversionColorMapper(settings.ConversionProfile) : null;
+            var surfaceMatcher = settings.ConversionProfile != null && settings.ConversionProfile.assignSurfacesFromPbr
+                ? new VoxelSurfaceMatcher(settings.ConversionProfile.surfaceMapping) : null;
             List<MeshSource> sources = ExtractMeshes(source, settings.IncludeInactiveObjects, settings.ConversionProfile);
             if (sources.Count == 0)
                 throw new InvalidOperationException("No triangle submeshes remain to voxelize after applying conversion rules.");
@@ -90,6 +93,8 @@ namespace LocalModels.VoxelBridge
                 }
                 if (mapper != null) VoxelSemanticMesher.ValidateGrid(size, origin, voxelSize);
                 var grid = new VoxelGrid(size, origin, voxelSize, mapper != null);
+                var decisions = surfaceMatcher == null ? null : new VoxelSurfaceDecision[grid.Occupied.Length];
+                var pbrWarnings = new HashSet<string>();
                 var bestDistances = new float[grid.Occupied.Length];
                 for (int i = 0; i < bestDistances.Length; i++) bestDistances[i] = float.PositiveInfinity;
 
@@ -112,6 +117,7 @@ namespace LocalModels.VoxelBridge
                                 : null;
                             int surfaceId = meshSource.Rules[submesh].SurfaceId;
                             MaterialSampler sampler = samplers.Get(material, surfaceId < 0);
+                            VoxelPbrSampler pbr = surfaceMatcher != null && surfaceId < 0 ? samplers.GetPbr(material) : null;
                             for (int t = 0; t < triangles.Length; t += 3)
                             {
                                 if ((triangleDone & 127) == 0 && cancelProgress != null &&
@@ -127,7 +133,9 @@ namespace LocalModels.VoxelBridge
                                 Vector2 uv1 = i1 < meshSource.Uvs.Length ? meshSource.Uvs[i1] : Vector2.zero;
                                 Vector2 uv2 = i2 < meshSource.Uvs.Length ? meshSource.Uvs[i2] : Vector2.zero;
                                 RasterizeTriangle(grid, bestDistances, a, b, c, uv0, uv1, uv2,
-                                    sampler, settings.AlphaCutoff, mapper, surfaceId, settings.ConversionProfile);
+                                    sampler, settings.AlphaCutoff, mapper, surfaceId, settings.ConversionProfile,
+                                    pbr, meshSource.Uvs.Length == meshSource.Vertices.Length, surfaceMatcher, decisions, pbrWarnings,
+                                    material != null ? material.name : "Missing material");
                                 triangleDone++;
                             }
                         }
@@ -138,6 +146,9 @@ namespace LocalModels.VoxelBridge
                 int occupiedVoxelCount = grid.CountOccupied();
                 if (occupiedVoxelCount == 0)
                     throw new InvalidOperationException("No voxels were generated. Increase the resolution or check material transparency.");
+                var surfaceReport = decisions == null ? null : VoxelSurfaceAssignmentReport.Create(
+                    grid, decisions, settings.ConversionProfile, source.name, pbrWarnings);
+                decisions = null;
 
                 if (settings.FillInterior)
                 {
@@ -150,12 +161,14 @@ namespace LocalModels.VoxelBridge
                 }
 
                 cancelProgress?.Invoke(1f, "Voxelization complete");
+                if (surfaceReport != null) surfaceReport.filledInteriorCells = occupiedVoxelCount - surfaceReport.sampledCells;
                 return new VoxelizationResult
                 {
                     Grid = grid,
                     SourceBounds = bounds,
                     OccupiedVoxelCount = occupiedVoxelCount,
-                    MaximumColorDistance = mapper?.MaximumDistance ?? 0
+                    MaximumColorDistance = mapper?.MaximumDistance ?? 0,
+                    SurfaceReport = surfaceReport
                 };
             }
             finally
@@ -388,7 +401,8 @@ namespace LocalModels.VoxelBridge
             Vector3 a, Vector3 b, Vector3 c,
             Vector2 uv0, Vector2 uv1, Vector2 uv2,
             MaterialSampler sampler, float alphaCutoff, VoxelConversionColorMapper mapper,
-            int surfaceId, VoxelConversionProfile profile)
+            int surfaceId, VoxelConversionProfile profile, VoxelPbrSampler pbr, bool hasUv0,
+            VoxelSurfaceMatcher surfaceMatcher, VoxelSurfaceDecision[] decisions, HashSet<string> warnings, string materialName)
         {
             Vector3 min = Vector3.Min(a, Vector3.Min(b, c));
             Vector3 max = Vector3.Max(a, Vector3.Max(b, c));
@@ -418,9 +432,32 @@ namespace LocalModels.VoxelBridge
                 if (mapper != null)
                 {
                     int resolvedSurface = surfaceId;
+                    var decision = surfaceId >= 0 ? VoxelSurfaceDecision.Explicit : VoxelSurfaceDecision.Unassigned;
                     if (surfaceId < 0 && profile.detectEmission && sampler.TrySampleEmission(uv, profile.emissionThreshold, out Color32 emission))
-                    { color = emission; resolvedSurface = profile.emissiveSurfaceId; }
+                    {
+                        if (!sampler.IsConstantColor) color = emission;
+                        resolvedSurface = profile.emissiveSurfaceId; decision = VoxelSurfaceDecision.EmissiveFallback;
+                    }
+                    else if (surfaceId < 0 && surfaceMatcher != null)
+                    {
+                        if (pbr.TrySample(uv, hasUv0, out float metallic, out float smoothness, out string reason))
+                        {
+                            var match = surfaceMatcher.Match(metallic, smoothness);
+                            resolvedSurface = match.SurfaceId; decision = match.Decision;
+                        }
+                        else
+                        {
+                            decision = VoxelSurfaceDecision.Unsupported;
+                            string warning = materialName + ": " + reason;
+                            if (!warnings.Contains(warning))
+                            {
+                                if (warnings.Count < 64) warnings.Add(warning);
+                                else warnings.Add("Additional unsupported material warnings omitted (limit 64).");
+                            }
+                        }
+                    }
                     grid.SemanticIds[index] = mapper.Map(color, resolvedSurface);
+                    if (decisions != null) decisions[index] = decision;
                 }
                 else grid.Colors[index] = color;
                 bestDistances[index] = distance;
@@ -587,18 +624,22 @@ namespace LocalModels.VoxelBridge
             private readonly VoxelizationSettings settings;
             private readonly Dictionary<Material, MaterialSampler> cache = new Dictionary<Material, MaterialSampler>();
             private MaterialSampler nullSampler;
+            private readonly Dictionary<Material, VoxelPbrSampler> pbrCache = new();
+            private VoxelPbrSampler nullPbrSampler;
 
             public MaterialSamplerCache(VoxelizationSettings settings) { this.settings = settings; }
 
             public MaterialSampler Get(Material material, bool allowEmission)
             {
-                if (settings.ColorMode == VoxelColorMode.SingleColor)
+                if (settings.ColorMode == VoxelColorMode.SingleColor && settings.ConversionProfile?.assignSurfacesFromPbr != true)
                     return nullSampler ?? (nullSampler = new MaterialSampler(settings.SingleColor));
                 if (material == null)
-                    return nullSampler ?? (nullSampler = new MaterialSampler(new Color32(200, 200, 200, 255)));
+                    return nullSampler ?? (nullSampler = new MaterialSampler(settings.ColorMode == VoxelColorMode.SingleColor
+                        ? settings.SingleColor : new Color32(200, 200, 200, 255)));
                 if (!cache.TryGetValue(material, out MaterialSampler sampler))
                 {
-                    sampler = new MaterialSampler(material, settings.ColorMode == VoxelColorMode.MaterialAndTexture);
+                    sampler = settings.ColorMode == VoxelColorMode.SingleColor ? new MaterialSampler(settings.SingleColor) :
+                        new MaterialSampler(material, settings.ColorMode == VoxelColorMode.MaterialAndTexture);
                     cache.Add(material, sampler);
                 }
                 if (allowEmission && settings.ConversionProfile != null && settings.ConversionProfile.detectEmission)
@@ -608,16 +649,27 @@ namespace LocalModels.VoxelBridge
 
             public void Dispose()
             {
+                foreach (var sampler in pbrCache.Values) sampler.Dispose();
+                pbrCache.Clear(); nullPbrSampler?.Dispose(); nullPbrSampler = null;
                 foreach (MaterialSampler sampler in cache.Values) sampler.Dispose();
                 nullSampler?.Dispose();
                 cache.Clear();
                 nullSampler = null;
+            }
+
+            internal VoxelPbrSampler GetPbr(Material material)
+            {
+                if (material == null) return nullPbrSampler ??= new VoxelPbrSampler(null);
+                if (!pbrCache.TryGetValue(material, out var sampler))
+                { sampler = new VoxelPbrSampler(material); pbrCache.Add(material, sampler); }
+                return sampler;
             }
         }
 
         private sealed class MaterialSampler : IDisposable
         {
             private readonly Color baseColor;
+            internal bool IsConstantColor { get; }
             private Color32[] pixels;
             private readonly int width;
             private readonly int height;
@@ -627,7 +679,7 @@ namespace LocalModels.VoxelBridge
             private MaterialSampler emissionSampler;
             private bool emissionConfigured;
 
-            public MaterialSampler(Color32 color) { baseColor = color; }
+            public MaterialSampler(Color32 color) { baseColor = color; IsConstantColor = true; }
 
             public MaterialSampler(Material material, bool includeTexture, bool emission = false)
             {

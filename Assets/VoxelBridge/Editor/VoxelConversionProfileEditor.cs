@@ -23,6 +23,12 @@ namespace LocalModels.VoxelBridge
                 DrawSurface(EditorGUILayout.GetControlRect(), serializedObject.FindProperty("emissiveSurfaceId"), profile.surfacePalette, false);
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("emissionThreshold"));
             }
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("assignSurfacesFromPbr"));
+            if (serializedObject.FindProperty("assignSurfacesFromPbr").boolValue)
+            {
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("surfaceMapping"));
+                EditorGUILayout.HelpBox("HDRP/Lit Standard: metallic y smoothness, con Mask Map UV0. Reglas explícitas y emisión tienen prioridad. Las muestras ambiguas o no compatibles conservan Default Surface ID; revisar el informe junto a cada VOX convertido.", MessageType.None);
+            }
             serializedObject.ApplyModifiedProperties();
             try { profile.Validate(); }
             catch (Exception exception) { EditorGUILayout.HelpBox(exception.Message, MessageType.Error); }

@@ -156,10 +156,31 @@ namespace LocalModels.VoxelBridge
                 "Cada voxel referencia un SurfaceID. Los valores PBR se almacenan una sola vez en esta paleta; " +
                 "la clase de render determina el material compartido que utilizará el mesher.",
                 MessageType.Info);
+            var palette = (VoxelSurfacePalette)target;
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                if (GUILayout.Button(new GUIContent("Preview Selected Surface", "Vista temporal con los valores actuales; no requiere reconstruir la LUT.")))
+                {
+                    serializedObject.ApplyModifiedProperties();
+                    int index = entriesList.index;
+                    int id = index >= 0 && index < palette.Entries.Count && palette.Entries[index] != null
+                        ? palette.Entries[index].Id : 0;
+                    VoxelSurfacePreviewWindow.Open(palette, id);
+                }
+                if (GUILayout.Button(new GUIContent("Append Recommended", "Añadir presets ausentes sin sustituir entradas ni reutilizar IDs retirados.")))
+                {
+                    serializedObject.ApplyModifiedProperties();
+                    Undo.RecordObject(palette, "Append Recommended Voxel Surfaces");
+                    if (!palette.TryAppendRecommendedEntries(out int added, out string appendError))
+                        EditorUtility.DisplayDialog("Voxel Bridge", appendError, "Close");
+                    else if (added > 0)
+                        EditorUtility.SetDirty(palette);
+                    serializedObject.Update();
+                }
+            }
             entriesList.DoLayoutList();
             serializedObject.ApplyModifiedProperties();
 
-            var palette = (VoxelSurfacePalette)target;
             DrawRetiredIds(palette.RetiredIds);
             DrawValidationAndLut(palette);
 
