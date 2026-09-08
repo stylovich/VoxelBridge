@@ -59,6 +59,23 @@ El pincel interpola el recorrido del ratón; el rectángulo admite ambas direcci
 
 El muestreo de `Match` no cambia la superficie elegida como destino. `Use Surface` permite tomarla explícitamente desde la muestra. Después de revisar el perímetro y el contador, utilizar `Apply Surface` y `Save & Rebuild`. Cambiar el criterio o la tolerancia requiere otro clic; no modifica retroactivamente una selección confirmada. El historial local combina selecciones de pincel, rectángulo y Match, limpieza de selección y asignaciones de superficies en orden cronológico. Los botones Undo/Redo y sus atajos operan sobre el mismo historial. El cuentagotas, la cámara y las preferencias de vista no generan pasos.
 
+### Vistas de diagnóstico y aislamiento
+
+El selector `View` cambia únicamente la previsualización. No modifica los IDs, las LUT, los materiales compartidos, los archivos fuente ni el historial de edición.
+
+| Vista | Uso |
+|---|---|
+| `Lit` | Referencia PBR con iluminación y emisión normalizada de autoría. |
+| `Base Color` | Color de la paleta global sin iluminación, reflejos ni emisión. Desactivar `Tint` para comparaciones de color sin el tinte de selección. |
+| `SurfaceID` | Color de diagnóstico estable por ID, independiente de ColorID y de las propiedades PBR. SurfaceID 0 utiliza gris. La muestra bajo el puntero identifica el ID y nombre; su color coincide con esta vista. |
+| `Emission` | Resalta las superficies cuya emisión es distinta de cero en la LUT y atenúa el resto en gris. Aclara ligeramente los emisivos para distinguir incluso colores oscuros. No representa intensidad física, exposición ni bloom y no clasifica LED o neón por luminosidad. |
+
+`Isolate Selection` fija los voxels seleccionados como grupo visible y los encuadra. Permite limpiar o modificar la selección dentro de ese grupo sin cambiar el aislamiento. `Brush`, `Rectangle`, `Match` y `Pick` consultan el mismo volumen visible; incluso `All Matching` con `Visible Only` desactivado permanece dentro del grupo. Las caras descubiertas por el recorte son inspeccionables, sin eliminar geometría de la fuente.
+
+`Show All` restaura el volumen completo; `Frame All` encuadra el volumen visible. Si Undo/Redo recupera una selección fuera del grupo aislado, el aislamiento termina para mostrarla y evitar ediciones sobre selecciones ocultas. Guardar, cambiar o recargar la fuente, recargar scripts o entrar en Play Mode también termina el aislamiento. El modo `View` se conserva como preferencia de la ventana.
+
+El aislamiento utiliza una rejilla temporal con los mismos índices que la fuente y una malla adicional. Respeta los límites de selección y meshing; un grupo disperso que exceda el presupuesto de caras se rechaza sin sustituir la vista anterior. Guardar o reconstruir desde una vista aislada procesa la fuente completa, no un recorte del modelo.
+
 ### Guardado y límites
 
 `Save & Rebuild` requiere vincular un prefab de producción mediante `Edit Surfaces` o arrastrándolo a `Source` y eligiendo su LOD. Cargar un `.vox` directamente deja la sesión sin prefab vinculado y deshabilita ese botón; `Source Actions > Save Source Only` permite guardar la fuente sin reconstruir. La ausencia de cambios pendientes no bloquea la reconstrucción de una fuente vinculada.
@@ -73,15 +90,15 @@ Límites: 131.072 celdas por selección, 1.048.576 celdas modificadas pendientes
 
 Un gesto admite hasta 1.048.576 muestras de pantalla únicas, 4.194.304 muestras contando repeticiones y 4.096 segmentos de arrastre. Superar un límite cancela el gesto completo, conserva la selección anterior e indica que se requiere un área o trazo menor; no confirma silenciosamente una selección parcial.
 
-La ventana limita el multiplicador de emisión de su material temporal al rango `0..1`; sin material vinculado utiliza `1`. Conserva la emisión relativa de cada SurfaceID y la emisión apagada si el multiplicador original es cero. Esto permite identificar el color sin saturarlo por intensidades HDR altas; no simula exposición, bloom ni luminosidad física final. La ayuda `?` y el tooltip de las propiedades PBR describen esta limitación. Guardar o reconstruir no la transfiere al material de producción. Comprobar el resultado luminoso definitivo en la escena.
+La vista `Lit` limita el multiplicador de emisión de su material temporal al rango `0..1`; sin material vinculado utiliza `1`. Conserva la emisión relativa de cada SurfaceID y la emisión apagada si el multiplicador original es cero. Esto permite identificar el color sin saturarlo por intensidades HDR altas; no simula exposición, bloom ni luminosidad física final. El diagnóstico `Emission` muestra presencia emisiva en la LUT independientemente de ese multiplicador. Guardar o reconstruir no transfiere estos ajustes de vista al material de producción. Comprobar el resultado luminoso definitivo en la escena.
 
-La vista utiliza HDRP Lit, no colores planos. Una superficie con `Metallic = 0` conserva respuesta especular; `Smoothness` influye en su apariencia bajo las luces de referencia. Comparar el brillo con otro editor, como MagicaVoxel, requiere considerar sus diferencias de sombreado e iluminación. No deducir un SurfaceID metálico únicamente por el aspecto de esa comparación; consultar la superficie asignada y sus valores PBR.
+La vista `Lit` utiliza HDRP Lit, no colores planos. Una superficie con `Metallic = 0` conserva respuesta especular; `Smoothness` influye en su apariencia bajo las luces de referencia. Comparar el brillo con otro editor, como MagicaVoxel, requiere considerar sus diferencias de sombreado e iluminación. Utilizar `Base Color` para comprobar los colores sin esos efectos y `SurfaceID` para revisar las asignaciones.
 
 El perfil recomendado `Default` (SurfaceID 0) utiliza Metallic 0, Smoothness 0, Emission 0 y AO 1 como referencia mate. Cambiar una definición global requiere regenerar su LUT y recargar las sesiones de pintura; afecta a todos los voxels que usan ese ID, sin reconstruir su geometría. Guardar o resolver los borradores antes de modificar las paletas compartidas.
 
 El guardado y la reconstrucción son etapas separadas: un fallo de reconstrucción conserva la fuente guardada y la malla anterior. Reintentar la reconstrucción después de resolver el error; Undo no revierte los archivos guardados.
 
-Las vistas de diagnóstico y la preasignación por semejanza PBR son fases posteriores descritas en [ROADMAP.md](ROADMAP.md).
+La edición visual de ColorID y la preasignación por semejanza PBR son fases posteriores descritas en [ROADMAP.md](ROADMAP.md).
 
 ## Combinación de modelos voxel
 

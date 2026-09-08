@@ -10,6 +10,8 @@ using Object = UnityEngine.Object;
 
 namespace LocalModels.VoxelBridge
 {
+    internal enum VoxelPainterViewMode { Lit, BaseColor, SurfaceID, Emission }
+
     internal sealed class VoxelSurfacePainterWindow : EditorWindow
     {
         [SerializeField] private Object source;
@@ -25,6 +27,7 @@ namespace LocalModels.VoxelBridge
         [SerializeField] private int brushDiameter = 16;
         [SerializeField] private bool showHelp;
         [SerializeField] private bool showSelectionTint = true;
+        [SerializeField] private VoxelPainterViewMode viewMode;
         [SerializeField] private VoxelSelectionMatch matchCriterion;
         [SerializeField] private bool matchConnected = true;
         [SerializeField] private bool matchVisibleOnly = true;
@@ -39,6 +42,12 @@ namespace LocalModels.VoxelBridge
         private PreviewRenderUtility preview;
         private Mesh mesh;
         private Material material;
+        private Material diagnosticMaterial;
+        private VoxelPainterIsolation isolation;
+        private VoxelGrid ViewGrid => isolation?.Grid ?? edit.Grid;
+        private Mesh ViewMesh => isolation?.Mesh ?? mesh;
+        internal const string DiagnosticShaderPath = "Assets/VoxelBridge/Editor/Shaders/VoxelPainterDiagnostic.shader";
+        private static readonly int ViewModeProperty = Shader.PropertyToID("_ViewMode");
         private string status;
         private MessageType statusType = MessageType.Info;
         private Vector3 center;
@@ -223,6 +232,7 @@ namespace LocalModels.VoxelBridge
             var generated = VoxelSemanticMesher.Build(edit.Grid, edit.HideInternalCavities, VoxelProductionEditor.Progress);
             try
             {
+                isolation?.Refresh(VoxelProductionEditor.Progress);
                 VoxelProductionExporter.ValidatePalettes(edit.Colors, edit.Surfaces);
                 if (material == null)
                 {
@@ -262,6 +272,9 @@ namespace LocalModels.VoxelBridge
 
         private void ReleasePreview()
         {
+            ClearIsolation();
+            if (diagnosticMaterial != null) DestroyImmediate(diagnosticMaterial);
+            diagnosticMaterial = null;
             VoxelSelectionOverlay.Destroy(selectionMeshes); VoxelSelectionOverlay.Destroy(hoverMeshes);
             if (selectionMaterial != null) DestroyImmediate(selectionMaterial);
             if (hoverMaterial != null) DestroyImmediate(hoverMaterial);
@@ -318,6 +331,7 @@ namespace LocalModels.VoxelBridge
             if (edit == null) return false;
             if (!edit.Surfaces.TryValidate(out string surfaceError))
             { EditorGUILayout.HelpBox(surfaceError, MessageType.Error); return false; }
+            DrawViewControls();
             using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
             {
                 selectionTool = (VoxelSelectionTool)GUILayout.Toolbar((int)selectionTool, new[] { "Brush", "Rectangle", "Match", "Pick" }, EditorStyles.toolbarButton, GUILayout.Width(240));
@@ -375,7 +389,11 @@ namespace LocalModels.VoxelBridge
                 using (new EditorGUI.DisabledScope(selected.Count == 0))
                     if (GlyphButton("×", "Clear Selection\nQuita la selección sin modificar las asignaciones. Admite Undo.")) Run(() => Change(() => edit.Select(Array.Empty<int>())));
                 GUILayout.Space(8);
-                if (GUILayout.Button("Frame All", EditorStyles.toolbarButton, GUILayout.Width(75))) { distance = radius * 4; panOffset = Vector3.zero; Repaint(); }
+                if (GUILayout.Button("Frame All", EditorStyles.toolbarButton, GUILayout.Width(75))) Run(() =>
+                {
+                    if (isolation != null) FrameCells(isolation.Cells);
+                    else { distance = radius * 4; panOffset = Vector3.zero; Repaint(); }
+                });
                 using (new EditorGUI.DisabledScope(selected.Count == 0))
                     if (GUILayout.Button("Frame Selection", EditorStyles.toolbarButton, GUILayout.Width(108))) Run(FrameSelection);
                 bool tint = GUILayout.Toggle(showSelectionTint, new GUIContent("Tint", "Tinte suave sobre la selección. Desactivar para mostrar sólo el perímetro; no modifica materiales ni asignaciones."), EditorStyles.toolbarButton, GUILayout.Width(42));
@@ -387,6 +405,88 @@ namespace LocalModels.VoxelBridge
                         : "Guarda la fuente y reconstruye este LOD del prefab. No regenera los LODs descendientes."), EditorStyles.toolbarButton, GUILayout.Width(125))) Run(SaveAndRebuild);
             }
             return true;
+        }
+
+        private void DrawViewControls()
+        {
+            using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
+            {
+                GUILayout.Label(new GUIContent("View", "Diagnóstico temporal: no modifica colores, superficies ni materiales compartidos."), GUILayout.Width(32));
+                var mode = (VoxelPainterViewMode)EditorGUILayout.Popup((int)viewMode, new[] { "Lit", "Base Color", "SurfaceID", "Emission" }, GUILayout.Width(115));
+                if (mode != viewMode) Run(() => SetViewMode(mode));
+                using (new EditorGUI.DisabledScope(isolation == null && selected.Count == 0))
+                    if (GUILayout.Button(new GUIContent(isolation == null ? "Isolate Selection" : "Show All",
+                        "Fija el grupo visible hasta Show All. Las herramientas sólo operan dentro del grupo; limpiar la selección no lo oculta. Undo sale del aislamiento si recupera una selección externa."), EditorStyles.toolbarButton, GUILayout.Width(120)))
+                        Run(() => SetIsolation(isolation == null));
+                if (isolation != null) GUILayout.Label($"Isolated {isolation.Cells.Count:N0}", EditorStyles.miniLabel, GUILayout.Width(105));
+                GUILayout.FlexibleSpace();
+                Rect swatch = GUILayoutUtility.GetRect(14, 14, GUILayout.Width(14));
+                string label = "Hover a voxel", tooltip = "SurfaceID y emisión del voxel bajo el puntero.";
+                if (hover >= 0 && ViewGrid.Occupied[hover])
+                {
+                    int id = VoxelSemanticEncoding.SurfaceId(edit.Grid.SemanticIds[hover]);
+                    if (edit.Surfaces.TryGetSurface(id, out var surface))
+                    {
+                        EditorGUI.DrawRect(swatch, DiagnosticSurfaceColor(id));
+                        label = $"{id:000} · {surface.DisplayName}";
+                        tooltip = $"SurfaceID {id:000} · Emission {surface.Emission:0.###}\nColor de diagnóstico, no ColorID. Emission resalta presencia emisiva en la LUT, sin clasificar LED o neón por brillo.";
+                    }
+                }
+                GUILayout.Label(new GUIContent(label, tooltip), EditorStyles.miniLabel, GUILayout.Width(175));
+            }
+        }
+
+        internal static Color DiagnosticSurfaceColor(int id)
+        {
+            if (id < 0 || id > 255) throw new ArgumentOutOfRangeException(nameof(id));
+            return id == 0 ? new Color(.5f, .5f, .5f) : Color.HSVToRGB(Mathf.Repeat(id * .61803398875f, 1), .68f, .9f);
+        }
+
+        private void SetViewMode(VoxelPainterViewMode mode)
+        {
+            if (!Enum.IsDefined(typeof(VoxelPainterViewMode), mode)) throw new ArgumentOutOfRangeException(nameof(mode));
+            if (selectionJob != null || EditorApplication.isPlayingOrWillChangePlaymode) return;
+            if (mode != VoxelPainterViewMode.Lit) GetDiagnosticMaterial();
+            viewMode = mode;
+            Repaint();
+        }
+
+        private Material GetDiagnosticMaterial()
+        {
+            if (diagnosticMaterial == null)
+            {
+                var shader = AssetDatabase.LoadAssetAtPath<Shader>(DiagnosticShaderPath);
+                if (shader == null || !shader.isSupported || ShaderUtil.ShaderHasError(shader)) throw new InvalidOperationException("Painter diagnostic shader is unavailable.");
+                diagnosticMaterial = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
+                diagnosticMaterial.SetTexture("_PaletteColor", edit.Colors.GeneratedLut);
+                diagnosticMaterial.SetTexture("_PaletteSurface", edit.Surfaces.GeneratedLut);
+            }
+            return diagnosticMaterial;
+        }
+
+        private Material ViewMaterial()
+        {
+            if (viewMode == VoxelPainterViewMode.Lit) return material;
+            Material view = GetDiagnosticMaterial();
+            view.SetFloat(ViewModeProperty, (int)viewMode);
+            return view;
+        }
+
+        private void SetIsolation(bool enabled)
+        {
+            if (edit == null || selectionJob != null || EditorApplication.isPlayingOrWillChangePlaymode) return;
+            if (!enabled) { ClearIsolation(); Repaint(); return; }
+            var next = new VoxelPainterIsolation(edit.Grid, selected, VoxelProductionEditor.Progress);
+            ClearIsolation(); isolation = next;
+            sampledCell = -1;
+            FrameCells(isolation.Cells);
+        }
+
+        private void ClearIsolation()
+        {
+            isolation?.Dispose(); isolation = null;
+            hover = -1; overlayCount = overlayHover = -1;
+            VoxelSelectionOverlay.Destroy(selectionMeshes); VoxelSelectionOverlay.Destroy(hoverMeshes);
         }
 
         private bool GlyphButton(string symbol, string tooltip)
@@ -495,7 +595,7 @@ namespace LocalModels.VoxelBridge
                 try
                 {
                     UpdateSelectionOverlay();
-                    preview.DrawMesh(mesh, Matrix4x4.identity, material, 0);
+                    preview.DrawMesh(ViewMesh, Matrix4x4.identity, ViewMaterial(), 0);
                     foreach (var faces in selectionMeshes) preview.DrawMesh(faces, Matrix4x4.identity, selectionMaterial, 0);
                     foreach (var faces in hoverMeshes) preview.DrawMesh(faces, Matrix4x4.identity, hoverMaterial, 0);
                     preview.Render(true, false);
@@ -560,14 +660,14 @@ namespace LocalModels.VoxelBridge
                     Run(() =>
                     {
                         Vector2 point = e.mousePosition - rect.position;
-                        if (!VoxelSurfaceEdit.Pick(edit.Grid, camera.ViewportPointToRay(new Vector3(point.x / rect.width, 1 - point.y / rect.height, 0)), out int cell)) return;
+                        if (!VoxelSurfaceEdit.Pick(ViewGrid, camera.ViewportPointToRay(new Vector3(point.x / rect.width, 1 - point.y / rect.height, 0)), out int cell)) return;
                         SampleCell(cell, selectionTool == VoxelSelectionTool.Pick);
                         if (selectionTool == VoxelSelectionTool.Pick) return;
-                        if (matchVisibleOnly && !VoxelSemanticSelection.IsVisible(edit.Grid, camera, cell))
+                        if (matchVisibleOnly && !VoxelSemanticSelection.IsVisible(ViewGrid, camera, cell))
                             throw new InvalidOperationException("No visible face center on the seed voxel. Reframe the view or disable Visible Only explicitly.");
                         RunSelection(() =>
                         {
-                            selectionJob = new VoxelSurfaceSelection(edit.Grid, camera, rect.size, e.shift ? VoxelSelectionMode.Subtract : selectionMode, selected);
+                            selectionJob = new VoxelSurfaceSelection(ViewGrid, camera, rect.size, e.shift ? VoxelSelectionMode.Subtract : selectionMode, selected);
                             selectionJob.Match(cell, edit.Colors, matchCriterion, matchTolerance, matchConnected, matchVisibleOnly);
                             selectionViewport = rect; selecting = false;
                             EditorApplication.update += ProcessSelection;
@@ -577,7 +677,7 @@ namespace LocalModels.VoxelBridge
                 }
                 RunSelection(() =>
                 {
-                    selectionJob = new VoxelSurfaceSelection(edit.Grid, camera, rect.size,
+                    selectionJob = new VoxelSurfaceSelection(ViewGrid, camera, rect.size,
                         e.shift ? VoxelSelectionMode.Subtract : selectionMode, selected);
                     selectionViewport = rect;
                     gestureStart = gestureEnd = e.mousePosition - rect.position;
@@ -590,7 +690,7 @@ namespace LocalModels.VoxelBridge
             if ((e.type == EventType.MouseMove || e.type == EventType.MouseDown || e.type == EventType.MouseDrag) && !e.alt && e.button == 0)
             {
                 Vector2 uv = new((e.mousePosition.x - rect.x) / rect.width, 1 - (e.mousePosition.y - rect.y) / rect.height);
-                hover = VoxelSurfaceEdit.Pick(edit.Grid, camera.ViewportPointToRay(uv), out int index) ? index : -1;
+                hover = VoxelSurfaceEdit.Pick(ViewGrid, camera.ViewportPointToRay(uv), out int index) ? index : -1;
                 Repaint();
             }
         }
@@ -662,9 +762,11 @@ namespace LocalModels.VoxelBridge
             frameDistance = Mathf.Max(grid.VoxelSize * 2, ((Vector3)(max - min) + Vector3.one).magnitude * grid.VoxelSize * 2);
         }
 
-        private void FrameSelection()
+        private void FrameSelection() => FrameCells(selected);
+
+        private void FrameCells(IReadOnlyCollection<int> cells)
         {
-            SelectionFrame(edit.Grid, selected, out var pivot, out distance);
+            SelectionFrame(edit.Grid, cells, out var pivot, out distance);
             panOffset = pivot - center;
             Repaint();
         }
@@ -698,7 +800,7 @@ namespace LocalModels.VoxelBridge
             var current = selectionJob?.Result ?? selected;
             if (!ReferenceEquals(overlaySource, current) || overlayCount != current.Count)
             {
-                var generated = VoxelSelectionOverlay.Build(edit.Grid, current, showSelectionTint);
+                var generated = VoxelSelectionOverlay.Build(ViewGrid, current, showSelectionTint);
                 VoxelSelectionOverlay.Destroy(selectionMeshes); selectionMeshes.AddRange(generated);
                 selectionMaterial.SetFloat("_FillOpacity", showSelectionTint ? .04f : 0);
                 overlaySource = current; overlayCount = current.Count;
@@ -706,7 +808,7 @@ namespace LocalModels.VoxelBridge
             if (overlayHover != hover)
             {
                 VoxelSelectionOverlay.Destroy(hoverMeshes);
-                if (hover >= 0) hoverMeshes.AddRange(VoxelSelectionOverlay.Build(edit.Grid, new[] { hover }));
+                if (hover >= 0) hoverMeshes.AddRange(VoxelSelectionOverlay.Build(ViewGrid, new[] { hover }));
                 overlayHover = hover;
             }
         }
@@ -716,6 +818,12 @@ namespace LocalModels.VoxelBridge
             int revision = edit.SurfaceRevision;
             operation();
             overlayCount = -1;
+            if (isolation != null && selected.Any(cell => !isolation.Grid.Occupied[cell]))
+            {
+                ClearIsolation();
+                status = "Aislamiento desactivado: el historial recuperó una selección fuera del grupo visible.";
+                statusType = MessageType.Info;
+            }
             if (revision != edit.SurfaceRevision)
             {
                 edit.GetChanges(out draftCells, out draftSurfaces);

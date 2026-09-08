@@ -465,6 +465,145 @@ namespace LocalModels.VoxelBridge.Tests
         }
 
         [Test]
+        public void Isolation_WindowKeepsSelectionHistoryAndSavesTheWholeSource()
+        {
+            Create(8);
+            Assert.That(VoxelPaletteLutGenerator.TryRebuild(colors, out _, out string error), Is.True, error);
+            Assert.That(VoxelPaletteLutGenerator.TryRebuild(surfaces, out _, out error), Is.True, error);
+            AssetDatabase.ImportAsset(sidecarPath, ImportAssetOptions.ForceSynchronousImport);
+            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport);
+            var window = ScriptableObject.CreateInstance<VoxelSurfacePainterWindow>();
+            try
+            {
+                InvokeWindow(window, "SetSource", path, null, 0);
+                var edit = (VoxelSurfaceEdit)WindowField(window, "edit");
+                var selected = (HashSet<int>)WindowField(window, "selected");
+                InvokeWindow(window, "Change", (Action)(() => edit.Select(new[] { 0, 1, 2 })));
+                InvokeWindow(window, "Change", (Action)(() => edit.Select(new[] { 0, 1 })));
+                InvokeWindow(window, "SetIsolation", true);
+                var isolated = (VoxelPainterIsolation)WindowField(window, "isolation");
+                Assert.That(isolated.Grid.CountOccupied(), Is.EqualTo(2));
+                Assert.That(window.hasUnsavedChanges, Is.False);
+                Assert.That(edit.HistorySteps, Is.EqualTo(2), "Isolation is a view, not an edit.");
+                InvokeWindow(window, "Change", (Action)(() => edit.Select(Array.Empty<int>())));
+                Assert.That(WindowField(window, "isolation"), Is.SameAs(isolated));
+                Assert.That(isolated.Grid.CountOccupied(), Is.EqualTo(2));
+                InvokeWindow(window, "Change", (Action)(() => edit.Select(new[] { 1 })));
+                InvokeWindow(window, "Change", (Action)(() => edit.Apply(selected, 13)));
+                Assert.That(isolated.Mesh.uv4.Any(uv => uv.x == 13), Is.True);
+                InvokeWindow(window, "Change", (Action)edit.Undo);
+                Assert.That(edit.PendingCells, Is.Zero);
+                Assert.That(isolated.Mesh.uv4.All(uv => uv.x == 0), Is.True);
+                InvokeWindow(window, "Change", (Action)edit.Undo);
+                InvokeWindow(window, "Change", (Action)edit.Undo);
+                Assert.That(WindowField(window, "isolation"), Is.SameAs(isolated));
+                Mesh isolatedMesh = isolated.Mesh;
+                InvokeWindow(window, "Change", (Action)edit.Undo);
+                CollectionAssert.AreEquivalent(new[] { 0, 1, 2 }, selected);
+                Assert.That(WindowField(window, "isolation"), Is.Null, "Undo outside the visible scope must show the restored selection.");
+                Assert.That(isolatedMesh == null, Is.True);
+                InvokeWindow(window, "Change", (Action)(() => edit.Select(new[] { 0, 1 })));
+                InvokeWindow(window, "SetIsolation", true);
+                InvokeWindow(window, "SetViewMode", VoxelPainterViewMode.SurfaceID);
+                InvokeWindow(window, "Change", (Action)(() => edit.Apply(selected, 7)));
+                InvokeWindow(window, "SaveSource");
+                var saved = new VoxelSurfaceEdit(path);
+                Assert.That(saved.Grid.CountOccupied(), Is.EqualTo(8), "Saving an isolated view must not save a cropped source.");
+                for (int i = 0; i < 8; i++) Assert.That(saved.Grid.SemanticIds[i], Is.EqualTo(VoxelSemanticEncoding.Pack(1, i < 2 ? 7 : 0)));
+                Assert.That(WindowField(window, "isolation"), Is.Null);
+                Assert.That(WindowField(window, "viewMode"), Is.EqualTo(VoxelPainterViewMode.SurfaceID));
+                Assert.That(window.hasUnsavedChanges, Is.False);
+            }
+            finally { window.DiscardChanges(); UnityEngine.Object.DestroyImmediate(window); }
+        }
+
+        [TestCase(1)]
+        [TestCase(2)]
+        [TestCase(3)]
+        public void DiagnosticViews_RenderPaletteIdsAndEmissionWithoutChangingAssets(int mode)
+        {
+            Color32 baseColor = new(180, 60, 35, 255);
+            colors.MutableEntries[1] = new VoxelColorDefinition(1, "Diagnostic Red", baseColor);
+            Create(8);
+            Assert.That(VoxelPaletteLutGenerator.TryRebuild(colors, out _, out string error), Is.True, error);
+            Assert.That(VoxelPaletteLutGenerator.TryRebuild(surfaces, out _, out error), Is.True, error);
+            AssetDatabase.ImportAsset(sidecarPath, ImportAssetOptions.ForceSynchronousImport);
+            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport);
+            byte[] sourceBefore = File.ReadAllBytes(path), sidecarBefore = File.ReadAllBytes(sidecarPath);
+            string colorsBefore = EditorJsonUtility.ToJson(colors), surfacesBefore = EditorJsonUtility.ToJson(surfaces);
+            var window = ScriptableObject.CreateInstance<VoxelSurfacePainterWindow>();
+            Texture2D capture = null;
+            try
+            {
+                InvokeWindow(window, "SetSource", path, null, 0);
+                var edit = (VoxelSurfaceEdit)WindowField(window, "edit");
+                InvokeWindow(window, "Change", (Action)(() => edit.Apply(new[] { 4, 5, 6, 7 }, 13)));
+                int history = edit.HistorySteps;
+                Material lit = (Material)WindowField(window, "material");
+                string litBefore = EditorJsonUtility.ToJson(lit);
+                Mesh mesh = (Mesh)WindowField(window, "mesh");
+                InvokeWindow(window, "SetViewMode", (VoxelPainterViewMode)mode);
+                var diagnostic = (Material)InvokeWindow(window, "ViewMaterial");
+                Assert.That(diagnostic, Is.Not.SameAs(lit));
+                Assert.That(ShaderUtil.ShaderHasError(diagnostic.shader), Is.False);
+                var preview = (PreviewRenderUtility)WindowField(window, "preview");
+                var camera = preview.camera;
+                camera.orthographic = true; camera.orthographicSize = .08f; camera.aspect = 2;
+                camera.nearClipPlane = .001f; camera.farClipPlane = 10;
+                camera.transform.SetPositionAndRotation(edit.Grid.Origin + new Vector3(.128f, .016f, -1), Quaternion.identity);
+                preview.BeginStaticPreview(new Rect(0, 0, 512, 256));
+                preview.DrawMesh(mesh, Matrix4x4.identity, diagnostic, 0);
+                preview.Render(true, false); capture = preview.EndStaticPreview();
+                Color left = Pixel(1), right = Pixel(6);
+                if (mode == 1)
+                {
+                    Close(left, baseColor); Close(right, baseColor);
+                }
+                else if (mode == 2)
+                {
+                    Close(left, VoxelSurfacePainterWindow.DiagnosticSurfaceColor(0));
+                    Close(right, VoxelSurfacePainterWindow.DiagnosticSurfaceColor(13));
+                }
+                else
+                {
+                    Assert.That(right.r, Is.GreaterThan(left.r + .3f));
+                    Assert.That(right.r, Is.GreaterThan(right.g), "Emissive regions preserve their base color hue.");
+                    Assert.That(left.maxColorComponent, Is.LessThan(.15f));
+                }
+                File.WriteAllBytes($"Logs/painter-diagnostic-{mode}.png", capture.EncodeToPNG());
+                InvokeWindow(window, "SetViewMode", VoxelPainterViewMode.Lit);
+                Assert.That(InvokeWindow(window, "ViewMaterial"), Is.SameAs(lit));
+                Assert.That(WindowField(window, "mesh"), Is.SameAs(mesh), "Changing views must not remesh the model.");
+                Assert.That(edit.HistorySteps, Is.EqualTo(history));
+                Assert.That(edit.PendingCells, Is.EqualTo(4));
+                Assert.That(EditorJsonUtility.ToJson(lit), Is.EqualTo(litBefore));
+                Assert.That(EditorJsonUtility.ToJson(colors), Is.EqualTo(colorsBefore));
+                Assert.That(EditorJsonUtility.ToJson(surfaces), Is.EqualTo(surfacesBefore));
+                CollectionAssert.AreEqual(sourceBefore, File.ReadAllBytes(path));
+                CollectionAssert.AreEqual(sidecarBefore, File.ReadAllBytes(sidecarPath));
+                InvokeWindow(window, "ReleasePreview");
+                Assert.That(diagnostic == null, Is.True);
+
+                Color Pixel(int cell)
+                {
+                    Vector3 uv = camera.WorldToViewportPoint(edit.Grid.Origin + new Vector3((cell + .5f) * .032f, .016f, 0));
+                    return capture.GetPixel(Mathf.FloorToInt(uv.x * capture.width), Mathf.FloorToInt(uv.y * capture.height));
+                }
+                void Close(Color actual, Color expected)
+                {
+                    Assert.That(actual.r, Is.EqualTo(expected.r).Within(.025f));
+                    Assert.That(actual.g, Is.EqualTo(expected.g).Within(.025f));
+                    Assert.That(actual.b, Is.EqualTo(expected.b).Within(.025f));
+                }
+            }
+            finally
+            {
+                if (capture != null) UnityEngine.Object.DestroyImmediate(capture);
+                window.DiscardChanges(); UnityEngine.Object.DestroyImmediate(window);
+            }
+        }
+
+        [Test]
         public void CameraNavigation_AllowsCellScaleZoomAndFramesSelectedCells()
         {
             var grid = new VoxelGrid(new Vector3Int(50, 20, 10), new Vector3(-2, 3, 5), .032f, true);
