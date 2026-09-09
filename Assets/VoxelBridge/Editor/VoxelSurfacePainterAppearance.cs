@@ -21,34 +21,12 @@ namespace LocalModels.VoxelBridge
                 using (new EditorGUILayout.HorizontalScope())
                 {
                     GUILayout.Label("Color", GUILayout.Width(45));
-                    var labels = options.Select(c => $"{c.Id:000} · {c.DisplayName}").ToArray();
-                    if (index < 0) labels = new[] { $"{colorId:000} · Not allowed by profile" }.Concat(labels).ToArray();
-                    int choice = EditorGUILayout.Popup(Mathf.Max(0, index), labels, GUILayout.MaxWidth(350));
-                    int chosen = index < 0 ? choice - 1 : choice;
-                    if (chosen >= 0 && colorId != options[chosen].Id) { colorId = options[chosen].Id; Run(UpdateAppearanceCandidate); }
+                    GUILayout.Label(index < 0 ? $"{colorId:000} · Not allowed by profile" : $"{colorId:000} · {options[index].DisplayName}", GUILayout.MaxWidth(350));
                     Rect swatch = GUILayoutUtility.GetRect(30, 18, GUILayout.Width(30));
                     edit.Colors.TryGetColor(colorId, out var rgb); EditorGUI.DrawRect(swatch, rgb);
                     GUILayout.FlexibleSpace();
-                    using (new EditorGUI.DisabledScope(selected.Count == 0 || appearancePreview != null || chosen < 0))
+                    using (new EditorGUI.DisabledScope(selected.Count == 0 || appearancePreview != null || index < 0))
                         if (GUILayout.Button("Apply Color", GUILayout.Width(108))) Run(() => Change(() => edit.ApplyColor(selected, colorId)));
-                }
-                using (new EditorGUILayout.HorizontalScope())
-                {
-                    int count = Mathf.Min(20, options.Length);
-                    int start = Mathf.Clamp(Mathf.Max(0, index) - count / 2, 0, options.Length - count);
-                    if (GUILayout.Button("‹", GUILayout.Width(25))) StepAppearance(-1);
-                    for (int i = start; i < start + count; i++)
-                    {
-                        var entry = options[i];
-                        Rect rect = GUILayoutUtility.GetRect(22, 25, GUILayout.ExpandWidth(true));
-                        edit.Colors.TryGetColor(entry.Id, out var color);
-                        EditorGUI.DrawRect(rect, entry.Id == colorId ? Color.white : new Color(.15f, .15f, .15f));
-                        var inner = new Rect(rect.x + 3, rect.y + 3, rect.width - 6, rect.height - 6);
-                        EditorGUI.DrawRect(inner, color);
-                        if (GUI.Button(rect, new GUIContent("", $"{entry.Id:000} · {entry.DisplayName}"), GUIStyle.none))
-                        { colorId = entry.Id; Run(UpdateAppearanceCandidate); }
-                    }
-                    if (GUILayout.Button("›", GUILayout.Width(25))) StepAppearance(1);
                 }
             }
             catch (Exception exception) { EditorGUILayout.HelpBox(exception.Message, MessageType.Warning); }
@@ -123,11 +101,12 @@ namespace LocalModels.VoxelBridge
         {
             Run(() =>
             {
-                int[] ids = editColor ? edit.AllowedColors().Select(c => c.Id).ToArray() :
+                int[] ids = editColor ? FilterColorChoices(edit.AllowedColors(), colorSearch).Select(c => c.Id).ToArray() :
                     edit.Surfaces.Entries.Where(s => s != null && s.RenderClass == VoxelSurfaceRenderClass.Opaque).OrderBy(s => s.Id).Select(s => s.Id).ToArray();
                 if (ids.Length == 0) return;
                 int index = Array.IndexOf(ids, editColor ? colorId : surfaceId);
-                int next = ids[(Mathf.Max(0, index) + direction + ids.Length) % ids.Length];
+                int next = ids[editColor ? Mathf.Clamp(Mathf.Max(0, index) + direction, 0, ids.Length - 1) :
+                    (Mathf.Max(0, index) + direction + ids.Length) % ids.Length];
                 if (editColor) colorId = next; else surfaceId = next;
                 UpdateAppearanceCandidate();
             });
@@ -144,7 +123,8 @@ namespace LocalModels.VoxelBridge
                 if (GUILayout.Button(new GUIContent("Confirm", "Enter — Confirma una sola operación en el historial."), EditorStyles.toolbarButton, GUILayout.Width(75))) Run(ConfirmAppearancePreview);
                 if (GUILayout.Button(new GUIContent("Cancel", "Esc — Descarta la previsualización, conservando borrador y selección."), EditorStyles.toolbarButton, GUILayout.Width(65))) CancelAppearancePreview();
             }
-            GUILayout.Label("← / → cambia candidato · Enter confirma · Esc cancela · Cámara: controles habituales", EditorStyles.miniLabel);
+            GUILayout.Label(editColor ? "Cuadrícula lateral / flechas eligen color · Enter confirma · Esc cancela" :
+                "← / → cambia candidato · Enter confirma · Esc cancela · Cámara: controles habituales", EditorStyles.miniLabel);
             if (!string.IsNullOrEmpty(status) && statusType != MessageType.Info) EditorGUILayout.HelpBox(status, statusType);
             if (editColor) DrawColorControls(); else
             {
@@ -174,6 +154,8 @@ namespace LocalModels.VoxelBridge
             if (appearancePreview == null || e.type != EventType.KeyDown || EditorGUIUtility.editingTextField ||
                 e.alt || e.control || e.command || e.shift || GUIUtility.hotControl != 0) return;
             if (e.keyCode == KeyCode.LeftArrow || e.keyCode == KeyCode.RightArrow) StepAppearance(e.keyCode == KeyCode.LeftArrow ? -1 : 1);
+            else if (editColor && (e.keyCode == KeyCode.UpArrow || e.keyCode == KeyCode.DownArrow))
+                StepAppearance((e.keyCode == KeyCode.UpArrow ? -1 : 1) * ColorGridColumns(SidebarWidth - 28));
             else if (e.keyCode == KeyCode.Return || e.keyCode == KeyCode.KeypadEnter) Run(ConfirmAppearancePreview);
             else if (e.keyCode == KeyCode.Escape) { CancelAppearancePreview(); Repaint(); }
             else return;

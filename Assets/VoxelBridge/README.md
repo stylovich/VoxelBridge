@@ -61,7 +61,7 @@ El muestreo de `Match` no cambia el atributo elegido como destino. `Use Surface`
 
 ### Colores y comparación de superficies
 
-`Color` muestra los colores permitidos por el perfil cromático vinculado a la fuente, con nombres, IDs y muestras visuales. Sin un perfil vinculado se utiliza la paleta global completa. Un perfil ausente o incompatible bloquea la pintura de color; no se sustituye silenciosamente por otro. Los colores existentes fuera del conjunto permitido se conservan al editar superficies. El guardado comprueba que los ColorIDs modificados sigan permitidos. La selección de un color nuevo para el archivo obtiene su RGBA de la paleta global y conserva los slots supervivientes.
+`Color` muestra los colores permitidos por el perfil cromático vinculado a la fuente en una cuadrícula lateral derecha, con desplazamiento vertical y búsqueda por nombre o ColorID. Los tooltips identifican cada muestra y su RGB; pulsar una celda elige el color destino sin aplicarlo. La rueda sobre el panel desplaza la paleta, no la cámara. Sin un perfil vinculado se utiliza la paleta global completa. Un perfil ausente o incompatible bloquea la pintura de color; no se sustituye silenciosamente por otro. Los colores existentes fuera del conjunto permitido se conservan al editar superficies. El guardado comprueba que los ColorIDs modificados sigan permitidos. La selección de un color nuevo para el archivo obtiene su RGBA de la paleta global y conserva los slots supervivientes.
 
 `Browse Surfaces` despliega cinco miniaturas alrededor del candidato activo; las flechas recorren las superficies opacas. Las esferas comparten un color neutro y una iluminación HDRP fija. El tooltip muestra nombre, ID y valores PBR; las miniaturas no simulan bloom ni la iluminación final de la escena.
 
@@ -69,7 +69,7 @@ Para comparar directamente sobre el modelo:
 
 1. Seleccionar voxels y elegir el modo `Surface` o `Color`.
 2. Pulsar `Try on Selection`. La vista temporal utiliza iluminación Lit y conserva el color o superficie que no se está editando. La selección queda fija; la cámara continúa disponible.
-3. Elegir miniaturas o muestras, o utilizar `←` y `→` sin modificadores. Las teclas actúan en la ventana mientras no se esté editando texto ni arrastrando un control.
+3. Elegir miniaturas de superficies o muestras de la cuadrícula de colores. `←` y `→` recorren los candidatos sin modificadores; en Color, `↑` y `↓` avanzan por filas del conjunto filtrado, sin retorno circular al llegar a sus extremos. Las teclas actúan en la ventana mientras no se esté editando texto ni arrastrando un control.
 4. Pulsar `Confirm` o `Enter` para registrar una única asignación en el borrador; después utilizar el guardado habitual. `Cancel` o `Esc` descarta la comparación sin modificar historial, selección ni archivos.
 
 El preview prepara una malla temporal que separa los límites de selección y reutiliza esa geometría al cambiar candidatos. Conserva los límites de selección y meshing; una selección muy fragmentada puede superar el presupuesto y requerir reducir su tamaño. `Original` compara con el borrador anterior al preview; `Confirm` aplica el candidato elegido. El tinte se suprime durante la comparación y `Outline` permite mostrar el contorno, oculto por defecto para no tapar el acabado. Cerrar la ventana, recargar scripts o entrar en Play Mode descarta el preview; los cambios previamente confirmados siguen sujetos al guardado y recuperación del borrador. Undo/Redo durante el preview lo cancela primero, sin recorrer el historial. La vista de diagnóstico anterior se conserva al salir. El intercambio externo de RGB duplicados continúa pendiente de certificación.
@@ -82,7 +82,7 @@ El selector `View` cambia únicamente la previsualización. No modifica los IDs,
 |---|---|
 | `Lit` | Referencia PBR con iluminación y emisión normalizada de autoría. |
 | `Base Color` | Color de la paleta global sin iluminación, reflejos ni emisión. Desactivar `Tint` para comparaciones de color sin el tinte de selección. |
-| `SurfaceID` | Color de diagnóstico estable por ID, independiente de ColorID y de las propiedades PBR. SurfaceID 0 utiliza gris. La muestra bajo el puntero identifica el ID y nombre; su color coincide con esta vista. |
+| `SurfaceID` | Color de diagnóstico estable por ID, independiente de ColorID y de las propiedades PBR. SurfaceID 0 utiliza gris. La leyenda lateral relaciona muestras, IDs y nombres de las superficies utilizadas en el modelo o grupo aislado, incluidas celdas ocultas. Los tooltips muestran propiedades PBR. La muestra bajo el puntero utiliza la misma correspondencia. |
 | `Emission` | Resalta las superficies cuya emisión es distinta de cero en la LUT y atenúa el resto en gris. Aclara ligeramente los emisivos para distinguir incluso colores oscuros. No representa intensidad física, exposición ni bloom y no clasifica LED o neón por luminosidad. |
 
 `Isolate Selection` fija los voxels seleccionados como grupo visible y los encuadra. Permite limpiar o modificar la selección dentro de ese grupo sin cambiar el aislamiento. `Brush`, `Rectangle`, `Match` y `Pick` consultan el mismo volumen visible; incluso `All Matching` con `Visible Only` desactivado permanece dentro del grupo. Las caras descubiertas por el recorte son inspeccionables, sin eliminar geometría de la fuente.

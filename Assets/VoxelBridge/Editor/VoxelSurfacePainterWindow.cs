@@ -287,6 +287,7 @@ namespace LocalModels.VoxelBridge
 
         private void ReleasePreview()
         {
+            legendGrid = null; legendRevision = -1; legendIds = Array.Empty<int>();
             CancelAppearancePreview();
             thumbnails?.Dispose(); thumbnails = null;
             ClearIsolation();
@@ -601,8 +602,15 @@ namespace LocalModels.VoxelBridge
                 using (new EditorGUI.DisabledScope(selectionJob == null))
                     if (GUILayout.Button(new GUIContent("Cancel", "Cancel Selection — Esc\nConserva la selección anterior al gesto."), EditorStyles.toolbarButton, GUILayout.Width(60))) CancelSelection();
             }
-            Rect viewport = GUILayoutUtility.GetRect(100, 100, GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true));
-            DrawPreview(viewport);
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                Rect viewport = GUILayoutUtility.GetRect(100, 100, GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true));
+                DrawPreview(viewport);
+                if (editColor || (viewMode == VoxelPainterViewMode.SurfaceID && appearancePreview == null))
+                    using (new EditorGUI.DisabledScope(selectionJob != null))
+                    using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox, GUILayout.Width(SidebarWidth), GUILayout.ExpandHeight(true)))
+                        DrawSidebar();
+            }
         }
 
         private void DrawPreview(Rect rect)
