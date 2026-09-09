@@ -86,6 +86,107 @@ namespace LocalModels.VoxelBridge.Tests
         private VoxelizationResult Voxelize() => MeshVoxelizer.Voxelize(root, new VoxelizationSettings
         { VoxelSize = .125f, Padding = 1, FillInterior = true, ConversionProfile = conversion });
 
+        [Test]
+        public void SourceAxes_NormalizesBoundsMeshesAndRetainedGeometryWithoutChangingSource()
+        {
+            var cube = Cube(new Vector3(1, 2, 3), body);
+            cube.transform.localScale = new Vector3(2, 4, 6);
+            root.transform.rotation = Quaternion.Euler(270, 0, 0);
+            Quaternion sourceRotation = root.transform.rotation;
+            string fingerprint = VoxelConversionProfile.Fingerprint(conversion);
+            var original = Voxelize();
+            conversion.sourceAxes = VoxelSourceAxes.ZUp;
+            Assert.That(VoxelConversionProfile.Fingerprint(conversion), Is.Not.EqualTo(fingerprint));
+            var normalized = Voxelize();
+            VoxelSourceOrientationTests.AssertBounds(new Bounds(new Vector3(1, 3, -2), new Vector3(2, 6, 4)), normalized.SourceBounds);
+            VoxelSourceOrientationTests.AssertBounds(normalized.SourceBounds, MeshVoxelizer.GetSourceBounds(root, true, conversion));
+            VoxelSourceOrientationTests.AssertBounds(new Bounds(new Vector3(1, 2, 3), new Vector3(2, 4, 6)), original.SourceBounds);
+            Assert.That(root.transform.rotation, Is.EqualTo(sourceRotation));
+            Assert.That(cube.transform.localPosition, Is.EqualTo(new Vector3(1, 2, 3)));
+            var prefab = PrefabUtility.SaveAsPrefabAsset(root, folder + "/ZUp.prefab");
+            VoxelSourceOrientationTests.AssertBounds(normalized.SourceBounds, MeshVoxelizer.GetSourceBounds(prefab, true, conversion));
+            var mesh = Object.Instantiate(cube.GetComponent<MeshFilter>().sharedMesh);
+            try
+            {
+                mesh.vertices = mesh.vertices.Select(v => Vector3.Scale(v, new Vector3(2, 4, 6)) + new Vector3(1, 2, 3)).ToArray();
+                VoxelSourceOrientationTests.AssertBounds(normalized.SourceBounds, MeshVoxelizer.GetSourceBounds(mesh, true, conversion));
+            }
+            finally { Object.DestroyImmediate(mesh); }
+            SetRule(cube, VoxelConversionAction.KeepOriginal);
+            string retained = MeshVoxelizer.ExportRetainedGeometry(root, true, conversion, folder);
+            var retainedMesh = AssetDatabase.LoadAssetAtPath<GameObject>(AssetDatabase.GUIDToAssetPath(retained)).GetComponentInChildren<MeshFilter>().sharedMesh;
+            VoxelSourceOrientationTests.AssertBounds(normalized.SourceBounds, retainedMesh.bounds);
+        }
+
+        [Test]
+        public void SourceAxes_BatchPlacementUsesEachSavedFamilyBasis()
+        {
+            var first = Cube(new Vector3(1, 2, 3), body); first.name = "Z Up Source";
+            var second = Cube(new Vector3(4, 5, 6), body); second.name = "Preserved Source";
+            first.transform.localRotation = Quaternion.Euler(270, 12, 0);
+            first.transform.localScale = new Vector3(2, -3, 4);
+            second.transform.localRotation = Quaternion.Euler(20, 32, 18);
+            second.transform.localScale = new Vector3(-3, 4, 2);
+            root.transform.rotation = Quaternion.Euler(11, 22, 33);
+            root.transform.localScale = new Vector3(1.5f, 2, .5f);
+            var options = new VoxelLodBuildOptions { ExportFolder = folder, ConversionProfile = conversion, GenerateLod0Only = true };
+            conversion.sourceAxes = VoxelSourceAxes.ZUp;
+            var firstBuild = VoxelLodPipeline.GenerateAutomatic(first, style, options);
+            conversion.sourceAxes = VoxelSourceAxes.PreserveLocalAxes;
+            var secondBuild = VoxelLodPipeline.GenerateAutomatic(second, style, options);
+            var batch = new VoxelLodBatchBuildResult(new[]
+            {
+                new VoxelLodBatchItemResult(new VoxelLodBatchSourcePlan(first, first, first, false, false), firstBuild),
+                new VoxelLodBatchItemResult(new VoxelLodBatchSourcePlan(second, second, second, false, false), secondBuild)
+            }, 2, false);
+            GameObject placed = null;
+            try
+            {
+                SceneManager.MoveGameObjectToScene(root, SceneManager.GetActiveScene());
+                placed = VoxelLodBatchScenePlacement.Place(root, batch, null, false).Root;
+                VoxelSourceOrientationTests.AssertEquivalent(first.transform.localToWorldMatrix,
+                    placed.transform.Find(first.name).localToWorldMatrix * VoxelSourceOrientation.ToUnity(VoxelSourceAxes.ZUp));
+                VoxelSourceOrientationTests.AssertEquivalent(second.transform.localToWorldMatrix,
+                    placed.transform.Find(second.name).localToWorldMatrix);
+            }
+            finally
+            {
+                if (placed != null) Object.DestroyImmediate(placed);
+                SceneManager.MoveGameObjectToScene(root, scene);
+            }
+        }
+
+        [Test]
+        public void SourceAxes_PersistsAcrossDerivedLodsAndRebuildWithoutDoubleRotation()
+        {
+            var cube = Cube(new Vector3(0, 0, 2), body); cube.transform.localScale = new Vector3(1, 2, 3);
+            conversion.sourceAxes = VoxelSourceAxes.ZUp;
+            var build = VoxelLodPipeline.GenerateAutomatic(root, style,
+                new VoxelLodBuildOptions { ExportFolder = folder, ConversionProfile = conversion, GenerateLod0Only = true });
+            var initial = VoxelProductionExporter.ReadGrid(build.VoxAssetPaths[0], out var metadata, out _, out _, out _);
+            Assert.That(metadata.sourceAxes, Is.EqualTo(VoxelSourceAxes.ZUp));
+            Assert.That(metadata.sourceBoundsMax.y - metadata.sourceBoundsMin.y, Is.EqualTo(3));
+            conversion.sourceAxes = VoxelSourceAxes.PreserveLocalAxes;
+            VoxelProductionFamily.DeriveLevel(build.ManifestAssetPath, 1, VoxelLodGenerationMode.DuplicateParent);
+            VoxelProductionFamily.DeriveLevel(build.ManifestAssetPath, 2, VoxelLodGenerationMode.ReduceParent);
+            VoxelProductionFamily.RebuildAll(build.ManifestAssetPath);
+            var manifest = VoxelProductionFamily.Load(build.ManifestAssetPath);
+            Assert.That(manifest.sourceAxes, Is.EqualTo(VoxelSourceAxes.ZUp));
+            Assert.That(VoxelSourceOrientation.ReadPlacementAxes(build.ManifestAssetPath), Is.EqualTo(VoxelSourceAxes.ZUp));
+            foreach (var entry in manifest.lods)
+            {
+                var grid = VoxelProductionExporter.ReadGrid(VoxelProductionFamily.SourcePath(entry), out var level, out _, out _, out _);
+                Assert.That(level.sourceAxes, Is.EqualTo(VoxelSourceAxes.ZUp));
+                Assert.That(level.sourceBoundsMin, Is.EqualTo(metadata.sourceBoundsMin));
+                Assert.That(level.sourceBoundsMax, Is.EqualTo(metadata.sourceBoundsMax));
+                if (entry.lodIndex < 2)
+                {
+                    Assert.That(grid.Size, Is.EqualTo(initial.Size)); Assert.That(grid.Origin, Is.EqualTo(initial.Origin));
+                    Assert.That(grid.Occupied, Is.EqualTo(initial.Occupied)); Assert.That(grid.SemanticIds, Is.EqualTo(initial.SemanticIds));
+                }
+            }
+        }
+
         private VoxelSurfaceMappingProfile EnablePbr()
         {
             var mapping = ScriptableObject.CreateInstance<VoxelSurfaceMappingProfile>(); mapping.surfacePalette = conversion.surfacePalette;
@@ -278,9 +379,11 @@ namespace LocalModels.VoxelBridge.Tests
             Assert.That(Surfaces(), Is.EquivalentTo(new[] { 0 }));
         }
 
-        [Test]
-        public void RetainedGeometry_PreservesMirroredFaceOrientation()
+        [TestCase(VoxelSourceAxes.PreserveLocalAxes)]
+        [TestCase(VoxelSourceAxes.ZUp)]
+        public void RetainedGeometry_PreservesMirroredFaceOrientation(VoxelSourceAxes axes)
         {
+            conversion.sourceAxes = axes;
             var cube = Cube(Vector3.zero, glass);
             cube.transform.localScale = new Vector3(-1, 2, 1);
             SetRule(cube, VoxelConversionAction.KeepOriginal);
@@ -482,9 +585,11 @@ namespace LocalModels.VoxelBridge.Tests
             finally { VoxelLodBatchCheckpointStore.Reset(signature); }
         }
 
-        [Test]
-        public void ProductionPlacement_UsesLinkedPrefabAndSupportsUndo()
+        [TestCase(VoxelSourceAxes.PreserveLocalAxes)]
+        [TestCase(VoxelSourceAxes.ZUp)]
+        public void ProductionPlacement_UsesLinkedPrefabAndSupportsUndo(VoxelSourceAxes axes)
         {
+            conversion.sourceAxes = axes;
             Cube(Vector3.zero, body);
             var build = VoxelLodPipeline.GenerateAutomatic(root, style,
                 new VoxelLodBuildOptions { ExportFolder = folder, ConversionProfile = conversion, GenerateLod0Only = true });
@@ -493,8 +598,13 @@ namespace LocalModels.VoxelBridge.Tests
             try
             {
                 root.transform.position = new Vector3(2, 0, 3);
+                root.transform.rotation = Quaternion.Euler(270, 12, 0);
+                root.transform.localScale = new Vector3(2, -3, 4);
+                conversion.sourceAxes = VoxelSourceAxes.PreserveLocalAxes;
                 var placed = VoxelLodBatchScenePlacement.PlaceSingle(root, build, style, true);
                 instance = placed.Instance;
+                VoxelSourceOrientationTests.AssertEquivalent(root.transform.localToWorldMatrix,
+                    instance.transform.localToWorldMatrix * VoxelSourceOrientation.ToUnity(axes));
                 Assert.That(root.activeSelf, Is.False);
                 Assert.That(PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(instance), Is.EqualTo(build.PrefabAssetPath));
                 Assert.That(VoxelProductionLink.HasLink(build.PrefabAssetPath), Is.True);

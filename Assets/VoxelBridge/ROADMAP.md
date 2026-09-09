@@ -21,7 +21,7 @@ La consolidación artística de las paletas puede continuar durante la validaci�
 
 | Bloque | Estado y alcance pendiente |
 |---|---|
-| Conversión y reglas | Disponible: flujo físico individual y por lotes, exclusión, `Keep Original` y detección de emisión con superficie de respaldo. |
+| Conversión y reglas | Disponible: flujo físico individual y por lotes, normalización opcional Z-up → Y-up con colocación compensada, exclusión, `Keep Original` y detección de emisión con superficie de respaldo. |
 | Materiales semánticos | Disponible: paletas, catálogo recomendado de 44 superficies, visor HDRP temporal, perfiles cromáticos, bindings por slot, LUT y mesher opaco compartido. |
 | Familias y combinación | Disponible: edición de fuentes, reconstrucción, derivación de LODs y unión exacta de conjuntos compactos. |
 | DOTS y subescenas | Integración y diagnóstico disponibles; validación funcional inicial de instancias, recursos compartidos y frustum. No equivale a certificar rendimiento, sombras, oclusión o streaming de producción. |

@@ -32,6 +32,7 @@ namespace LocalModels.VoxelBridge
     [Serializable]
     internal sealed class VoxelBridgeMetadata
     {
+        public VoxelSourceAxes sourceAxes;
         public int formatVersion = 3;
         public string sourceName;
         public string sourceAssetPath;
@@ -116,6 +117,7 @@ namespace LocalModels.VoxelBridge
     [Serializable]
     internal sealed class VoxelLodSetManifest
     {
+        public VoxelSourceAxes sourceAxes;
         public string retainedGeometryGuid;
         public int formatVersion = 4;
         public string familyId;

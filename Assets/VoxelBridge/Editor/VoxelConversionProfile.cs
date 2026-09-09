@@ -19,6 +19,8 @@ namespace LocalModels.VoxelBridge
     [CreateAssetMenu(fileName = "VoxelConversionProfile", menuName = "Voxel Bridge/Conversion Profile")]
     public sealed class VoxelConversionProfile : ScriptableObject
     {
+        [Tooltip("Preserve conserva los ejes locales. Z Up → Y Up aplica -90° en X antes de voxelizar y compensa la colocación en escena. No cambia el pivote ni infiere el frente. Requiere convertir de nuevo desde la malla original.")]
+        public VoxelSourceAxes sourceAxes;
         [Tooltip("Perfil de colores globales. Es obligatorio para conservar SurfaceID durante la conversión.")]
         public VoxelColorMappingProfile colorMapping;
         public VoxelSurfacePalette surfacePalette;
@@ -35,6 +37,7 @@ namespace LocalModels.VoxelBridge
 
         internal void Validate()
         {
+            VoxelSourceOrientation.Validate(sourceAxes);
             string error = null;
             if (colorMapping == null || !colorMapping.TryGetAllowedColors(out _, out error))
                 throw new InvalidDataException(colorMapping == null ? "Assign a color mapping profile." : error);

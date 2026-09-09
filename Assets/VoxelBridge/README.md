@@ -139,6 +139,19 @@ Un error o cancelación elimina solamente la nueva carpeta incompleta. Las fuent
 
 Cada LOD automático se voxeliza desde la malla fuente. Con multiplicadores `1, 2, 4`, las celdas utilizan `base`, `base × 2` y `base × 4`. Todas las rejillas comparten la alineación física.
 
+### Ejes de origen
+
+Configurar `Source Axes` en el `Conversion Profile` antes de convertir:
+
+| Opción | Uso |
+|---|---|
+| `Preserve Local Axes` | Predeterminada. Conservar las coordenadas locales de la raíz de conversión. |
+| `Z Up → Y Up` | Normalizar modelos cuyo eje vertical local es Z mediante una rotación de −90° en X: `(x, y, z) → (x, z, −y)`. |
+
+La normalización se aplica a la geometría fuente antes de calcular bounds y voxelizar, incluidas las piezas `Keep Original`. El `.vox`, el prefab de producción y `Surface Painter` utilizan la misma orientación. El origen del pivote permanece fijo; no se infiere la dirección frontal del vehículo. No utilizar `Z Up → Y Up` si una raíz contenedora ya presenta la geometría en Y vertical.
+
+El sidecar y el manifiesto conservan la configuración utilizada. Duplicar, reducir o reconstruir LODs no vuelve a aplicar la rotación. Cambiar `Source Axes` requiere una conversión nueva desde la malla original; `Rebuild` no normaliza una familia existente. Los archivos anteriores, sin este campo, conservan sus ejes locales. Para lotes con distintas convenciones de ejes, utilizar conversiones separadas con el perfil correspondiente.
+
 ### Reglas de conversión
 
 Crear `Assets > Create > Voxel Bridge > Conversion Profile` y asignarlo en `Conversion Profile`, dentro de `Physical Models and LODs`. El perfil requiere un `Color Mapping Profile` y una paleta global de superficies guardados como assets. Las reglas se comparten entre la conversión individual y por lotes.
@@ -176,7 +189,7 @@ La herramienta intenta la menor unidad permitida que satisface los límites. Si 
 
 ### Colocación en escena
 
-`Place Result in Scene` instancia el prefab generado como hermano de la fuente. Conserva su transform, layer, tag y flags Static. `Disable Original Object` desactiva la fuente después de completar la conversión y, si corresponde, el horneado del impostor. La operación admite Undo. Una fuente seleccionada desde Project sólo genera assets.
+`Place Result in Scene` instancia el prefab generado como hermano de la fuente. Conserva layer, tag y flags Static. Con `Preserve Local Axes` copia su transform; con `Z Up → Y Up` compensa la rotación y permuta las escalas Y/Z, conservando sus signos, para mantener la apariencia en escena sin duplicar la corrección. La posición utiliza el ajuste a rejilla del perfil. La colocación individual y por lotes consulta la configuración guardada en la familia, no el valor actual del perfil. `Disable Original Object` desactiva la fuente después de completar la conversión y, si corresponde, el horneado del impostor. La operación admite Undo. Una fuente seleccionada desde Project sólo genera assets.
 
 `Snap Pivots on Placement` ajusta la posición mundial al múltiplo más cercano de la unidad base. El desplazamiento máximo es media celda por eje. No introduce un desplazamiento aleatorio.
 

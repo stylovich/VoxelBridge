@@ -49,6 +49,7 @@ namespace LocalModels.VoxelBridge
                 AssetDatabase.ImportAsset(sourcePath, ImportAssetOptions.ForceSynchronousImport);
                 var manifest = new VoxelLodSetManifest
                 {
+                    sourceAxes = metadata.sourceAxes,
                     productionMeshes = true, familyId = Guid.NewGuid().ToString("N"), sourceName = metadata.sourceName,
                     sourceAssetPath = metadata.sourceAssetPath, baseVoxelSize = metadata.voxelSize,
                     retainedGeometryGuid = metadata.retainedGeometryGuid,

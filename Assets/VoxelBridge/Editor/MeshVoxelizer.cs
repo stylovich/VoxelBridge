@@ -293,6 +293,7 @@ namespace LocalModels.VoxelBridge
         private static MeshSource CreateMeshSource(Mesh mesh, Matrix4x4 transform, Material[] materials, bool ownsMesh,
             Transform root, Transform current, VoxelConversionProfile profile, VoxelConversionAction action)
         {
+            transform = VoxelSourceOrientation.ToUnity(profile?.sourceAxes ?? VoxelSourceAxes.PreserveLocalAxes) * transform;
             var triangles = new int[mesh.subMeshCount][];
             var rules = new VoxelResolvedRule[mesh.subMeshCount];
             bool selected = false;

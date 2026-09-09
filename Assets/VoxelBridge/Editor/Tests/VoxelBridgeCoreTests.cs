@@ -1251,8 +1251,10 @@ namespace LocalModels.VoxelBridge.Tests
                 GameObjectUtility.SetStaticEditorFlags(
                     sourceObject, StaticEditorFlags.OccluderStatic);
 
+                string manifestPath = testRoot + "/ConvertedSingle.voxset.json";
+                VoxelLodPipeline.SaveManifest(manifestPath, new VoxelLodSetManifest { prefabAssetPath = prefabPath });
                 var build = new VoxelLodBuildResult(
-                    null, prefabPath, System.Array.Empty<string>());
+                    manifestPath, prefabPath, System.Array.Empty<string>());
                 profile = ScriptableObject.CreateInstance<VoxelStyleProfile>();
                 var serializedProfile = new SerializedObject(profile);
                 serializedProfile.FindProperty("baseVoxelSize").floatValue = 0.5f;
@@ -1413,7 +1415,7 @@ namespace LocalModels.VoxelBridge.Tests
                 Assert.That(batch.ReusedCount, Is.EqualTo(1));
                 Assert.That(batch.Items[0].Source, Is.EqualTo(invalid));
                 Assert.That(batch.Items[0].Succeeded, Is.False);
-                Assert.That(batch.Items[0].Error, Does.Contain("vertices"));
+                Assert.That(batch.Items[0].Error, Does.Contain("No triangle submeshes"));
                 Assert.That(batch.Items[1].Source, Is.EqualTo(firstInstance));
                 Assert.That(batch.Items[1].Succeeded, Is.True);
                 Assert.That(batch.Items[1].Reused, Is.False);

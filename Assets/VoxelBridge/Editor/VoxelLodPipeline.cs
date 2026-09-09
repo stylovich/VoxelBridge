@@ -565,6 +565,7 @@ namespace LocalModels.VoxelBridge
 
                 var manifest = new VoxelLodSetManifest
                 {
+                    sourceAxes = options.ConversionProfile?.sourceAxes ?? VoxelSourceAxes.PreserveLocalAxes,
                     familyId = familyId,
                     sourceName = source.name,
                     sourceAssetPath = AssetDatabase.GetAssetPath(source),
@@ -687,6 +688,7 @@ namespace LocalModels.VoxelBridge
                     $"{folder}/{MakeSafeFileName(parent.sourceName)}.voxset.json");
                 manifest = new VoxelLodSetManifest
                 {
+                    sourceAxes = parent.sourceAxes,
                     familyId = string.IsNullOrWhiteSpace(parent.familyId) ? Guid.NewGuid().ToString("N") : parent.familyId,
                     sourceName = parent.sourceName,
                     sourceAssetPath = parent.sourceAssetPath,
@@ -903,6 +905,7 @@ namespace LocalModels.VoxelBridge
             bool normalizedBySceneGraph = writeResult.UsesSceneGraph;
             var metadata = new VoxelBridgeMetadata
             {
+                sourceAxes = conversionProfile?.sourceAxes ?? semanticSource?.sourceAxes ?? VoxelSourceAxes.PreserveLocalAxes,
                 formatVersion = semantic != null ? 4 : 3,
                 sourceName = sourceName,
                 sourceAssetPath = sourceAssetPath,
@@ -1119,6 +1122,7 @@ namespace LocalModels.VoxelBridge
                 return false;
             }
             if (candidate == null || candidate.formatVersion != 4 ||
+                !Enum.IsDefined(typeof(VoxelSourceAxes), candidate.sourceAxes) ||
                 !IsPowerOfTwo(candidate.initialVoxelMultiplier))
                 return false;
             manifest = candidate;

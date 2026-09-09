@@ -342,9 +342,18 @@ namespace LocalModels.VoxelBridge.Tests
             finally { EditorSceneManager.ClosePreviewScene(other); }
         }
 
-        [Test]
-        public void CombinedFamily_RoundTripsIdsChunksDerivedLodsAndStableRebuild()
+        [TestCase(VoxelSourceAxes.PreserveLocalAxes)]
+        [TestCase(VoxelSourceAxes.ZUp)]
+        public void CombinedFamily_RoundTripsIdsChunksDerivedLodsAndStableRebuild(VoxelSourceAxes axes)
         {
+            var input = VoxelProductionExporter.ReadGrid(sourcePath, out var inputMetadata, out _, out _, out _);
+            inputMetadata.sourceAxes = axes;
+            WriteSource(sourcePath, input, colors, inputMetadata);
+            string inputManifestPath = AssetDatabase.GUIDToAssetPath(VoxelProductionLink.Load(
+                PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(a)).manifestGuid);
+            var inputManifest = VoxelProductionFamily.Load(inputManifestPath);
+            inputManifest.sourceAxes = axes;
+            VoxelLodPipeline.SaveManifest(inputManifestPath, inputManifest);
             string before = Hash128.Compute(File.ReadAllBytes(VoxelLodPipeline.AssetPathToAbsolute(sourcePath))).ToString();
             var analysis = VoxelFamilyCombiner.Analyze(new[] { parent }, profile);
             Assert.That(analysis.Grid.CountOccupied(), Is.EqualTo(160));
@@ -353,6 +362,7 @@ namespace LocalModels.VoxelBridge.Tests
             var result = VoxelFamilyCombiner.Build(analysis, profile, folder + "/Output", "Combined", true, false);
             var manifest = VoxelProductionFamily.Load(result.ManifestAssetPath);
             Assert.That(result.VoxAssetPaths.Length, Is.EqualTo(3));
+            Assert.That(manifest.sourceAxes, Is.EqualTo(VoxelSourceAxes.PreserveLocalAxes));
             Assert.That(manifest.lods[0].meshGuids.Length, Is.EqualTo(3));
             var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(result.PrefabAssetPath);
             Assert.That(VoxelProductionLink.Load(result.PrefabAssetPath).manifestGuid, Is.EqualTo(AssetDatabase.AssetPathToGUID(result.ManifestAssetPath)));
@@ -362,6 +372,7 @@ namespace LocalModels.VoxelBridge.Tests
             {
                 var grid = VoxelProductionExporter.ReadGrid(VoxelProductionFamily.SourcePath(entry), out var levelMetadata, out _, out _, out _);
                 Assert.That(levelMetadata.semantic.colorMappingProfileGuid, Is.Null.Or.Empty);
+                Assert.That(levelMetadata.sourceAxes, Is.EqualTo(VoxelSourceAxes.PreserveLocalAxes));
                 var ids = grid.SemanticIds.Where((id, i) => grid.Occupied[i]).Distinct().ToArray();
                 Assert.That(ids, Is.EquivalentTo(new[] { VoxelSemanticEncoding.Pack(54, 7), VoxelSemanticEncoding.Pack(54, 13) }));
                 if (entry.lodIndex > 0)

@@ -398,6 +398,8 @@ namespace LocalModels.VoxelBridge
                 progress?.Invoke(0);
                 string retained = CopyRetained(analysis, folder);
                 var metadata = JsonUtility.FromJson<VoxelBridgeMetadata>(JsonUtility.ToJson(analysis.Sources[0].Metadata));
+                // The union is already expressed in its own world-aligned basis.
+                metadata.sourceAxes = VoxelSourceAxes.PreserveLocalAxes;
                 metadata.baseVoxelSize = profile.BaseVoxelSize;
                 metadata.retainedGeometryGuid = retained;
                 // A combined asset can contain colors selected through several mapping profiles.

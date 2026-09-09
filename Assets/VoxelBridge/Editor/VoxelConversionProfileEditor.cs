@@ -12,6 +12,7 @@ namespace LocalModels.VoxelBridge
         {
             serializedObject.Update();
             var profile = (VoxelConversionProfile)target;
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("sourceAxes"));
             EditorGUILayout.HelpBox("Las reglas utilizan referencias a materiales, no sus nombres. El componente Conversion Rule tiene prioridad. Keep Original conserva solamente geometría y materiales estáticos.", MessageType.Info);
             EditorGUILayout.PropertyField(serializedObject.FindProperty("colorMapping"));
             EditorGUILayout.PropertyField(serializedObject.FindProperty("surfacePalette"));

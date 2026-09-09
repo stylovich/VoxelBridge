@@ -91,6 +91,7 @@ namespace LocalModels.VoxelBridge
             }
 
             if (metadata == null || (metadata.formatVersion != 3 && metadata.formatVersion != 4) ||
+                !Enum.IsDefined(typeof(VoxelSourceAxes), metadata.sourceAxes) ||
                 metadata.voxelSize <= 0f || float.IsNaN(metadata.voxelSize) || float.IsInfinity(metadata.voxelSize) ||
                 metadata.unityGridSize.x <= 0 || metadata.unityGridSize.y <= 0 || metadata.unityGridSize.z <= 0)
             {

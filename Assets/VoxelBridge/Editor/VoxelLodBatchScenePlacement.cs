@@ -54,6 +54,7 @@ namespace LocalModels.VoxelBridge
                 throw new InvalidOperationException(
                     $"The converted prefab for '{sourceObject.name}' was not found.");
 
+            VoxelSourceAxes axes = VoxelSourceOrientation.ReadPlacementAxes(build.ManifestAssetPath);
             var instance = PrefabUtility.InstantiatePrefab(prefab, sourceObject.scene) as GameObject;
             if (instance == null)
                 throw new InvalidOperationException(
@@ -65,7 +66,7 @@ namespace LocalModels.VoxelBridge
                 Transform instanceTransform = instance.transform;
                 instanceTransform.SetParent(sourceTransform.parent, false);
                 instanceTransform.SetSiblingIndex(sourceTransform.GetSiblingIndex() + 1);
-                CopyLocalTransform(sourceTransform, instanceTransform);
+                VoxelSourceOrientation.CopyPlacement(sourceTransform, instanceTransform, axes);
                 SnapWorldPosition(instanceTransform, sourceTransform.position, profile);
                 instance.name = GameObjectUtility.GetUniqueNameForSibling(
                     sourceTransform.parent, sourceObject.name + "_Voxel");
@@ -111,6 +112,9 @@ namespace LocalModels.VoxelBridge
                 throw new InvalidOperationException(
                     "The batch contains no successful conversions to place in the scene.");
 
+            var sourceAxes = successful.ToDictionary(item => item,
+                item => VoxelSourceOrientation.ReadPlacementAxes(item.BuildResult.ManifestAssetPath));
+
             Undo.IncrementCurrentGroup();
             int undoGroup = Undo.GetCurrentGroup();
             Undo.SetCurrentGroupName("Place voxel batch in scene");
@@ -143,7 +147,7 @@ namespace LocalModels.VoxelBridge
                         $"The converted prefab for '{item.Source.name}' could not be instantiated.");
                 Undo.RegisterCreatedObjectUndo(instance, "Place voxel model");
                 instance.name = item.Source.name;
-                CopyLocalTransform(item.Source.transform, instance.transform);
+                VoxelSourceOrientation.CopyPlacement(item.Source.transform, instance.transform, sourceAxes[item]);
                 SnapWorldPosition(instance.transform, item.Source.transform.position, profile);
                 SetLayerAndStaticFlagsRecursively(
                     instance, item.Source.layer,
