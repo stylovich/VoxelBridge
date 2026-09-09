@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using UnityEngine;
+using UnityEditor;
 
 namespace LocalModels.VoxelBridge
 {
@@ -39,6 +40,7 @@ namespace LocalModels.VoxelBridge
         private int cursor;
         private int historyCells;
         private readonly HashSet<int> selection;
+        private readonly Dictionary<int, int> colorEdits = new();
 
         internal VoxelGrid Grid { get; }
         internal string AssetPath { get; }
@@ -52,6 +54,26 @@ namespace LocalModels.VoxelBridge
         internal string Fingerprint => sourceHash + metadataHash + colorHash + surfaceHash;
         internal bool HideInternalCavities => metadata.hideInternalCavities;
         internal int LodIndex => metadata.lodIndex;
+
+        internal VoxelColorDefinition[] AllowedColors()
+        {
+            string guid = metadata.semantic.colorMappingProfileGuid;
+            string path = string.IsNullOrEmpty(guid) ? metadata.semantic.colorMappingProfileAssetPath : AssetDatabase.GUIDToAssetPath(guid);
+            if (string.IsNullOrEmpty(guid) && string.IsNullOrEmpty(path))
+                return colors.Entries.Where(c => c != null).OrderBy(c => c.Id).ToArray();
+            var profile = AssetDatabase.LoadAssetAtPath<VoxelColorMappingProfile>(path ?? "");
+            if (profile == null || profile.ColorPalette != colors)
+                throw new InvalidDataException("The source color mapping profile is missing or uses another palette. Restore it before editing colors.");
+            if (!profile.TryGetAllowedColors(out var allowed, out string error)) throw new InvalidDataException(error);
+            return allowed.OrderBy(c => c.Id).ToArray();
+        }
+
+        internal void ValidateColor(int id)
+        {
+            ValidatePaletteState();
+            if (!colors.TryGetColor(id, out _) || !AllowedColors().Any(c => c.Id == id))
+                throw new InvalidDataException($"ColorID {id} is unknown or excluded by the source color mapping profile.");
+        }
 
         internal void GetChanges(out int[] cells, out int[] surfaceIds)
         {
@@ -103,24 +125,33 @@ namespace LocalModels.VoxelBridge
                 throw new InvalidDataException("The same ColorID has conflicting local display colors. Rebind the source before editing surfaces.");
         }
 
-        internal int Apply(IReadOnlyCollection<int> selection, int surfaceId)
+        internal int Apply(IReadOnlyCollection<int> selection, int surfaceId) => ApplyAttribute(selection, surfaceId, false);
+        internal int ApplyColor(IReadOnlyCollection<int> selection, int colorId) => ApplyAttribute(selection, colorId, true);
+
+        private int ApplyAttribute(IReadOnlyCollection<int> selection, int id, bool color)
         {
             if (selection == null) throw new ArgumentNullException(nameof(selection));
             if (selection.Count > MaximumSelection)
                 throw new InvalidOperationException($"Select at most {MaximumSelection:N0} cells per operation.");
             ValidatePaletteState();
-            ValidateSurface(surfaceId);
+            if (color) ValidateColor(id); else ValidateSurface(id);
             int[] cells = selection.Distinct().OrderBy(cell => cell).ToArray();
             foreach (int cell in cells)
+            {
                 if (cell < 0 || cell >= Grid.Occupied.Length || !Grid.Occupied[cell] || recordOffsets[cell] == 0)
                     throw new InvalidDataException("The selection contains an empty or invalid cell.");
-            cells = cells.Where(cell => VoxelSemanticEncoding.SurfaceId(Grid.SemanticIds[cell]) != surfaceId).ToArray();
+                int expected = colorEdits.TryGetValue(cell, out int authorized) ? authorized : VoxelSemanticEncoding.ColorId(originalPairs[cell]);
+                if (VoxelSemanticEncoding.ColorId(Grid.SemanticIds[cell]) != expected)
+                    throw new InvalidDataException("ColorID changed outside the validated color editing operation.");
+            }
+            cells = cells.Where(cell => (color ? VoxelSemanticEncoding.ColorId(Grid.SemanticIds[cell]) : VoxelSemanticEncoding.SurfaceId(Grid.SemanticIds[cell])) != id).ToArray();
             if (cells.Length == 0) return 0;
             var change = new Change { Cells = cells, Before = new ushort[cells.Length], After = new ushort[cells.Length] };
             for (int i = 0; i < cells.Length; i++)
             {
                 change.Before[i] = Grid.SemanticIds[cells[i]];
-                change.After[i] = VoxelSemanticEncoding.Pack(VoxelSemanticEncoding.ColorId(change.Before[i]), surfaceId);
+                change.After[i] = color ? VoxelSemanticEncoding.Pack(id, VoxelSemanticEncoding.SurfaceId(change.Before[i])) :
+                    VoxelSemanticEncoding.Pack(VoxelSemanticEncoding.ColorId(change.Before[i]), id);
             }
             int pending = PendingCells;
             for (int i = 0; i < cells.Length; i++)
@@ -207,6 +238,9 @@ namespace LocalModels.VoxelBridge
                 int cell = change.Cells[i];
                 if (Grid.SemanticIds[cell] != originalPairs[cell]) PendingCells--;
                 Grid.SemanticIds[cell] = pairs[i];
+                int color = VoxelSemanticEncoding.ColorId(pairs[i]);
+                if (color != VoxelSemanticEncoding.ColorId(originalPairs[cell])) colorEdits[cell] = color;
+                else colorEdits.Remove(cell);
                 if (Grid.SemanticIds[cell] != originalPairs[cell]) PendingCells++;
             }
         }
@@ -259,7 +293,10 @@ namespace LocalModels.VoxelBridge
                 if (slot < 1) throw new InvalidDataException("No local semantic slot is available.");
                 occupiedSlots[slot] = true;
                 int colorId = VoxelSemanticEncoding.ColorId(pair);
-                Color32 displayColor = metadata.semantic.slots.First(entry => entry.colorId == colorId).displayColor;
+                var originalColor = metadata.semantic.slots.FirstOrDefault(entry => entry.colorId == colorId);
+                Color32 displayColor;
+                if (originalColor != null) displayColor = originalColor.displayColor;
+                else if (!colors.TryGetColor(colorId, out displayColor)) throw new InvalidDataException("Unknown ColorID.");
                 pairSlots.Add(pair, new VoxelSemanticSlotMetadata
                 {
                     slot = slot, colorId = colorId, surfaceId = VoxelSemanticEncoding.SurfaceId(pair), displayColor = displayColor
@@ -295,9 +332,16 @@ namespace LocalModels.VoxelBridge
                     throw new InvalidDataException("Surface editing cannot change voxel occupancy.");
                 if (!Grid.Occupied[cell]) continue;
                 ushort pair = Grid.SemanticIds[cell];
-                if (VoxelSemanticEncoding.ColorId(pair) != VoxelSemanticEncoding.ColorId(originalPairs[cell]))
-                    throw new InvalidDataException("Surface editing cannot change ColorID.");
+                int expectedColor = colorEdits.TryGetValue(cell, out int authorized) ? authorized : VoxelSemanticEncoding.ColorId(originalPairs[cell]);
+                if (VoxelSemanticEncoding.ColorId(pair) != expectedColor)
+                    throw new InvalidDataException("ColorID changed outside the validated color editing operation.");
                 pairs.Add(pair);
+            }
+            if (colorEdits.Count > 0)
+            {
+                var allowed = new HashSet<int>(AllowedColors().Select(c => c.Id));
+                if (colorEdits.Values.Any(id => !allowed.Contains(id)))
+                    throw new InvalidDataException("The color mapping profile excludes a pending ColorID. Restore the profile or undo the color edit.");
             }
             foreach (ushort pair in pairs)
             {

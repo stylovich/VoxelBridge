@@ -180,7 +180,7 @@ El mismo RGB puede ocupar dos slots locales cuando necesita superficies diferent
 
 ## Autoría visual de superficies
 
-La asignación en `Semantic Bindings` afecta a todos los voxels que utilizan un slot. `Surface Painter`, disponible desde `Edit Surfaces` en el prefab o desde `Tools > Voxel Bridge`, modifica la superficie de las celdas seleccionadas conservando su ColorID. El [procedimiento de edición](README.md#edición-visual-de-superficies) describe selección, guardado, recuperación y reconstrucción.
+La asignación en `Semantic Bindings` afecta a todos los voxels que utilizan un slot. `Surface Painter`, disponible desde `Edit Surfaces` en el prefab o desde `Tools > Voxel Bridge`, modifica ColorID o SurfaceID de las celdas seleccionadas conservando el otro atributo. La pintura de color respeta el perfil cromático vinculado. El [procedimiento de edición](README.md#edición-visual-de-superficies) describe selección, comparación temporal de acabados, guardado, recuperación y reconstrucción.
 
 La herramienta reutiliza el `.vox`, el sidecar v4 y el mesher existentes. La superficie pertenece al voxel completo, no a cada cara. Guardar no regenera LODs descendientes ni modifica definiciones PBR globales. Los pares supervivientes conservan sus slots; los pares nuevos reutilizan slots libres. El intercambio externo de slots con RGB idéntico requiere certificación específica antes de considerarse seguro. La preasignación PBR y las ayudas de selección permanecen en [ROADMAP.md](ROADMAP.md#preasignación-de-superficies-por-semejanza-pbr).
 

@@ -39,6 +39,20 @@ namespace LocalModels.VoxelBridge
             return BuildRegion(grid, exterior, Vector3Int.zero, grid.Size, progress, maximumQuads, false);
         }
 
+        // The extra UV channel partitions selection boundaries for temporary authoring previews.
+        internal static Mesh BuildSelectionPreview(VoxelGrid grid, HashSet<int> selection, bool hideEnclosedCavities,
+            Action<float> progress = null)
+        {
+            if (grid == null || !grid.IsSemantic) throw new ArgumentException("A semantic grid is required.");
+            ValidateGrid(grid.Size, grid.Origin, grid.VoxelSize);
+            if (selection == null || selection.Count == 0 || selection.Count > VoxelSurfaceEdit.MaximumSelection)
+                throw new ArgumentException("Choose a bounded, nonempty selection.");
+            foreach (int cell in selection)
+                if (cell < 0 || cell >= grid.Occupied.Length || !grid.Occupied[cell]) throw new ArgumentException("Invalid preview selection.");
+            bool[] exterior = hideEnclosedCavities ? FindExterior(grid, progress) : null;
+            return BuildRegion(grid, exterior, Vector3Int.zero, grid.Size, progress, MaximumQuads, false, selection);
+        }
+
         internal static Mesh[] BuildChunks(VoxelGrid grid, int chunkSize, bool hideEnclosedCavities,
             Action<float> progress = null)
         {
@@ -72,7 +86,7 @@ namespace LocalModels.VoxelBridge
         }
 
         private static Mesh BuildRegion(VoxelGrid grid, bool[] exterior, Vector3Int offset, Vector3Int size,
-            Action<float> progress, int maximumQuads, bool allowEmpty)
+            Action<float> progress, int maximumQuads, bool allowEmpty, HashSet<int> selection = null)
         {
             var vertices = new List<Vector3>();
             var normals = new List<Vector3>();
@@ -80,6 +94,7 @@ namespace LocalModels.VoxelBridge
             var colors = new List<Vector2>();
             var surfaces = new List<Vector2>();
             var triangles = new List<int>();
+            var selectedVertices = selection == null ? null : new List<Vector2>();
             int totalSlices = size.x + size.y + size.z + 3;
             int completedSlices = 0;
 
@@ -108,7 +123,11 @@ namespace LocalModels.VoxelBridge
                         {
                             int air = solidA ? b : a;
                             if (exterior == null || air < 0 || exterior[air])
-                                value = (grid.SemanticIds[solidA ? a : b] + 1) * (solidA ? 1 : -1);
+                            {
+                                int cell = solidA ? a : b;
+                                int selectedFlag = selection != null && selection.Contains(cell) ? 65536 : 0;
+                                value = (grid.SemanticIds[cell] + selectedFlag + 1) * (solidA ? 1 : -1);
+                            }
                         }
                         mask[x + width * y] = value;
                     }
@@ -139,7 +158,7 @@ namespace LocalModels.VoxelBridge
                         int start = vertices.Count;
                         vertices.Add(corner); vertices.Add(corner + du);
                         vertices.Add(corner + du + dv); vertices.Add(corner + dv);
-                        ushort semantic = (ushort)(Math.Abs(key) - 1);
+                        ushort semantic = (ushort)((Math.Abs(key) - 1) & 65535);
                         Vector4 tangent = Vector4.zero;
                         tangent[u] = 1; tangent.w = sign;
                         for (int i = 0; i < 4; i++)
@@ -147,6 +166,7 @@ namespace LocalModels.VoxelBridge
                             normals.Add(normal); tangents.Add(tangent);
                             colors.Add(new Vector2(VoxelSemanticEncoding.ColorId(semantic), 0));
                             surfaces.Add(new Vector2(VoxelSemanticEncoding.SurfaceId(semantic), 0));
+                            selectedVertices?.Add(new Vector2((Math.Abs(key) - 1 & 65536) != 0 ? 1 : 0, 0));
                         }
                         triangles.Add(start);
                         triangles.Add(start + (sign > 0 ? 1 : 2));
@@ -166,6 +186,7 @@ namespace LocalModels.VoxelBridge
             {
                 mesh.SetVertices(vertices); mesh.SetNormals(normals); mesh.SetTangents(tangents);
                 mesh.SetUVs(0, colors); mesh.SetUVs(3, surfaces);
+                if (selectedVertices != null) mesh.SetUVs(1, selectedVertices);
                 mesh.SetTriangles(triangles, 0);
                 mesh.RecalculateBounds();
                 return mesh;

@@ -53,13 +53,162 @@ namespace LocalModels.VoxelBridge.Tests
         }
 
         [Test]
-        public void SaveFailure_RestoresBothFilesAndKeepsPendingBuffer()
+        public void ColorEditing_PreservesSurfaceGeometryAndMixedUndoRedo()
+        {
+            Create();
+            AssetDatabase.ImportAsset(sidecarPath, ImportAssetOptions.ForceSynchronousImport);
+            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport);
+            var selection = new HashSet<int>(); var edit = new VoxelSurfaceEdit(path, selection);
+            edit.Select(new[] { 0, 17, 34 }); edit.Apply(selection, 7); edit.ApplyColor(selection, 120);
+            Assert.That(edit.HistorySteps, Is.EqualTo(3)); Assert.That(edit.PendingCells, Is.EqualTo(3));
+            Assert.That(edit.Grid.SemanticIds[17], Is.EqualTo(VoxelSemanticEncoding.Pack(120, 7)));
+            edit.Undo(); Assert.That(edit.Grid.SemanticIds[17], Is.EqualTo(VoxelSemanticEncoding.Pack(1, 7)));
+            edit.Undo(); Assert.That(edit.PendingCells, Is.Zero);
+            edit.Redo(); edit.Redo();
+            edit.BuildOutput(out var vox, out var sidecar);
+            var read = ReadOutput(vox, sidecar);
+            Assert.That(read.Occupied, Is.EqualTo(edit.Grid.Occupied));
+            Assert.That(read.SemanticIds, Is.EqualTo(edit.Grid.SemanticIds));
+            var metadata = JsonUtility.FromJson<VoxelBridgeMetadata>(Encoding.UTF8.GetString(sidecar));
+            colors.TryGetColor(120, out var rgb);
+            Assert.That(metadata.semantic.slots.Single(s => s.colorId == 120).displayColor, Is.EqualTo(rgb));
+            Assert.That(edit.ApplyColor(selection, 120), Is.Zero);
+            Assert.That(edit.HistorySteps, Is.EqualTo(3));
+            VoxelSurfaceEditStore.Save(path, edit);
+            Assert.That(new VoxelSurfaceEdit(path).Grid.SemanticIds, Is.EqualTo(read.SemanticIds));
+        }
+
+        [Test]
+        public void ColorEditing_EnforcesSourceProfileAndRejectsTampering()
+        {
+            var metadata = Create();
+            var mapping = ScriptableObject.CreateInstance<VoxelColorMappingProfile>();
+            mapping.ConfigureForTests(colors, 100, 100);
+            mapping.MutableAllowedRanges.Clear(); mapping.MutableAdditionalColorIds.Add(2);
+            AssetDatabase.CreateAsset(mapping, folder + "/Mapping.asset");
+            metadata.semantic.colorMappingProfileGuid = AssetDatabase.AssetPathToGUID(folder + "/Mapping.asset");
+            metadata.semantic.colorMappingProfileAssetPath = folder + "/Mapping.asset";
+            File.WriteAllText(sidecarPath, JsonUtility.ToJson(metadata, true));
+            var edit = new VoxelSurfaceEdit(path);
+            Assert.That(edit.AllowedColors().Select(c => c.Id), Is.EqualTo(new[] { 2 }));
+            Assert.Throws<InvalidDataException>(() => edit.ApplyColor(new[] { 0 }, 3));
+            edit.ApplyColor(new[] { 0 }, 2); edit.BuildOutput(out _, out _);
+            mapping.MutableAdditionalColorIds.Clear(); mapping.MutableAdditionalColorIds.Add(3);
+            Assert.Throws<InvalidDataException>(() => edit.BuildOutput(out _, out _));
+            edit.Undo(); edit.BuildOutput(out _, out _);
+            edit.Grid.SemanticIds[0] = VoxelSemanticEncoding.Pack(3, 0);
+            Assert.Throws<InvalidDataException>(() => edit.Apply(new[] { 0 }, 7));
+            Assert.Throws<InvalidDataException>(() => edit.BuildOutput(out _, out _));
+        }
+
+        [Test]
+        public void ColorEditing_PairLimitAndInvalidInputKeepSourcesAndHistory()
+        {
+            Create(256, true);
+            var edit = new VoxelSurfaceEdit(path); byte[] before = File.ReadAllBytes(path);
+            edit.ApplyColor(new[] { 255 }, 255);
+            Assert.Throws<InvalidDataException>(() => edit.BuildOutput(out _, out _));
+            edit.Undo(); Assert.That(edit.CanRedo, Is.True);
+            Assert.Throws<InvalidDataException>(() => edit.ApplyColor(new[] { 0 }, 256));
+            Assert.Throws<InvalidDataException>(() => edit.ApplyColor(new[] { 0, 256 }, 1));
+            Assert.That(edit.CanRedo, Is.True); Assert.That(edit.PendingCells, Is.Zero);
+            Assert.That(File.ReadAllBytes(path), Is.EqualTo(before));
+            edit.BuildOutput(out var unchanged, out _); Assert.That(unchanged, Is.EqualTo(before));
+        }
+
+        [Test]
+        public void ColorEditing_SaveAndRebuildUpdatesLinkedMeshAndPreservesAssetGuids()
+        {
+            Create(8);
+            Assert.That(VoxelPaletteLutGenerator.TryRebuild(colors, out _, out string error), Is.True, error);
+            Assert.That(VoxelPaletteLutGenerator.TryRebuild(surfaces, out _, out error), Is.True, error);
+            AssetDatabase.ImportAsset(sidecarPath, ImportAssetOptions.ForceSynchronousImport);
+            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport);
+            var prefab = VoxelProductionExporter.Export(path, folder + "/Production");
+            string prefabPath = AssetDatabase.GetAssetPath(prefab);
+            string materialPath = AssetDatabase.GetAssetPath(prefab.GetComponent<MeshRenderer>().sharedMaterial);
+            string sourceGuid = AssetDatabase.AssetPathToGUID(path), prefabGuid = AssetDatabase.AssetPathToGUID(prefabPath);
+            string meshPath = AssetDatabase.GetAssetPath(prefab.GetComponent<MeshFilter>().sharedMesh);
+            string meshGuid = AssetDatabase.AssetPathToGUID(meshPath);
+            var window = ScriptableObject.CreateInstance<VoxelSurfacePainterWindow>();
+            try
+            {
+                InvokeWindow(window, "SetSource", path, prefabPath, 0);
+                var edit = (VoxelSurfaceEdit)WindowField(window, "edit");
+                InvokeWindow(window, "Change", (Action)(() => edit.ApplyColor(new[] { 0, 1 }, 120)));
+                InvokeWindow(window, "SaveAndRebuild");
+                var saved = new VoxelSurfaceEdit(path);
+                Assert.That(saved.Grid.SemanticIds[0], Is.EqualTo(VoxelSemanticEncoding.Pack(120, 0)));
+                Assert.That(AssetDatabase.LoadAssetAtPath<Mesh>(meshPath).uv.Any(uv => uv.x == 120), Is.True);
+                Assert.That(AssetDatabase.AssetPathToGUID(path), Is.EqualTo(sourceGuid));
+                Assert.That(AssetDatabase.AssetPathToGUID(prefabPath), Is.EqualTo(prefabGuid));
+                Assert.That(AssetDatabase.AssetPathToGUID(meshPath), Is.EqualTo(meshGuid));
+                Assert.That(window.hasUnsavedChanges, Is.False);
+            }
+            finally { window.DiscardChanges(); UnityEngine.Object.DestroyImmediate(window); AssetDatabase.DeleteAsset(materialPath); }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void AppearancePreview_CancelsWithoutHistoryAndConfirmsOneEdit(bool color)
+        {
+            Create(8);
+            Assert.That(VoxelPaletteLutGenerator.TryRebuild(colors, out _, out string error), Is.True, error);
+            Assert.That(VoxelPaletteLutGenerator.TryRebuild(surfaces, out _, out error), Is.True, error);
+            AssetDatabase.ImportAsset(sidecarPath, ImportAssetOptions.ForceSynchronousImport);
+            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport);
+            var window = ScriptableObject.CreateInstance<VoxelSurfacePainterWindow>();
+            var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+            try
+            {
+                InvokeWindow(window, "SetSource", path, null, 0);
+                var edit = (VoxelSurfaceEdit)WindowField(window, "edit");
+                edit.Select(new[] { 0, 1 });
+                typeof(VoxelSurfacePainterWindow).GetField("editColor", flags).SetValue(window, color);
+                InvokeWindow(window, "SampleCell", 0, true);
+                Assert.That(WindowField(window, color ? "colorId" : "surfaceId"), Is.EqualTo(color ? 1 : 0));
+                typeof(VoxelSurfacePainterWindow).GetField(color ? "colorId" : "surfaceId", flags).SetValue(window, color ? 120 : 7);
+                InvokeWindow(window, "StartAppearancePreview");
+                var temporary = (VoxelPainterAppearancePreview)WindowField(window, "appearancePreview");
+                Assert.That(temporary, Is.Not.Null); var mesh = temporary.Mesh;
+                Assert.Throws<System.Reflection.TargetInvocationException>(() => InvokeWindow(window, "SaveSource"));
+                InvokeWindow(window, "StepAppearance", 1);
+                Assert.That(temporary.Mesh, Is.SameAs(mesh)); Assert.That(edit.PendingCells, Is.Zero);
+                Assert.That(edit.HistorySteps, Is.EqualTo(1));
+                InvokeWindow(window, "HandleAppearanceKeys", new Event { type = EventType.KeyDown, keyCode = KeyCode.Escape });
+                Assert.That(mesh == null, Is.True); Assert.That(edit.PendingCells, Is.Zero);
+                InvokeWindow(window, "StartAppearancePreview");
+                InvokeWindow(window, "ConfirmAppearancePreview");
+                Assert.That(edit.HistorySteps, Is.EqualTo(2)); Assert.That(edit.PendingCells, Is.EqualTo(2));
+                Assert.That(WindowField(window, "appearancePreview"), Is.Null);
+                var pair = edit.Grid.SemanticIds[0];
+                Assert.That(color ? VoxelSemanticEncoding.SurfaceId(pair) : VoxelSemanticEncoding.ColorId(pair), Is.EqualTo(color ? 0 : 1));
+                string draft = EditorJsonUtility.ToJson(window);
+                var restored = ScriptableObject.CreateInstance<VoxelSurfacePainterWindow>();
+                try
+                {
+                    EditorJsonUtility.FromJsonOverwrite(draft, restored); InvokeWindow(restored, "LoadSource", true);
+                    var buffer = (VoxelSurfaceEdit)WindowField(restored, "edit");
+                    Assert.That(buffer, Is.Not.Null, (string)WindowField(restored, "status"));
+                    Assert.That(buffer.Grid.SemanticIds[0], Is.EqualTo(pair));
+                }
+                finally { restored.DiscardChanges(); UnityEngine.Object.DestroyImmediate(restored); }
+                InvokeWindow(window, "ApplyHistoryShortcut", false); Assert.That(edit.PendingCells, Is.Zero);
+                Assert.That(new VoxelSurfaceEdit(path).PendingCells, Is.Zero);
+            }
+            finally { window.DiscardChanges(); UnityEngine.Object.DestroyImmediate(window); }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void SaveFailure_RestoresBothFilesAndKeepsPendingBuffer(bool color)
         {
             Create();
             AssetDatabase.ImportAsset(sidecarPath, ImportAssetOptions.ForceSynchronousImport);
             AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport);
             byte[] vox = File.ReadAllBytes(path), sidecar = File.ReadAllBytes(sidecarPath);
             var edit = new VoxelSurfaceEdit(path); edit.Apply(new[] { 0 }, 7);
+            if (color) edit.ApplyColor(new[] { 0 }, 120);
             Assert.Throws<IOException>(() => VoxelSurfaceEditStore.Save(path, edit, () => throw new IOException("Injected interruption")));
             CollectionAssert.AreEqual(vox, File.ReadAllBytes(path));
             CollectionAssert.AreEqual(sidecar, File.ReadAllBytes(sidecarPath));

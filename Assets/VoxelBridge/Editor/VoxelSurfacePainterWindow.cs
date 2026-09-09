@@ -12,13 +12,16 @@ namespace LocalModels.VoxelBridge
 {
     internal enum VoxelPainterViewMode { Lit, BaseColor, SurfaceID, Emission }
 
-    internal sealed class VoxelSurfacePainterWindow : EditorWindow
+    internal sealed partial class VoxelSurfacePainterWindow : EditorWindow
     {
         [SerializeField] private Object source;
         [SerializeField] private string sourceGuid;
         [SerializeField] private string prefabGuid;
         [SerializeField] private int level;
         [SerializeField] private int surfaceId;
+        [SerializeField] private int colorId;
+        [SerializeField] private bool editColor;
+        [SerializeField] private bool showSurfaceBrowser;
         [SerializeField] private Vector2 orbit = new(20, -30);
         [SerializeField] private float distance = 1;
         [SerializeField] private Vector3 panOffset;
@@ -36,6 +39,7 @@ namespace LocalModels.VoxelBridge
         [SerializeField] private string draftFingerprint;
         [SerializeField] private int[] draftCells = Array.Empty<int>();
         [SerializeField] private int[] draftSurfaces = Array.Empty<int>();
+        [SerializeField] private int[] draftColors = Array.Empty<int>();
 
         private VoxelSurfaceEdit edit;
         private readonly HashSet<int> selected = new();
@@ -45,7 +49,7 @@ namespace LocalModels.VoxelBridge
         private Material diagnosticMaterial;
         private VoxelPainterIsolation isolation;
         private VoxelGrid ViewGrid => isolation?.Grid ?? edit.Grid;
-        private Mesh ViewMesh => isolation?.Mesh ?? mesh;
+        private Mesh ViewMesh => appearancePreview != null && !compareOriginalAppearance ? appearancePreview.Mesh : isolation?.Mesh ?? mesh;
         internal const string DiagnosticShaderPath = "Assets/VoxelBridge/Editor/Shaders/VoxelPainterDiagnostic.shader";
         private static readonly int ViewModeProperty = Shader.PropertyToID("_ViewMode");
         private string status;
@@ -167,7 +171,7 @@ namespace LocalModels.VoxelBridge
         {
             wantsMouseMove = true;
             EditorApplication.playModeStateChanged += OnPlayMode;
-            saveChangesMessage = "Hay superficies sin guardar. Guardar modifica el .vox y su sidecar; no regenera los LODs.";
+            saveChangesMessage = "Hay colores o superficies sin guardar. Guardar modifica el .vox y su sidecar; no regenera los LODs.";
             if (!string.IsNullOrEmpty(sourceGuid)) EditorApplication.update += RestoreAfterReload;
         }
 
@@ -212,6 +216,17 @@ namespace LocalModels.VoxelBridge
                         int[] cells = group.Select(i => draftCells[i]).ToArray();
                         for (int offset = 0; offset < cells.Length; offset += VoxelSurfaceEdit.MaximumSelection)
                             edit.Apply(cells.Skip(offset).Take(VoxelSurfaceEdit.MaximumSelection).ToArray(), group.Key);
+                    }
+                    if (draftColors.Length != 0)
+                    {
+                        if (draftColors.Length != draftCells.Length) throw new InvalidOperationException("Invalid color draft. Discard explicitly or restore its data.");
+                        foreach (var group in Enumerable.Range(0, draftCells.Length)
+                            .Where(i => VoxelSemanticEncoding.ColorId(edit.Grid.SemanticIds[draftCells[i]]) != draftColors[i]).GroupBy(i => draftColors[i]))
+                        {
+                            int[] cells = group.Select(i => draftCells[i]).ToArray();
+                            for (int offset = 0; offset < cells.Length; offset += VoxelSurfaceEdit.MaximumSelection)
+                                edit.ApplyColor(cells.Skip(offset).Take(VoxelSurfaceEdit.MaximumSelection).ToArray(), group.Key);
+                        }
                     }
                     edit.ClearHistory();
                     status = "Borrador restaurado. El historial Undo se reinicia después de recargar scripts.";
@@ -272,6 +287,8 @@ namespace LocalModels.VoxelBridge
 
         private void ReleasePreview()
         {
+            CancelAppearancePreview();
+            thumbnails?.Dispose(); thumbnails = null;
             ClearIsolation();
             if (diagnosticMaterial != null) DestroyImmediate(diagnosticMaterial);
             diagnosticMaterial = null;
@@ -302,6 +319,7 @@ namespace LocalModels.VoxelBridge
 
         private bool DrawControls()
         {
+            if (appearancePreview != null) return DrawAppearanceSession();
             Object candidate;
             using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
             {
@@ -320,7 +338,7 @@ namespace LocalModels.VoxelBridge
             }
             if (showHelp)
             {
-                EditorGUILayout.HelpBox("Brush y Rectangle seleccionan voxels visibles. Match busca coincidencias desde el voxel pulsado; Pick consulta sus IDs y toma su superficie. Shift al iniciar resta; Esc cancela. Alt + arrastre o botón derecho rota; botón central desplaza; rueda acerca/aleja. Apply Surface modifica el voxel completo. Keep Original queda fuera de esta vista.", MessageType.Info);
+                EditorGUILayout.HelpBox("Brush y Rectangle seleccionan voxels visibles. Match busca coincidencias desde el voxel pulsado; Pick toma el atributo activo: Surface o Color. Shift al iniciar resta; Esc cancela. Alt + arrastre o botón derecho rota; botón central desplaza; rueda acerca/aleja. Apply modifica el atributo activo del voxel completo. Keep Original queda fuera de esta vista.", MessageType.Info);
                 EditorGUILayout.HelpBox("Intercambio externo: los slots con RGB idéntico y superficies distintas requieren una prueba en MagicaVoxel. No se debe asumir que un guardado externo conserva su identidad. Las validaciones y el bloqueo ante conflictos permanecen activos.", MessageType.Warning);
             }
             if (!string.IsNullOrEmpty(SourcePath) && VoxelSurfaceEditStore.HasPending(SourcePath))
@@ -366,6 +384,15 @@ namespace LocalModels.VoxelBridge
                 }
             }
             if (selectionTool == VoxelSelectionTool.Match || selectionTool == VoxelSelectionTool.Pick) DrawSample();
+            using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
+            {
+                editColor = GUILayout.Toolbar(editColor ? 1 : 0, new[] { "Surface", "Color" }, EditorStyles.toolbarButton, GUILayout.Width(145)) == 1;
+                GUILayout.FlexibleSpace();
+                if (!editColor) showSurfaceBrowser = GUILayout.Toggle(showSurfaceBrowser, new GUIContent("Browse Surfaces", "Miniaturas HDRP con color neutro. Seleccionar voxels y usar Try on Selection para comparar sobre el modelo."), EditorStyles.toolbarButton, GUILayout.Width(120));
+            }
+            if (editColor) DrawColorControls();
+            else
+            {
             var options = edit.Surfaces.Entries.Where(s => s.RenderClass == VoxelSurfaceRenderClass.Opaque).OrderBy(s => s.Id).ToArray();
             int choice = Array.FindIndex(options, s => s.Id == surfaceId);
             using (new EditorGUILayout.HorizontalScope())
@@ -382,6 +409,10 @@ namespace LocalModels.VoxelBridge
                 using (new EditorGUI.DisabledScope(selected.Count == 0))
                     if (GUILayout.Button("Apply Surface", GUILayout.Width(108))) Run(() => Change(() => edit.Apply(selected, surfaceId)));
             }
+            if (showSurfaceBrowser) DrawSurfaceBrowser();
+            }
+            using (new EditorGUI.DisabledScope(selected.Count == 0))
+                if (GUILayout.Button(new GUIContent("Try on Selection", "Preview temporal. ←/→ cambia candidato; Enter confirma, Esc cancela. No modifica archivos ni historial hasta confirmar."), EditorStyles.toolbarButton)) Run(StartAppearancePreview);
             using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
             {
                 using (new EditorGUI.DisabledScope(!edit.CanUndo)) if (GlyphButton("↶", "Undo — Ctrl+Z\nDeshace selecciones y asignaciones en orden; no revierte archivos guardados.")) Run(() => Change(edit.Undo));
@@ -466,7 +497,7 @@ namespace LocalModels.VoxelBridge
 
         private Material ViewMaterial()
         {
-            if (viewMode == VoxelPainterViewMode.Lit) return material;
+            if (appearancePreview != null || viewMode == VoxelPainterViewMode.Lit) return material;
             Material view = GetDiagnosticMaterial();
             view.SetFloat(ViewModeProperty, (int)viewMode);
             return view;
@@ -518,7 +549,7 @@ namespace LocalModels.VoxelBridge
                 GUILayout.Label(new GUIContent(colorText, details), EditorStyles.miniLabel, GUILayout.MinWidth(160));
                 GUILayout.Label(new GUIContent(surfaceText, details), EditorStyles.miniLabel, GUILayout.MinWidth(150));
                 using (new EditorGUI.DisabledScope(!valid))
-                    if (GUILayout.Button(new GUIContent("Use Surface", "Carga esta superficie como destino, sin aplicarla a ningún voxel."), EditorStyles.toolbarButton, GUILayout.Width(88))) Run(() => SampleCell(sampledCell, true));
+                    if (GUILayout.Button(new GUIContent(editColor ? "Use Color" : "Use Surface", "Carga el atributo activo como destino, sin aplicarlo a ningún voxel."), EditorStyles.toolbarButton, GUILayout.Width(88))) Run(() => SampleCell(sampledCell, true));
             }
         }
 
@@ -530,7 +561,11 @@ namespace LocalModels.VoxelBridge
                 !edit.Surfaces.TryGetSurface(VoxelSemanticEncoding.SurfaceId(pair), out var surface))
                 throw new InvalidOperationException("The sampled voxel references an unknown color or surface.");
             sampledCell = cell; hover = cell;
-            if (takeSurface) surfaceId = surface.Id;
+            if (takeSurface)
+            {
+                if (editColor) colorId = VoxelSemanticEncoding.ColorId(pair);
+                else surfaceId = surface.Id;
+            }
             Repaint();
         }
 
@@ -554,6 +589,7 @@ namespace LocalModels.VoxelBridge
 
         private void OnGUI()
         {
+            HandleAppearanceKeys(Event.current);
             using (new EditorGUI.DisabledScope(selectionJob != null))
                 if (!DrawControls()) return;
             using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
@@ -588,7 +624,7 @@ namespace LocalModels.VoxelBridge
                 // BeginClip also changes Event.mousePosition's coordinate space. Snapshot
                 // both position and containment before entering the local viewport.
                 Vector2 localPointer = e.mousePosition - rect.position;
-                bool drawBrushCursor = selectionTool == VoxelSelectionTool.Brush && rect.Contains(e.mousePosition);
+                bool drawBrushCursor = appearancePreview == null && selectionTool == VoxelSelectionTool.Brush && rect.Contains(e.mousePosition);
                 preview.BeginPreview(rect, GUIStyle.none);
                 Texture texture;
                 bool failed = false;
@@ -596,7 +632,8 @@ namespace LocalModels.VoxelBridge
                 {
                     UpdateSelectionOverlay();
                     preview.DrawMesh(ViewMesh, Matrix4x4.identity, ViewMaterial(), 0);
-                    foreach (var faces in selectionMeshes) preview.DrawMesh(faces, Matrix4x4.identity, selectionMaterial, 0);
+                    if (appearancePreview == null || previewOutline)
+                        foreach (var faces in selectionMeshes) preview.DrawMesh(faces, Matrix4x4.identity, selectionMaterial, 0);
                     foreach (var faces in hoverMeshes) preview.DrawMesh(faces, Matrix4x4.identity, hoverMaterial, 0);
                     preview.Render(true, false);
                 }
@@ -653,6 +690,7 @@ namespace LocalModels.VoxelBridge
             }
             if (e.type == EventType.MouseDrag && (e.alt || e.button == 1))
             { orbit = RotateView(orbit, e.delta); selecting = false; e.Use(); Repaint(); }
+            if (appearancePreview != null) return;
             if (e.type == EventType.MouseDown && e.button == 0 && !e.alt)
             {
                 if (selectionTool == VoxelSelectionTool.Match || selectionTool == VoxelSelectionTool.Pick)
@@ -782,6 +820,7 @@ namespace LocalModels.VoxelBridge
 
         private void ApplyHistoryShortcut(bool redo)
         {
+            if (appearancePreview != null) { CancelAppearancePreview(); Repaint(); return; }
             if (edit == null || selectionJob != null || EditorApplication.isPlayingOrWillChangePlaymode || EditorGUIUtility.editingTextField) return;
             if (redo ? edit.CanRedo : edit.CanUndo) Run(() => Change(redo ? edit.Redo : edit.Undo));
         }
@@ -802,7 +841,7 @@ namespace LocalModels.VoxelBridge
             {
                 var generated = VoxelSelectionOverlay.Build(ViewGrid, current, showSelectionTint);
                 VoxelSelectionOverlay.Destroy(selectionMeshes); selectionMeshes.AddRange(generated);
-                selectionMaterial.SetFloat("_FillOpacity", showSelectionTint ? .04f : 0);
+                selectionMaterial.SetFloat("_FillOpacity", showSelectionTint && appearancePreview == null ? .04f : 0);
                 overlaySource = current; overlayCount = current.Count;
             }
             if (overlayHover != hover)
@@ -815,6 +854,7 @@ namespace LocalModels.VoxelBridge
 
         private void Change(Action operation)
         {
+            CancelAppearancePreview();
             int revision = edit.SurfaceRevision;
             operation();
             overlayCount = -1;
@@ -827,6 +867,7 @@ namespace LocalModels.VoxelBridge
             if (revision != edit.SurfaceRevision)
             {
                 edit.GetChanges(out draftCells, out draftSurfaces);
+                draftColors = draftCells.Select(cell => VoxelSemanticEncoding.ColorId(edit.Grid.SemanticIds[cell])).ToArray();
                 draftFingerprint = edit.Fingerprint; hasUnsavedChanges = draftCells.Length > 0;
                 Run(BuildPreview);
             }
@@ -835,6 +876,7 @@ namespace LocalModels.VoxelBridge
 
         private void SaveSource()
         {
+            if (appearancePreview != null) throw new InvalidOperationException("Confirm or cancel the appearance preview before saving.");
             if (edit == null) throw new InvalidOperationException("Load a valid source before saving.");
             string warning = VoxelSurfaceEditStore.Save(SourcePath, edit);
             ResetDraft(); LoadSource(true);
@@ -882,9 +924,9 @@ namespace LocalModels.VoxelBridge
             }
         }
 
-        public override void SaveChanges() { SaveSource(); base.SaveChanges(); }
-        public override void DiscardChanges() { ResetDraft(); base.DiscardChanges(); }
-        private void ResetDraft() { draftCells = Array.Empty<int>(); draftSurfaces = Array.Empty<int>(); draftFingerprint = null; hasUnsavedChanges = false; }
+        public override void SaveChanges() { CancelAppearancePreview(); SaveSource(); base.SaveChanges(); }
+        public override void DiscardChanges() { CancelAppearancePreview(); ResetDraft(); base.DiscardChanges(); }
+        private void ResetDraft() { draftCells = Array.Empty<int>(); draftSurfaces = Array.Empty<int>(); draftColors = Array.Empty<int>(); draftFingerprint = null; hasUnsavedChanges = false; }
         private bool ConfirmLeave()
         {
             if (!hasUnsavedChanges) return true;
