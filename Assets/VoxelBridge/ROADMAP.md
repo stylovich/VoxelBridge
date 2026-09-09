@@ -27,7 +27,7 @@ La consolidación artística de las paletas puede continuar durante la validaci�
 | DOTS y subescenas | Integración y diagnóstico disponibles; validación funcional inicial de instancias, recursos compartidos y frustum. No equivale a certificar rendimiento, sombras, oclusión o streaming de producción. |
 | Autoría visual de superficies | Disponible: pincel, rectángulo, cuentagotas, selección semántica y regiones conectadas, Replace/Add/Subtract, vistas Lit/Base Color/SurfaceID/Emission, aislamiento, aplicación por voxel, Undo/Redo y guardado recuperable con reconstrucción explícita. Pendiente: edición visual de ColorID. |
 | Intercambio de RGB duplicados | Pendiente de certificar en MagicaVoxel; la escritura y lectura controladas por Voxel Bridge conservan los pares. |
-| Preasignación PBR | Disponible y opcional para HDRP/Lit Standard: candidatos por perfil, muestreo de constantes o Mask Map UV0, distancia y separación mínimas, fallback e informe por LOD. Pendientes: validación artística y ampliación de shaders/configuraciones según casos reales. |
+| Preasignación PBR | Disponible y opcional para HDRP/Lit Standard: candidatos por perfil, muestreo de constantes o Mask Map UV0, distancia y separación mínimas, fallback e informe por LOD. Pendientes: validación artística, calidad espacial de la clasificación y ampliación de shaders/configuraciones según casos reales. |
 | Impostores semánticos | Horneado bloqueado hasta adaptar la captura a las LUT y los canales de IDs. La ruta RGB existente no demuestra compatibilidad semántica. |
 | Rendimiento, HLOD y presupuesto | Fase diferida; requiere escenas, cámaras y plataformas objetivo representativas. |
 
@@ -118,6 +118,19 @@ La preasignación está disponible como opción del Conversion Profile. Propone 
 La clasificación debe ocurrir antes de exportar a `.vox`, mientras están disponibles los materiales fuente y sus mapas. Los `.vox` existentes no permiten reconstruir las muestras PBR originales; requerirán una conversión nueva o asignación manual. El volumen final mantiene `ColorID + SurfaceID`, mientras las propiedades físicas proceden de la paleta global.
 
 La validación debe cubrir materiales constantes, mapas con distintas zonas, UV y remapeos, empate o cercanía entre candidatos, perfiles vacíos o inválidos, prioridad de reglas explícitas, separación de emisivos y consistencia de conversión individual/por lotes. Los retoques guardados en una fuente no se deben sobrescribir como efecto lateral de cambiar el perfil.
+
+### Calidad espacial de la preasignación — fase posterior
+
+Las máscaras con desgaste y variaciones PBR continuas pueden producir pequeñas regiones de SurfaceID distintos o alternancias con Default. Antes de ampliar el algoritmo, evaluar perfiles de candidatos acotados y las reglas explícitas por material disponibles. La tolerancia de coincidencia no debe aumentarse únicamente para reducir rechazos, sin revisar la calidad de las asignaciones.
+
+Evaluar las siguientes mejoras como opciones de conversión, no como cambios automáticos de las fuentes existentes:
+
+- Candidatos y parámetros de clasificación por material de origen, manteniendo la prioridad de asignaciones explícitas y emisión.
+- Filtrado de metallic y smoothness según el área cubierta por cada voxel antes de clasificar, respetando discontinuidades y bordes de islas UV.
+- Coherencia espacial para pequeñas regiones de asignaciones poco fiables, sin atravesar límites de materiales, huecos o bordes geométricos, ni eliminar emisivos, detalles finos o decisiones artísticas explícitas.
+- Diagnóstico por material de origen y comparación antes/después de cobertura, ambigüedad, rechazos y conservación de detalles. La procedencia necesaria debe capturarse durante la conversión; el informe agregado y los IDs del VOX no permiten recuperarla por sí solos.
+
+Validar con modelos de varios materiales, paneles desgastados, señalética, piezas delgadas y LODs derivados. El proceso debe ser determinista, cancelable y respetar los presupuestos de memoria y el límite de pares semánticos. Esta fase trata la clasificación del acabado, no el suavizado de la geometría. Incluso con SurfaceID uniforme, los cambios de ColorID pueden impedir unir caras coplanares en el mesher y mantener una malla densa.
 
 ## Combinación manual de familias voxel
 
