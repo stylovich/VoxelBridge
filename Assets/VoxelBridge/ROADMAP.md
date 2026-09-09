@@ -28,6 +28,7 @@ La consolidación artística de las paletas puede continuar durante la validaci�
 | Autoría visual de superficies | Disponible: pincel, rectángulo, cuentagotas, selección semántica y regiones conectadas, Replace/Add/Subtract, vistas Lit/Base Color/SurfaceID/Emission, aislamiento, aplicación por voxel, Undo/Redo y guardado recuperable con reconstrucción explícita. Pendiente: edición visual de ColorID. |
 | Intercambio de RGB duplicados | Pendiente de certificar en MagicaVoxel; la escritura y lectura controladas por Voxel Bridge conservan los pares. |
 | Preasignación PBR | Disponible y opcional para HDRP/Lit Standard: candidatos por perfil, muestreo de constantes o Mask Map UV0, distancia y separación mínimas, fallback e informe por LOD. Pendientes: validación artística, calidad espacial de la clasificación y ampliación de shaders/configuraciones según casos reales. |
+| Meshing híbrido | Fase posterior: evaluar caras coplanares con texturas de ColorID/SurfaceID para reducir geometría fragmentada por atributos, conservando el volumen voxel editable. |
 | Impostores semánticos | Horneado bloqueado hasta adaptar la captura a las LUT y los canales de IDs. La ruta RGB existente no demuestra compatibilidad semántica. |
 | Rendimiento, HLOD y presupuesto | Fase diferida; requiere escenas, cámaras y plataformas objetivo representativas. |
 
@@ -279,6 +280,22 @@ El shader de horneado de Amplify Impostors debe leer las mismas LUT y los mismos
 - Ajustes de sRGB, filtrado, wrap, mipmaps y compresión de ambas LUT.
 - Compatibilidad visual con HDRP, HTrace e impostores.
 - Compatibilidad del material compartido con SRP Batcher y Entities Graphics.
+
+## Meshing híbrido con texturas de IDs — fase posterior
+
+Evaluar una representación de producción opcional que combine geometría voxel para siluetas, huecos y relieves con caras coplanares amplias cuyos atributos se almacenen en texturas de ColorID y SurfaceID. La selección debe considerar planitud, área y fragmentación por atributos, no únicamente el tamaño del modelo. Señalética, paredes, suelos y fachadas son casos de evaluación; las regiones uniformes pueden conservar el mesher actual.
+
+El VOX y su sidecar permanecen como fuente editable. Las mallas y texturas son resultados derivados de una reconstrucción explícita; no se editan como una segunda fuente de verdad ni amplían el límite de pares del transporte. Las texturas deben consultar las paletas globales sin hornear iluminación. Esta representación conserva geometría 3D real y no constituye un impostor ni un sistema HLOD.
+
+Criterios para un prototipo acotado:
+
+- Preservar ocupación, pivote, escala, bordes, huecos y límites de chunks; mantener la granularidad de culling.
+- Definir direccionamiento, bordes de atlas, filtrado y tratamiento de mipmaps sin interpolar IDs categóricos ni mezclar regiones vecinas.
+- Comparar geometría, memoria de texturas, coste de muestreo y tiempo de reconstrucción contra el mesher actual. No sustituir automáticamente una representación cuando el coste total empeore.
+- Validar paletas, emisión, LODs, uniones entre caras y chunks, materiales compartidos y Entities Graphics. Evitar materiales independientes por cara o instancia.
+- Comprobar que la edición y reconstrucción regeneren los datos derivados de forma coherente, sin sobrescribir retoques de LODs descendientes.
+
+Esta fase es independiente de la coherencia espacial de la clasificación PBR. Su evaluación pertenece al trabajo de optimización posterior a la estabilización del flujo de autoría y materiales.
 
 ## DOTS, subescenas y culling
 
