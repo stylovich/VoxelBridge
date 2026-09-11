@@ -10,7 +10,7 @@ Voxel Bridge debe producir familias voxel físicamente coherentes y editables, i
 2. Validar artísticamente `Surface Painter`, la edición de ColorID/SurfaceID, sus herramientas de selección, cuentagotas, vistas de diagnóstico, aislamiento y comparación temporal de acabados sobre modelos representativos.
 3. Validar artísticamente la preasignación PBR opcional y sus perfiles de candidatos; verificar el intercambio con MagicaVoxel y la derivación de LODs después de editar superficies.
 4. Completar las validaciones funcionales pendientes de materiales especiales, iluminación y carga/descarga de subescenas sobre assets representativos.
-5. Retomar las mediciones de rendimiento por LOD, sombras, transparencias, culling y streaming cuando exista una distribución representativa del mapa.
+5. Evaluar primero la autoría de geometría uniforme con detalle superficial separado; retomar las mediciones de rendimiento por LOD, sombras, transparencias, culling y streaming cuando exista una distribución representativa del mapa.
 6. Adaptar el horneado de impostores a las paletas semánticas antes de evaluar su calidad y coste. Comparar agrupación manual, HLOD e impostores sin imponer una técnica a todos los assets.
 7. Implementar el análisis de visibilidad y presupuesto por zonas, apoyado en las mediciones anteriores.
 8. Crear y hornear el plan final de impostores cuando la distribución del mapa y los materiales sean estables.
@@ -28,7 +28,8 @@ La consolidación artística de las paletas puede continuar durante la validaci�
 | Autoría visual de superficies | Disponible: selección espacial y semántica, edición independiente de ColorID/SurfaceID, cuentagotas, diagnóstico, aislamiento, miniaturas y comparación temporal sobre selección con confirmación, Undo/Redo y guardado recuperable. Pendiente: validación artística y certificación del intercambio externo de RGB duplicados. |
 | Intercambio de RGB duplicados | Pendiente de certificar en MagicaVoxel; la escritura y lectura controladas por Voxel Bridge conservan los pares. |
 | Preasignación PBR | Disponible y opcional para HDRP/Lit Standard: candidatos por perfil, muestreo de constantes o Mask Map UV0, distancia y separación mínimas, fallback e informe por LOD. Pendientes: validación artística, calidad espacial de la clasificación y ampliación de shaders/configuraciones según casos reales. |
-| Meshing híbrido | Fase posterior: evaluar caras coplanares con texturas de ColorID/SurfaceID para reducir geometría fragmentada por atributos, conservando el volumen voxel editable. |
+| Geometría limpia y detalle separado | Enfoque de diseño para una fase posterior: regiones uniformes, detalle del shader alineado a la unidad voxel mínima y anuncios sobre quads separados. Prototipo y mediciones pendientes. |
+| Meshing híbrido | Fase posterior: evaluar caras coplanares con texturas de ColorID/SurfaceID para modelos cuyo detalle por voxel deba conservarse, después de evaluar la autoría con detalle superficial separado. |
 | Impostores semánticos | Horneado bloqueado hasta adaptar la captura a las LUT y los canales de IDs. La ruta RGB existente no demuestra compatibilidad semántica. |
 | Rendimiento, HLOD y presupuesto | Fase diferida; requiere escenas, cámaras y plataformas objetivo representativas. |
 
@@ -284,6 +285,14 @@ El shader de horneado de Amplify Impostors debe leer las mismas LUT y los mismos
 - Ajustes de sRGB, filtrado, wrap, mipmaps y compresión de ambas LUT.
 - Compatibilidad visual con HDRP, HTrace e impostores.
 - Compatibilidad del material compartido con SRP Batcher y Entities Graphics.
+
+## Geometría limpia y detalle superficial — fase posterior
+
+Priorizar como decisión de autoría zonas planas con ColorID y SurfaceID uniformes. Reservar la geometría para siluetas, huecos y relieves reales; evaluar manchas y variaciones de acabado en el shader. Alinear ese detalle a la unidad voxel mínima del perfil, con un origen coherente entre chunks y LODs y filtrado a distancia.
+
+Separar anuncios e imágenes complejas de sus marcos, paredes y soportes: utilizar un quad con textura convencional para el gráfico y geometría voxel simplificada para la estructura. Mantener materiales compartidos cuando sea viable, sin imponer un material por cartel. Esta propuesta no convierte automáticamente modelos existentes ni modifica la identidad semántica del VOX.
+
+El [plan de geometría y detalle](ART_DIRECTION_AND_DETAIL.md) define el alcance, los recursos editables y los criterios de comparación. Prototipar esta alternativa después de la validación de autoría y MagicaVoxel, antes de ampliar el mesher híbrido. No considerar demostrado un beneficio de rendimiento hasta medir el coste conjunto de geometría, shaders, texturas y draws.
 
 ## Meshing híbrido con texturas de IDs — fase posterior
 

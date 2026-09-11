@@ -14,6 +14,8 @@ El diagnóstico de entidades requiere Entities 1.4 y Entities Graphics 1.4, incl
 
 Las paletas, el transporte de `ColorID + SurfaceID` y las familias semánticas de producción se describen en [MATERIALS.md](MATERIALS.md). [ROADMAP.md](ROADMAP.md) distingue los sistemas disponibles de las fases pendientes de autoría, validación de producción, impostores semánticos y evaluación de HLOD y presupuestos.
 
+El [enfoque de geometría limpia y detalle superficial](ART_DIRECTION_AND_DETAIL.md) describe una propuesta de autoría y optimización posterior: regiones uniformes, detalle del shader alineado a la rejilla y anuncios separados de su estructura. No constituye una funcionalidad implementada.
+
 ## Herramientas
 
 | Menú en `Tools > Voxel Bridge` | Función |
