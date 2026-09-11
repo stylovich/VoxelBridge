@@ -160,6 +160,18 @@ namespace LocalModels.VoxelBridge
             if (!profile.TryValidate(out string error)) throw new InvalidDataException(error);
         }
 
+        internal static float ReductionVoxelSize(VoxelLodSetManifest manifest, VoxelStyleProfile profile,
+            int level, float parentSize, out int multiplier)
+        {
+            if (level < 1 || level > manifest.lods.Length || level >= profile.LodCount)
+                throw new ArgumentException("The profile must define a next LOD for this source.");
+            multiplier = checked(Math.Max(1, manifest.initialVoxelMultiplier) * profile.GetLodMultiplier(level));
+            float size = manifest.baseVoxelSize * multiplier;
+            if (!float.IsFinite(size) || size <= parentSize)
+                throw new InvalidOperationException("The target voxel size must exceed the previous level's size.");
+            return size;
+        }
+
         internal static void DeriveLevel(string manifestPath, int level, VoxelLodGenerationMode mode,
             bool replaceExisting = false, Action<float> progress = null)
         {
@@ -184,8 +196,9 @@ namespace LocalModels.VoxelBridge
             try
             {
                 progress?.Invoke(0);
-                int multiplier = mode == VoxelLodGenerationMode.DuplicateParent
-                    ? manifest.lods[level - 1].multiplier : checked(Math.Max(1, manifest.initialVoxelMultiplier) * profile.GetLodMultiplier(level));
+                int multiplier = manifest.lods[level - 1].multiplier;
+                float size = mode == VoxelLodGenerationMode.DuplicateParent ? parentGrid.VoxelSize :
+                    ReductionVoxelSize(manifest, profile, level, parentGrid.VoxelSize, out multiplier);
                 if (mode == VoxelLodGenerationMode.DuplicateParent)
                 {
                     File.Copy(VoxelLodPipeline.AssetPathToAbsolute(parentPath), absolute, replacing);
@@ -197,8 +210,6 @@ namespace LocalModels.VoxelBridge
                 }
                 else
                 {
-                    float size = manifest.baseVoxelSize * multiplier;
-                    if (size <= parentGrid.VoxelSize) throw new InvalidOperationException("The target voxel size must exceed the previous level's size.");
                     VoxelGrid reduced = VoxelGridDownsampler.Downsample(parentGrid, size, profile.Padding,
                         manifest.chunkCellSize, parent.hideInternalCavities, progress);
                     VoxelSemanticMesher.ValidateGrid(reduced.Size, reduced.Origin, reduced.VoxelSize);

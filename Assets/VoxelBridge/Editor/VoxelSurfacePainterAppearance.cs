@@ -69,7 +69,7 @@ namespace LocalModels.VoxelBridge
 
         private void StartAppearancePreview()
         {
-            if (edit == null || selectionJob != null || EditorApplication.isPlayingOrWillChangePlaymode || selected.Count == 0) return;
+            if (edit == null || reductionActive || selectionJob != null || EditorApplication.isPlayingOrWillChangePlaymode || selected.Count == 0) return;
             edit.ValidateUnchangedSources();
             if (editColor) edit.ValidateColor(colorId);
             else ValidatePreviewSurface();

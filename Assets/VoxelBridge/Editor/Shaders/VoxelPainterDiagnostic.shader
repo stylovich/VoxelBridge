@@ -29,8 +29,8 @@ Shader "Hidden/Voxel Bridge/Painter Diagnostic"
             CBUFFER_START(UnityPerMaterial)
                 float _ViewMode;
             CBUFFER_END
-            struct Attributes { float3 positionOS : POSITION; float2 colorId : TEXCOORD0; float2 surfaceId : TEXCOORD3; UNITY_VERTEX_INPUT_INSTANCE_ID };
-            struct Varyings { float4 positionCS : SV_POSITION; nointerpolation float2 ids : TEXCOORD0; UNITY_VERTEX_OUTPUT_STEREO };
+            struct Attributes { float3 positionOS : POSITION; float2 colorId : TEXCOORD0; float2 flag : TEXCOORD1; float2 surfaceId : TEXCOORD3; UNITY_VERTEX_INPUT_INSTANCE_ID };
+            struct Varyings { float4 positionCS : SV_POSITION; nointerpolation float2 ids : TEXCOORD0; nointerpolation float flag : TEXCOORD1; UNITY_VERTEX_OUTPUT_STEREO };
             Varyings Vert(Attributes input)
             {
                 Varyings output;
@@ -38,6 +38,7 @@ Shader "Hidden/Voxel Bridge/Painter Diagnostic"
                 UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
                 output.positionCS = TransformWorldToHClip(TransformObjectToWorld(input.positionOS));
                 output.ids = float2(input.colorId.x, input.surfaceId.x);
+                output.flag = input.flag.x;
                 return output;
             }
             float4 Frag(Varyings input) : SV_Target
@@ -58,6 +59,8 @@ Shader "Hidden/Voxel Bridge/Painter Diagnostic"
                     float emission = LOAD_TEXTURE2D(_PaletteSurface, int2(ids.y, 0)).b;
                     rgb = emission > 0 ? lerp(rgb, 1.0, 0.12) : dot(rgb, float3(0.2126, 0.7152, 0.0722)) * 0.025;
                 }
+                if (_ViewMode == 4)
+                    rgb = input.flag > 0.5 ? SRGBToLinear(float3(1, 0.25, 0.12)) : rgb * 0.3;
                 return float4(rgb, 1);
             }
             ENDHLSL

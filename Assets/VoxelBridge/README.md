@@ -76,6 +76,16 @@ Para comparar directamente sobre el modelo:
 
 El preview prepara una malla temporal que separa los límites de selección y reutiliza esa geometría al cambiar candidatos. Conserva los límites de selección y meshing; una selección muy fragmentada puede superar el presupuesto y requerir reducir su tamaño. `Original` compara con el borrador anterior al preview; `Confirm` aplica el candidato elegido. El tinte se suprime durante la comparación y `Outline` permite mostrar el contorno, oculto por defecto para no tapar el acabado. Cerrar la ventana, recargar scripts o entrar en Play Mode descarta el preview; los cambios previamente confirmados siguen sujetos al guardado y recuperación del borrador. Undo/Redo durante el preview lo cancela primero, sin recorrer el historial. La vista de diagnóstico anterior se conserva al salir. El intercambio externo de RGB duplicados continúa pendiente de certificación.
 
+### Preview de reducción al siguiente LOD
+
+`Preview Next LOD`, en la barra `View`, requiere una familia de producción vinculada y un siguiente nivel definido en su perfil con tamaño voxel mayor. Calcula bajo demanda el resultado de `Reduce` desde el borrador completo, incluidos cambios sin guardar. Utiliza el mismo reductor, resolución, padding, alineación y política de cavidades que la derivación de producción.
+
+1. Alternar `Draft` e `If Regenerated: Reduce` para comparar manteniendo la cámara. Las vistas Lit, Base Color, SurfaceID y Emission están disponibles; SurfaceID conserva su leyenda lateral.
+2. En `Draft`, activar `Changed Finish` para resaltar en rojo las caras expuestas cuyo par ColorID/SurfaceID pierde frente al elegido en la celda gruesa compatible. Las caras interiores y las orientaciones incompatibles no se consideran pérdidas de acabado. La ausencia de rojo no garantiza conservar silueta, huecos o relieve.
+3. Pulsar `Return to Paint` o `Esc` para continuar editando. Undo/Redo durante el preview primero vuelve al pintor sin recorrer el historial. La selección y el aislamiento anterior se conservan; el cálculo siempre utiliza la fuente completa.
+
+El LOD guardado no se carga como resultado ni se modifica: puede contener retoques distintos del resultado hipotético. El preview no guarda archivos, crea assets ni regenera niveles. Se reutiliza mientras el borrador y los parámetros sigan vigentes; los cambios del proyecto pueden marcarlo como desactualizado. `Refresh` verifica fuentes y recalcula; un conflicto externo exige volver y recargar `Source`. La generación y el diagnóstico son cancelables y respetan los límites de volumen y meshing. Cerrar la ventana, recargar scripts o entrar en Play Mode libera los recursos temporales. La rejilla gruesa local y la inspección de votos por bloque quedan fuera de esta versión.
+
 ### Vistas de diagnóstico y aislamiento
 
 El selector `View` cambia únicamente la previsualización. No modifica los IDs, las LUT, los materiales compartidos, los archivos fuente ni el historial de edición.

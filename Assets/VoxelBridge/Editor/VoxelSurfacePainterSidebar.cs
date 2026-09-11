@@ -83,7 +83,8 @@ namespace LocalModels.VoxelBridge
         {
             GUILayout.Space(4);
             GUILayout.Label("SurfaceID Legend", EditorStyles.boldLabel);
-            GUILayout.Label(isolation == null ? "Used in model (includes hidden)" : "Used in isolated group", EditorStyles.miniLabel);
+            GUILayout.Label(reductionActive ? (reductionOriginal || ReductionStale ? "Full draft (includes hidden)" : "Reduced result (includes hidden)") :
+                isolation == null ? "Used in model (includes hidden)" : "Used in isolated group", EditorStyles.miniLabel);
             var grid = ViewGrid;
             if (!ReferenceEquals(legendGrid, grid) || legendRevision != edit.SurfaceRevision)
             { legendIds = UsedSurfaceIds(grid); legendGrid = grid; legendRevision = edit.SurfaceRevision; }

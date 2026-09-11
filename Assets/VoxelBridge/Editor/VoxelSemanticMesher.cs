@@ -53,6 +53,17 @@ namespace LocalModels.VoxelBridge
             return BuildRegion(grid, exterior, Vector3Int.zero, grid.Size, progress, MaximumQuads, false, selection);
         }
 
+        // Diagnostic face flags use the same bounded greedy mesher, without a painting selection limit.
+        internal static Mesh BuildReductionLossPreview(VoxelGrid grid, byte[] faces, bool hideEnclosedCavities,
+            Action<float> progress = null)
+        {
+            if (grid == null || !grid.IsSemantic || faces == null || faces.Length != grid.Occupied.Length)
+                throw new ArgumentException("A semantic grid and one face mask per cell are required.");
+            ValidateGrid(grid.Size, grid.Origin, grid.VoxelSize);
+            bool[] exterior = hideEnclosedCavities ? FindExterior(grid, progress) : null;
+            return BuildRegion(grid, exterior, Vector3Int.zero, grid.Size, progress, MaximumQuads, false, null, faces);
+        }
+
         internal static Mesh[] BuildChunks(VoxelGrid grid, int chunkSize, bool hideEnclosedCavities,
             Action<float> progress = null)
         {
@@ -86,7 +97,7 @@ namespace LocalModels.VoxelBridge
         }
 
         private static Mesh BuildRegion(VoxelGrid grid, bool[] exterior, Vector3Int offset, Vector3Int size,
-            Action<float> progress, int maximumQuads, bool allowEmpty, HashSet<int> selection = null)
+            Action<float> progress, int maximumQuads, bool allowEmpty, HashSet<int> selection = null, byte[] diagnosticFaces = null)
         {
             var vertices = new List<Vector3>();
             var normals = new List<Vector3>();
@@ -94,7 +105,7 @@ namespace LocalModels.VoxelBridge
             var colors = new List<Vector2>();
             var surfaces = new List<Vector2>();
             var triangles = new List<int>();
-            var selectedVertices = selection == null ? null : new List<Vector2>();
+            var selectedVertices = selection == null && diagnosticFaces == null ? null : new List<Vector2>();
             int totalSlices = size.x + size.y + size.z + 3;
             int completedSlices = 0;
 
@@ -125,7 +136,9 @@ namespace LocalModels.VoxelBridge
                             if (exterior == null || air < 0 || exterior[air])
                             {
                                 int cell = solidA ? a : b;
-                                int selectedFlag = selection != null && selection.Contains(cell) ? 65536 : 0;
+                                int faceBit = 1 << (axis * 2 + (solidA ? 1 : 0));
+                                int selectedFlag = (selection != null && selection.Contains(cell) ||
+                                    diagnosticFaces != null && (diagnosticFaces[cell] & faceBit) != 0) ? 65536 : 0;
                                 value = (grid.SemanticIds[cell] + selectedFlag + 1) * (solidA ? 1 : -1);
                             }
                         }

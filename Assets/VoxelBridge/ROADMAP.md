@@ -8,7 +8,7 @@ Voxel Bridge debe producir familias voxel físicamente coherentes y editables, i
 
 1. Mantener la conversión individual y por lotes, las paletas globales, el transporte semántico y los prefabs de producción como base del flujo.
 2. Validar artísticamente `Surface Painter`, la edición de ColorID/SurfaceID, sus herramientas de selección, cuentagotas, vistas de diagnóstico, aislamiento y comparación temporal de acabados sobre modelos representativos.
-3. Validar artísticamente la preasignación PBR opcional y sus perfiles de candidatos; verificar el intercambio con MagicaVoxel y la derivación de LODs después de editar superficies.
+3. Validar artísticamente el preview temporal del siguiente LOD con el reductor real; continuar la validación de la preasignación PBR y del intercambio con MagicaVoxel.
 4. Completar las validaciones funcionales pendientes de materiales especiales, iluminación y carga/descarga de subescenas sobre assets representativos.
 5. Evaluar primero la autoría de geometría uniforme con detalle superficial separado; retomar las mediciones de rendimiento por LOD, sombras, transparencias, culling y streaming cuando exista una distribución representativa del mapa.
 6. Adaptar el horneado de impostores a las paletas semánticas antes de evaluar su calidad y coste. Comparar agrupación manual, HLOD e impostores sin imponer una técnica a todos los assets.
@@ -25,7 +25,7 @@ La consolidación artística de las paletas puede continuar durante la validaci�
 | Materiales semánticos | Disponible: paletas, catálogo recomendado de 44 superficies, visor HDRP temporal, perfiles cromáticos, bindings por slot, LUT y mesher opaco compartido. |
 | Familias y combinación | Disponible: edición de fuentes, reconstrucción, duplicación independiente de familias guardadas, derivación de LODs y unión exacta de conjuntos compactos. La duplicación de variantes, prefabs anidados e impostores horneados queda fuera del alcance actual. |
 | DOTS y subescenas | Integración y diagnóstico disponibles; validación funcional inicial de instancias, recursos compartidos y frustum. No equivale a certificar rendimiento, sombras, oclusión o streaming de producción. |
-| Autoría visual de superficies | Disponible: selección espacial y semántica, edición independiente de ColorID/SurfaceID, cuentagotas, diagnóstico, aislamiento, miniaturas y comparación temporal sobre selección con confirmación, Undo/Redo y guardado recuperable. Pendiente: validación artística y certificación del intercambio externo de RGB duplicados. |
+| Autoría visual de superficies | Disponible: selección espacial y semántica, edición independiente de ColorID/SurfaceID, diagnóstico, aislamiento, comparación temporal de acabados y reducción al siguiente LOD, Undo/Redo y guardado recuperable. Pendiente: validación artística, rejilla local de reducción y certificación del intercambio externo de RGB duplicados. |
 | Intercambio de RGB duplicados | Pendiente de certificar en MagicaVoxel; la escritura y lectura controladas por Voxel Bridge conservan los pares. |
 | Preasignación PBR | Disponible y opcional para HDRP/Lit Standard: candidatos por perfil, muestreo de constantes o Mask Map UV0, distancia y separación mínimas, fallback e informe por LOD. Pendientes: validación artística, calidad espacial de la clasificación y ampliación de shaders/configuraciones según casos reales. |
 | Geometría limpia y detalle separado | Enfoque de diseño para una fase posterior: regiones uniformes, detalle del shader alineado a la unidad voxel mínima y anuncios sobre quads separados. Prototipo y mediciones pendientes. |
@@ -87,6 +87,15 @@ El flujo recomendado será: preparar geometría y colores de LOD0 en MagicaVoxel
 La validación externa debe guardar y reabrir un fixture con el mismo ColorID y superficies distintas, varios chunks y un cambio controlado de color u ocupación. Comparar los pares por coordenada, no sólo el aspecto visual. Hasta completar esa prueba, el flujo de ida y vuelta con RGB duplicados mantiene una advertencia accesible en la ayuda y en `Source Actions > External Editing Notice`, y no debe presentarse como certificado. Si falla, evaluar una representación por voxel con reconciliación explícita antes de ampliar el formato; no introducirla preventivamente.
 
 Los descendientes existentes nunca se sobrescriben al guardar una superficie. `Rebuild` no transmite cambios entre niveles. Crear niveles mediante reducción o duplicación sí parte de los pares del padre; actualizar un descendiente existente requiere `Regenerate`, con la advertencia de pérdida de sus retoques. La reducción prioriza caras expuestas compatibles y utiliza mayoría por volumen para interiores. Los emisivos no tienen prioridad incondicional: regiones pequeñas o acabados que comparten un voxel grueso pueden perderse. Evaluar la fidelidad artística además de la reducción de geometría.
+
+### Preview de reducción al siguiente LOD
+
+Disponible: comparación del borrador completo, incluidos cambios sin guardar, con el resultado temporal de `Reduce` al siguiente nivel. Utiliza el reductor, resolución, padding y alineación de la familia y conserva cámara y orientación al alternar. El preview no representa el LOD guardado ni modifica fuentes, mallas persistentes, historial o retoques de descendientes. El [procedimiento de uso](README.md#preview-de-reducción-al-siguiente-lod) describe sus controles y límites.
+
+- Primera entrega disponible: alternancia borrador/reducción, vistas Lit, Base Color, SurfaceID y Emission, información de nivel y tamaño voxel, y diagnóstico de contribuciones expuestas cuyo ColorID/SurfaceID pierde frente al par elegido. Pendiente de validación artística sobre más modelos representativos.
+- Las contribuciones interiores o caras incompatibles no deben presentarse como pérdidas visibles de acabado. Conservar un par no garantiza conservar silueta, huecos ni relieve; comparar también la geometría.
+- Calcular bajo demanda con cancelación, reutilizar resultados mientras el borrador y los parámetros sigan vigentes, e identificar resultados desactualizados. No recalcular al mover el puntero.
+- Fase posterior: rejilla gruesa local cerca del pincel o selección e inspección de votos por bloque. El resultado reducido tiene prioridad sobre la rejilla; la herramienta no limita el pincel ni obliga a pintar por bloques.
 
 ### Entregas y criterios de aceptación
 

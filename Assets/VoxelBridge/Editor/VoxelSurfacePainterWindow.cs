@@ -48,8 +48,8 @@ namespace LocalModels.VoxelBridge
         private Material material;
         private Material diagnosticMaterial;
         private VoxelPainterIsolation isolation;
-        private VoxelGrid ViewGrid => isolation?.Grid ?? edit.Grid;
-        private Mesh ViewMesh => appearancePreview != null && !compareOriginalAppearance ? appearancePreview.Mesh : isolation?.Mesh ?? mesh;
+        private VoxelGrid ViewGrid => reductionActive ? ReductionViewGrid : isolation?.Grid ?? edit.Grid;
+        private Mesh ViewMesh => reductionActive ? ReductionViewMesh : appearancePreview != null && !compareOriginalAppearance ? appearancePreview.Mesh : isolation?.Mesh ?? mesh;
         internal const string DiagnosticShaderPath = "Assets/VoxelBridge/Editor/Shaders/VoxelPainterDiagnostic.shader";
         private static readonly int ViewModeProperty = Shader.PropertyToID("_ViewMode");
         private string status;
@@ -287,6 +287,7 @@ namespace LocalModels.VoxelBridge
 
         private void ReleasePreview()
         {
+            ReleaseReductionPreview();
             legendGrid = null; legendRevision = -1; legendIds = Array.Empty<int>();
             CancelAppearancePreview();
             thumbnails?.Dispose(); thumbnails = null;
@@ -320,6 +321,7 @@ namespace LocalModels.VoxelBridge
 
         private bool DrawControls()
         {
+            if (reductionActive) return DrawReductionSession();
             if (appearancePreview != null) return DrawAppearanceSession();
             Object candidate;
             using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
@@ -450,7 +452,9 @@ namespace LocalModels.VoxelBridge
                     if (GUILayout.Button(new GUIContent(isolation == null ? "Isolate Selection" : "Show All",
                         "Fija el grupo visible hasta Show All. Las herramientas sólo operan dentro del grupo; limpiar la selección no lo oculta. Undo sale del aislamiento si recupera una selección externa."), EditorStyles.toolbarButton, GUILayout.Width(120)))
                         Run(() => SetIsolation(isolation == null));
-                if (isolation != null) GUILayout.Label($"Isolated {isolation.Cells.Count:N0}", EditorStyles.miniLabel, GUILayout.Width(105));
+                if (isolation != null && position.width > 950) GUILayout.Label($"Isolated {isolation.Cells.Count:N0}", EditorStyles.miniLabel, GUILayout.Width(105));
+                if (GUILayout.Button(new GUIContent("Preview Next LOD", "Comparar el borrador completo con una reducción temporal usando la configuración real de la familia. No guarda ni regenera archivos."),
+                    EditorStyles.toolbarButton, GUILayout.Width(125))) Run(StartReductionPreview);
                 GUILayout.FlexibleSpace();
                 Rect swatch = GUILayoutUtility.GetRect(14, 14, GUILayout.Width(14));
                 string label = "Hover a voxel", tooltip = "SurfaceID y emisión del voxel bajo el puntero.";
@@ -464,7 +468,7 @@ namespace LocalModels.VoxelBridge
                         tooltip = $"SurfaceID {id:000} · Emission {surface.Emission:0.###}\nColor de diagnóstico, no ColorID. Emission resalta presencia emisiva en la LUT, sin clasificar LED o neón por brillo.";
                     }
                 }
-                GUILayout.Label(new GUIContent(label, tooltip), EditorStyles.miniLabel, GUILayout.Width(175));
+                GUILayout.Label(new GUIContent(label, tooltip), EditorStyles.miniLabel, GUILayout.MinWidth(60), GUILayout.MaxWidth(175));
             }
         }
 
@@ -498,6 +502,10 @@ namespace LocalModels.VoxelBridge
 
         private Material ViewMaterial()
         {
+            if (reductionActive && reductionOriginal && reductionLosses && !ReductionStale)
+            {
+                var lossMaterial = GetDiagnosticMaterial(); lossMaterial.SetFloat(ViewModeProperty, 4); return lossMaterial;
+            }
             if (appearancePreview != null || viewMode == VoxelPainterViewMode.Lit) return material;
             Material view = GetDiagnosticMaterial();
             view.SetFloat(ViewModeProperty, (int)viewMode);
@@ -590,6 +598,7 @@ namespace LocalModels.VoxelBridge
 
         private void OnGUI()
         {
+            HandleReductionKeys(Event.current);
             HandleAppearanceKeys(Event.current);
             using (new EditorGUI.DisabledScope(selectionJob != null))
                 if (!DrawControls()) return;
@@ -606,10 +615,17 @@ namespace LocalModels.VoxelBridge
             {
                 Rect viewport = GUILayoutUtility.GetRect(100, 100, GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true));
                 DrawPreview(viewport);
-                if (editColor || (viewMode == VoxelPainterViewMode.SurfaceID && appearancePreview == null))
+                if (reductionActive ? viewMode == VoxelPainterViewMode.SurfaceID && !reductionLosses :
+                    editColor || (viewMode == VoxelPainterViewMode.SurfaceID && appearancePreview == null))
                     using (new EditorGUI.DisabledScope(selectionJob != null))
                     using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox, GUILayout.Width(SidebarWidth), GUILayout.ExpandHeight(true)))
-                        DrawSidebar();
+                        if (reductionActive)
+                        {
+                            sidebarScroll = EditorGUILayout.BeginScrollView(sidebarScroll);
+                            DrawSurfaceLegend();
+                            EditorGUILayout.EndScrollView();
+                        }
+                        else DrawSidebar();
             }
         }
 
@@ -632,17 +648,20 @@ namespace LocalModels.VoxelBridge
                 // BeginClip also changes Event.mousePosition's coordinate space. Snapshot
                 // both position and containment before entering the local viewport.
                 Vector2 localPointer = e.mousePosition - rect.position;
-                bool drawBrushCursor = appearancePreview == null && selectionTool == VoxelSelectionTool.Brush && rect.Contains(e.mousePosition);
+                bool drawBrushCursor = !reductionActive && appearancePreview == null && selectionTool == VoxelSelectionTool.Brush && rect.Contains(e.mousePosition);
                 preview.BeginPreview(rect, GUIStyle.none);
                 Texture texture;
                 bool failed = false;
                 try
                 {
-                    UpdateSelectionOverlay();
+                    if (!reductionActive) UpdateSelectionOverlay();
                     preview.DrawMesh(ViewMesh, Matrix4x4.identity, ViewMaterial(), 0);
-                    if (appearancePreview == null || previewOutline)
-                        foreach (var faces in selectionMeshes) preview.DrawMesh(faces, Matrix4x4.identity, selectionMaterial, 0);
-                    foreach (var faces in hoverMeshes) preview.DrawMesh(faces, Matrix4x4.identity, hoverMaterial, 0);
+                    if (!reductionActive)
+                    {
+                        if (appearancePreview == null || previewOutline)
+                            foreach (var faces in selectionMeshes) preview.DrawMesh(faces, Matrix4x4.identity, selectionMaterial, 0);
+                        foreach (var faces in hoverMeshes) preview.DrawMesh(faces, Matrix4x4.identity, hoverMaterial, 0);
+                    }
                     preview.Render(true, false);
                 }
                 catch (Exception exception)
@@ -698,7 +717,7 @@ namespace LocalModels.VoxelBridge
             }
             if (e.type == EventType.MouseDrag && (e.alt || e.button == 1))
             { orbit = RotateView(orbit, e.delta); selecting = false; e.Use(); Repaint(); }
-            if (appearancePreview != null) return;
+            if (appearancePreview != null || reductionActive) return;
             if (e.type == EventType.MouseDown && e.button == 0 && !e.alt)
             {
                 if (selectionTool == VoxelSelectionTool.Match || selectionTool == VoxelSelectionTool.Pick)
@@ -828,6 +847,7 @@ namespace LocalModels.VoxelBridge
 
         private void ApplyHistoryShortcut(bool redo)
         {
+            if (reductionActive) { ExitReductionPreview(); return; }
             if (appearancePreview != null) { CancelAppearancePreview(); Repaint(); return; }
             if (edit == null || selectionJob != null || EditorApplication.isPlayingOrWillChangePlaymode || EditorGUIUtility.editingTextField) return;
             if (redo ? edit.CanRedo : edit.CanUndo) Run(() => Change(redo ? edit.Redo : edit.Undo));
@@ -884,6 +904,7 @@ namespace LocalModels.VoxelBridge
 
         private void SaveSource()
         {
+            if (reductionActive) throw new InvalidOperationException("Return to Paint before saving the draft.");
             if (appearancePreview != null) throw new InvalidOperationException("Confirm or cancel the appearance preview before saving.");
             if (edit == null) throw new InvalidOperationException("Load a valid source before saving.");
             string warning = VoxelSurfaceEditStore.Save(SourcePath, edit);
@@ -895,6 +916,7 @@ namespace LocalModels.VoxelBridge
 
         private void Rebuild()
         {
+            if (reductionActive) throw new InvalidOperationException("Return to Paint before rebuilding.");
             ResolveRebuildTarget(out string path, out string manifestPath);
             if (manifestPath != null) VoxelProductionFamily.RebuildLevel(manifestPath, level, VoxelProductionEditor.Progress);
             else VoxelProductionExporter.Rebuild(path, VoxelProductionEditor.Progress);
@@ -904,6 +926,7 @@ namespace LocalModels.VoxelBridge
 
         private void SaveAndRebuild()
         {
+            if (reductionActive) throw new InvalidOperationException("Return to Paint before saving or rebuilding.");
             ResolveRebuildTarget(out _, out _);
             if (edit == null) throw new InvalidOperationException("Load a valid source before rebuilding.");
             if (edit.PendingCells > 0)
@@ -932,7 +955,7 @@ namespace LocalModels.VoxelBridge
             }
         }
 
-        public override void SaveChanges() { CancelAppearancePreview(); SaveSource(); base.SaveChanges(); }
+        public override void SaveChanges() { ExitReductionPreview(); CancelAppearancePreview(); SaveSource(); base.SaveChanges(); }
         public override void DiscardChanges() { CancelAppearancePreview(); ResetDraft(); base.DiscardChanges(); }
         private void ResetDraft() { draftCells = Array.Empty<int>(); draftSurfaces = Array.Empty<int>(); draftColors = Array.Empty<int>(); draftFingerprint = null; hasUnsavedChanges = false; }
         private bool ConfirmLeave()

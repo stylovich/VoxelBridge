@@ -545,7 +545,7 @@ namespace LocalModels.VoxelBridge
             }
         }
 
-        private static int ExposedFaces(VoxelGrid grid, int index, bool[] exterior)
+        internal static int ExposedFaces(VoxelGrid grid, int index, bool[] exterior)
         {
             grid.Coordinates(index, out int x, out int y, out int z);
             int width = grid.Size.x, plane = width * grid.Size.y, faces = 0;
@@ -559,7 +559,7 @@ namespace LocalModels.VoxelBridge
             return faces;
         }
 
-        private static int MapTargetIndex(
+        internal static int MapTargetIndex(
             VoxelGrid source, VoxelGrid result, float targetVoxelSize, int sourceIndex)
         {
             source.Coordinates(sourceIndex, out int x, out int y, out int z);
