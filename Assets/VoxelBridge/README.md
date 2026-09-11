@@ -246,7 +246,11 @@ El modo manual ofrece dos operaciones:
 - `Duplicate Previous (Free Editing)`: copiar el archivo para una simplificación artística libre.
 - `Reduce to Target Resolution`: remuestrear el volumen editado a la unidad del nuevo nivel.
 
-En un volumen semántico, la reducción conserva el par `ColorID + SurfaceID` mayoritario por celda y resuelve empates de forma determinista.
+En un volumen semántico, la reducción prioriza el par `ColorID + SurfaceID` con mayor área de caras expuestas orientadas como los límites del voxel reducido. El relleno interior no compite con esas caras; si no hay contribuciones expuestas compatibles, se utiliza la mayoría por volumen. Los empates se resuelven por el par de IDs menor. La política de cavidades del padre se aplica al volumen completo, sin tratar las fronteras entre chunks como superficies exteriores.
+
+Cada voxel reducido conserva un único par existente del bloque fuente. `Default` sigue siendo una superficie válida y los emisivos no reciben prioridad incondicional: una región pequeña o dos acabados que comparten una celda gruesa pueden requerir retoques. La ocupación, la alineación y el tamaño de la rejilla no dependen de esta selección de acabados; conservar más límites semánticos puede aumentar el número de triángulos frente a la mayoría por volumen. La ruta RGB conserva su promedio de color.
+
+La regla se aplica al crear niveles por reducción o al confirmar `Regenerate: Reduce`. `Rebuild` sólo reconstruye las mallas del VOX guardado, sin transferir nuevamente acabados desde el padre. Los LODs existentes no se regeneran automáticamente al actualizar el reductor; conservar una copia antes de reemplazar retoques manuales.
 
 `Rebuild Prefab from Manifest` reconstruye la familia y resincroniza sus imports. Conserva la ruta registrada y el GUID del prefab, incluso si se ha reubicado. Un perfil o manifiesto requerido que falta produce un error; la herramienta no inventa transiciones ni sustituye la familia silenciosamente.
 

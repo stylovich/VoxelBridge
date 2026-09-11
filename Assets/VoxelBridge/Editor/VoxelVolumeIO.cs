@@ -417,13 +417,17 @@ namespace LocalModels.VoxelBridge
 
     internal static class VoxelGridDownsampler
     {
-        public static VoxelGrid Downsample(VoxelGrid source, float targetVoxelSize, int padding, int chunkCellSize)
+        public static VoxelGrid Downsample(VoxelGrid source, float targetVoxelSize, int padding, int chunkCellSize,
+            bool hideEnclosedCavities = false, Action<float> progress = null)
         {
+            if (source == null) throw new ArgumentNullException(nameof(source));
+            if (source.IsSemantic) VoxelSemanticMesher.ValidateGrid(source.Size, source.Origin, source.VoxelSize);
             bool found = false;
             Vector3 min = default;
             Vector3 max = default;
             for (int i = 0; i < source.Occupied.Length; i++)
             {
+                if ((i & 65535) == 0) progress?.Invoke(.05f * i / source.Occupied.Length);
                 if (!source.Occupied[i]) continue;
                 source.Coordinates(i, out int x, out int y, out int z);
                 Vector3 cellMin = source.Origin + new Vector3(x, y, z) * source.VoxelSize;
@@ -435,10 +439,12 @@ namespace LocalModels.VoxelBridge
 
             Bounds bounds = new Bounds((min + max) * 0.5f, max - min);
             VoxelGridPlan plan = VoxelGridPlanner.Create(bounds, targetVoxelSize, padding, chunkCellSize);
+            if (source.IsSemantic) VoxelSemanticMesher.ValidateGrid(plan.Size, plan.Origin, targetVoxelSize);
             var result = new VoxelGrid(plan.Size, plan.Origin, targetVoxelSize, source.IsSemantic);
             if (source.IsSemantic)
             {
-                DownsampleSemantics(source, result, targetVoxelSize);
+                DownsampleSemantics(source, result, targetVoxelSize, hideEnclosedCavities, progress);
+                progress?.Invoke(1);
                 return result;
             }
             var counts = new int[result.Occupied.Length];
@@ -447,6 +453,7 @@ namespace LocalModels.VoxelBridge
             var blue = new long[result.Occupied.Length];
             for (int i = 0; i < source.Occupied.Length; i++)
             {
+                if ((i & 65535) == 0) progress?.Invoke(.05f + .9f * i / source.Occupied.Length);
                 if (!source.Occupied[i]) continue;
                 source.Coordinates(i, out int x, out int y, out int z);
                 Vector3 center = source.Origin + new Vector3(x + 0.5f, y + 0.5f, z + 0.5f) * source.VoxelSize;
@@ -470,50 +477,86 @@ namespace LocalModels.VoxelBridge
                     (byte)(green[i] / counts[i]),
                     (byte)(blue[i] / counts[i]), 255);
             }
+            progress?.Invoke(1);
             return result;
         }
 
         private static void DownsampleSemantics(
-            VoxelGrid source, VoxelGrid result, float targetVoxelSize)
+            VoxelGrid source, VoxelGrid result, float targetVoxelSize, bool hideEnclosedCavities,
+            Action<float> progress)
         {
+            // One packed vote per occupied source cell: target, semantic pair, six exposed-face bits.
+            // This retains the previous bounded vote-array size and never creates new semantic pairs.
+            const int targetShift = 22;
+            bool[] sourceExterior = hideEnclosedCavities
+                ? VoxelSemanticMesher.FindExterior(source, v => progress?.Invoke(.05f + .5f * v)) : null;
             var votes = new ulong[source.CountOccupied()];
             int voteIndex = 0;
             for (int i = 0; i < source.Occupied.Length; i++)
             {
+                if ((i & 65535) == 0) progress?.Invoke(.15f + .35f * i / source.Occupied.Length);
                 if (!source.Occupied[i]) continue;
                 int target = MapTargetIndex(source, result, targetVoxelSize, i);
-                votes[voteIndex++] = ((ulong)(uint)target << 16) | source.SemanticIds[i];
+                result.Occupied[target] = true;
+                votes[voteIndex++] = ((ulong)(uint)target << targetShift) |
+                    ((ulong)source.SemanticIds[i] << 6) | (uint)ExposedFaces(source, i, sourceExterior);
             }
+            bool[] targetExterior = hideEnclosedCavities
+                ? VoxelSemanticMesher.FindExterior(result, v => progress?.Invoke(.5f + .5f * v)) : null;
+            progress?.Invoke(.6f);
             Array.Sort(votes);
+            progress?.Invoke(.7f);
 
             int cursor = 0;
             while (cursor < votes.Length)
             {
-                int target = (int)(votes[cursor] >> 16);
+                int target = (int)(votes[cursor] >> targetShift);
+                int targetFaces = ExposedFaces(result, target, targetExterior);
                 ushort bestSemantic = 0;
                 int bestCount = -1;
-                while (cursor < votes.Length && (int)(votes[cursor] >> 16) == target)
+                int bestArea = 0;
+                while (cursor < votes.Length && (int)(votes[cursor] >> targetShift) == target)
                 {
-                    ushort semantic = (ushort)votes[cursor];
-                    int count = 0;
+                    ushort semantic = (ushort)(votes[cursor] >> 6);
+                    int count = 0, area = 0;
                     do
                     {
+                        if ((cursor & 65535) == 0) progress?.Invoke(.7f + .3f * cursor / votes.Length);
                         count++;
+                        int faces = (int)(votes[cursor] & 63) & targetFaces;
+                        while (faces != 0) { area++; faces &= faces - 1; }
                         cursor++;
                     }
                     while (cursor < votes.Length &&
-                           (int)(votes[cursor] >> 16) == target &&
-                           (ushort)votes[cursor] == semantic);
+                           (int)(votes[cursor] >> targetShift) == target &&
+                           (ushort)(votes[cursor] >> 6) == semantic);
 
-                    if (count > bestCount || count == bestCount && semantic < bestSemantic)
+                    // Visible source faces with the same orientation as the coarse boundary take priority.
+                    // Interiors fall back to volume majority. Sorted pairs resolve exact ties by lowest ID;
+                    // volume must not break a surface-area tie in favor of interior fill.
+                    if (bestCount < 0 || area > bestArea || area == 0 && bestArea == 0 && count > bestCount)
                     {
                         bestSemantic = semantic;
                         bestCount = count;
+                        bestArea = area;
                     }
                 }
-                result.Occupied[target] = true;
                 result.SemanticIds[target] = bestSemantic;
             }
+        }
+
+        private static int ExposedFaces(VoxelGrid grid, int index, bool[] exterior)
+        {
+            grid.Coordinates(index, out int x, out int y, out int z);
+            int width = grid.Size.x, plane = width * grid.Size.y, faces = 0;
+            bool Air(int neighbor) => !grid.Occupied[neighbor] && (exterior == null || exterior[neighbor]);
+            if (x == 0 || Air(index - 1)) faces |= 1;
+            if (x + 1 == width || Air(index + 1)) faces |= 2;
+            if (y == 0 || Air(index - width)) faces |= 4;
+            if (y + 1 == grid.Size.y || Air(index + width)) faces |= 8;
+            if (z == 0 || Air(index - plane)) faces |= 16;
+            if (z + 1 == grid.Size.z || Air(index + plane)) faces |= 32;
+            return faces;
         }
 
         private static int MapTargetIndex(

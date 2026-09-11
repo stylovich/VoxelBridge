@@ -431,7 +431,7 @@ namespace LocalModels.VoxelBridge.Tests
         }
 
         [Test]
-        public void SemanticDownsampler_UsesMajorityAndLowerPairForTies()
+        public void SemanticDownsampler_UsesExposedAreaAndLowerPairForTies()
         {
             var majority = new VoxelGrid(new Vector3Int(4, 1, 1), Vector3.zero, 0.1f, true);
             ushort low = VoxelSemanticEncoding.Pack(1, 1);
@@ -445,8 +445,10 @@ namespace LocalModels.VoxelBridge.Tests
             VoxelGrid majorityResult = VoxelGridDownsampler.Downsample(majority, 0.4f, 0, 16);
             Assert.That(majorityResult.SemanticIds.Single(), Is.EqualTo(high));
 
-            majority.SemanticIds[1] = low;
+            // Each pair covers one end cap and two side segments: equal exposed area.
+            majority.SemanticIds[1] = high;
             majority.SemanticIds[2] = low;
+            majority.SemanticIds[3] = low;
             VoxelGrid tieResult = VoxelGridDownsampler.Downsample(majority, 0.4f, 0, 16);
             Assert.That(tieResult.SemanticIds.Single(), Is.EqualTo(low));
         }

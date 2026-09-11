@@ -92,7 +92,7 @@ El perfil rechaza IDs desconocidos y superficies no opacas destinadas a voxeliza
 
 La conversión no amplía automáticamente la paleta global. Una muestra de color fuera de `Maximum Automatic Distance` detiene la fuente con un error; las coincidencias de color sobre `Warning Distance` producen un aviso resumido por LOD. Estos límites cromáticos son independientes del fallback por semejanza PBR. Cada `.vox` admite hasta 255 pares locales; superar ese límite requiere reducir el conjunto de colores o superficies del modelo.
 
-El sidecar conserva la tabla de slots y las referencias a las paletas y al perfil de color. Duplicar un LOD mantiene estos datos; reducirlo selecciona el par mayoritario mediante el desempate estable del reductor. Los descendientes reconstruidos desde el modelo original aplican otra vez las reglas de conversión, sin heredar ediciones posteriores realizadas en otro `.vox`.
+El sidecar conserva la tabla de slots y las referencias a las paletas y al perfil de color. Duplicar un LOD mantiene estos datos; reducirlo selecciona pares existentes priorizando las caras expuestas, con mayoría por volumen para interiores. Los descendientes reconstruidos desde el modelo original aplican otra vez las reglas de conversión, sin heredar ediciones posteriores realizadas en otro `.vox`.
 
 ## Vinculación semántica de `.vox`
 
@@ -168,7 +168,9 @@ El flujo RGB utiliza sidecars v3 y la vinculación semántica produce sidecars v
 
 Un volumen semántico almacena el par en 16 bits: ocho para `ColorID` y ocho para `SurfaceID`. Esta representación sustituye al array RGB de la rejilla y evita mantener ambas copias en memoria.
 
-La reducción manual selecciona el par mayoritario dentro de cada nueva celda. Los empates se resuelven por el valor estable menor. La duplicación manual copia el `.vox` y su sidecar sin reinterpretación. La conversión física con `Conversion Profile` asigna los IDs desde las muestras y reglas de materiales antes de exportar; sin ese perfil, la ruta RGB requiere vincularlos posteriormente. `All Profile Levels` convierte cada nivel desde la malla fuente y no hereda retoques del LOD0.
+La reducción manual selecciona dentro de cada nueva celda el par con mayor contribución de caras expuestas en las mismas orientaciones que sus límites. Respeta la política de cavidades del padre. Si no hay caras compatibles, selecciona la mayoría por volumen; los empates se resuelven por el par de IDs menor. No mezcla ColorID y SurfaceID de candidatos diferentes ni crea nuevos pares. Un detalle emisivo pequeño puede perder frente a otra superficie de mayor cobertura; no se amplifica automáticamente por ser emisivo.
+
+La duplicación manual copia el `.vox` y su sidecar sin reinterpretación. La conversión física con `Conversion Profile` asigna los IDs desde las muestras y reglas de materiales antes de exportar; sin ese perfil, la ruta RGB requiere vincularlos posteriormente. `All Profile Levels` convierte cada nivel desde la malla fuente y no hereda retoques del LOD0.
 
 Voxel Bridge lee los índices directamente del binario `.vox`. El mesh y el atlas generados por Voxel Importer se utilizan como previsualización, no como fuente semántica, porque el importador puede compactar su paleta interna.
 
@@ -247,7 +249,7 @@ Los prefabs generados sólo requieren sus mallas, material, shader y texturas en
 1. Asignar `Conversion Profile` y seleccionar `Generate Levels > LOD0 Only` en `Physical Models and LODs`. Las LUT de las paletas deben estar actualizadas.
 2. Convertir la fuente. La herramienta genera directamente un prefab semántico vinculado; `Place Result in Scene` permite colocarlo y desactivar el original.
 3. Revisar `ColorID + SurfaceID` con `Semantic Bindings` y editar LOD0 mediante `Open in MagicaVoxel`, desde el Inspector del prefab. Utilizar `Rebuild` después de guardar.
-4. Seleccionar el prefab de familia. `Duplicate Previous` copia el nivel anterior sin reinterpretar sus slots; `Reduce Previous` selecciona el par semántico mayoritario por celda, con desempate estable. `Generate Remaining LODs by Reduction` crea únicamente los niveles que faltan.
+4. Seleccionar el prefab de familia. `Duplicate Previous` copia el nivel anterior sin reinterpretar sus slots; `Reduce Previous` prioriza los pares de las caras expuestas, con mayoría por volumen para interiores y desempate estable. `Generate Remaining LODs by Reduction` crea únicamente los niveles que faltan.
 5. Utilizar `Open in MagicaVoxel`, `Semantic Bindings`, `Select Source` y `Rebuild` en la fila de cada LOD. Guardar en MagicaVoxel no reconstruye automáticamente el prefab.
 
 La conversión física guarda el manifiesto, el prefab, las mallas de chunks y las fuentes `.vox` en `<Model>_VoxelLOD`. `All Profile Levels` genera cada nivel desde la malla original, con sus propias vinculaciones; no hereda retoques de otros niveles. La reducción posterior utiliza la unidad base y el multiplicador inicial efectivo de la familia, incluidos los ajustes para modelos grandes. Duplicar conserva la resolución del padre.
@@ -264,7 +266,7 @@ Las familias admiten superficies opacas, una misma pareja de paletas globales y 
 
 ## Materiales en conjuntos combinados
 
-`Combine Voxel Models` une los pares globales de los LOD0 sin reconstruirlos desde RGB ni desde materiales de Unity. Requiere la misma pareja de paletas y revisiones vigentes. El archivo combinado crea su propia tabla de hasta 255 pares locales; el prefab reutiliza el material global compartido. Sus LODs derivados reducen el par completo mediante la regla mayoritaria existente.
+`Combine Voxel Models` une los pares globales de los LOD0 sin reconstruirlos desde RGB ni desde materiales de Unity. Requiere la misma pareja de paletas y revisiones vigentes. El archivo combinado crea su propia tabla de hasta 255 pares locales; el prefab reutiliza el material global compartido. Sus LODs derivados utilizan la misma reducción de pares completos basada en caras expuestas y mayoría interior.
 
 Las piezas `Keep Original` conservan materiales separados y copias de sus mallas. Cambiar una fuente de entrada después de combinar no modifica el conjunto: su autoría reside en el nuevo `.vox` y sidecar. Consultar el [flujo de combinación](README.md#combinación-de-modelos-voxel) para alineación, conflictos y colocación.
 

@@ -199,7 +199,8 @@ namespace LocalModels.VoxelBridge
                 {
                     float size = manifest.baseVoxelSize * multiplier;
                     if (size <= parentGrid.VoxelSize) throw new InvalidOperationException("The target voxel size must exceed the previous level's size.");
-                    VoxelGrid reduced = VoxelGridDownsampler.Downsample(parentGrid, size, profile.Padding, manifest.chunkCellSize);
+                    VoxelGrid reduced = VoxelGridDownsampler.Downsample(parentGrid, size, profile.Padding,
+                        manifest.chunkCellSize, parent.hideInternalCavities, progress);
                     VoxelSemanticMesher.ValidateGrid(reduced.Size, reduced.Origin, reduced.VoxelSize);
                     parent.baseVoxelSize = manifest.baseVoxelSize;
                     Bounds bounds = new Bounds((parent.sourceBoundsMin + parent.sourceBoundsMax) * 0.5f,

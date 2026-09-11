@@ -194,7 +194,7 @@ namespace LocalModels.VoxelBridge
             catch { UnityEngine.Object.DestroyImmediate(mesh); throw; }
         }
 
-        private static bool[] FindExterior(VoxelGrid grid, Action<float> progress)
+        internal static bool[] FindExterior(VoxelGrid grid, Action<float> progress)
         {
             int count = grid.Occupied.Length;
             var exterior = new bool[count];

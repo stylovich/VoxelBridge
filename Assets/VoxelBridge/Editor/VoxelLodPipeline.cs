@@ -737,7 +737,8 @@ namespace LocalModels.VoxelBridge
                     initialVoxelMultiplier * profile.GetLodMultiplier(targetLodIndex));
                 VoxelGrid parentGrid = VoxelVolumeReader.Read(AssetPathToAbsolute(parentVoxAssetPath), parent);
                 VoxelGrid reduced = VoxelGridDownsampler.Downsample(parentGrid,
-                    manifest.baseVoxelSize * targetMultiplier, profile.Padding, profile.ChunkCellSize);
+                    manifest.baseVoxelSize * targetMultiplier, profile.Padding, profile.ChunkCellSize,
+                    parent.hideInternalCavities);
                 Bounds sourceBounds = BoundsFromMetadataOrGrid(parent, parentGrid);
                 WriteGrid(targetPath, reduced, sourceBounds, parent.sourceName, parent.sourceAssetPath,
                     manifest.familyId, manifestPath, targetLodIndex, targetMultiplier, mode,
