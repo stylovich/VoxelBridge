@@ -282,6 +282,18 @@ La escala individual de una instancia no recalcula estas decisiones de autoría.
 
 `Generate Pending Impostors in Folder` procesa familias sin impostor disponible. `Remove Final Impostor` lo elimina del LODGroup y marca la familia como excluida de la generación de pendientes. Conserva los archivos de atlas para una regeneración posterior. La acción explícita de generación permite incorporarlo de nuevo.
 
+## Duplicación de familias editables
+
+`Duplicate Editable Family` está disponible en el Inspector del prefab de producción y en el menú contextual `Voxel Bridge > Production`, tanto en Project como en la jerarquía. Crea una carpeta hermana con sufijo `_Copy_VoxelLOD` y nombre único, y selecciona el nuevo prefab sin colocarlo ni reemplazar instancias en escena.
+
+La copia incluye los VOX y bindings de todos los LODs guardados, el manifiesto, las mallas, el prefab y la geometría `Keep Original`. Utiliza GUIDs y vínculos propios: pintar o reconstruir la copia no modifica las fuentes ni las mallas del original. Conserva los ajustes guardados del prefab y los avisos de mallas o descendientes pendientes; no regenera geometría durante la duplicación.
+
+Las paletas, LUT, perfiles y materiales permanecen compartidos. Cambiar una asignación de ColorID/SurfaceID en la copia es independiente; modificar una definición global de color, superficie o material afecta a todos sus consumidores. Los borradores del Painter y los overrides de instancias de escena no se incluyen: guardar o aplicar esos cambios antes de duplicar si deben formar parte de la copia.
+
+La operación requiere Edit Mode, una familia semántica válida y un prefab regular sin prefabs anidados ni impostores horneados. Los prefabs de producción independientes requieren primero `Create LOD Family`. No admite Undo de archivos; la cancelación o un error elimina únicamente la carpeta parcial creada por la operación. Una interrupción del Editor puede dejar una copia incompleta, sin modificar la familia original.
+
+Utilizar una copia para las pruebas de intercambio con MagicaVoxel. La duplicación conserva los pares semánticos, pero no certifica que una edición externa mantenga slots con RGB idéntico y SurfaceID diferentes.
+
 ## Conversión por resolución y retorno OBJ
 
 `Resolution-Based Conversion` genera un `.vox` individual según el número de celdas indicado para el eje principal, con máximo de 256 por eje. Resulta útil para una conversión aislada sin una familia física.

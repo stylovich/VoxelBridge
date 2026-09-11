@@ -226,7 +226,7 @@ La reconstrucción conserva los GUIDs del mesh y prefab, los transforms, compone
 
 El vínculo de autoría reside en `userData` del importador del prefab, dentro de su `.meta`; no añade componentes ni dependencias de runtime. Identifica por GUID la fuente y la malla. Mover esos assets dentro de Unity conserva el vínculo. El `.vox` debe permanecer junto a su sidecar con el mismo nombre base. Conservar todos sus archivos `.meta` al moverlos fuera del Editor.
 
-Un prefab sin vínculo requiere crear una salida desde su `.vox`; no se infieren asociaciones por nombre. Duplicar un prefab vinculado no crea una fuente independiente: para editar otro modelo, duplicar el `.vox` y su sidecar y exportar esa nueva fuente.
+Un prefab sin vínculo requiere crear una salida desde su `.vox`; no se infieren asociaciones por nombre. La duplicación normal de Unity no crea una fuente independiente. Para las familias de producción, utilizar `Duplicate Editable Family` desde el Inspector o el menú contextual: copia los VOX, sidecars, mallas y vínculos de todos sus LODs, conservando las paletas y materiales compartidos. Consultar [Duplicación de familias editables](README.md#duplicación-de-familias-editables). Un LOD0 de producción independiente requiere primero `Create LOD Family` o duplicar su VOX y sidecar y exportar la nueva fuente.
 
 El shader `Voxel Bridge/VoxelWorldOpaque` utiliza HDRP Lit y muestrea ambas LUT en el centro del texel, con LOD 0. La emisión es `BaseColor × SurfaceEmission × EmissionIntensity`; su intensidad global se ajusta en el material sin modificar meshes.
 

@@ -52,7 +52,10 @@ namespace LocalModels.VoxelBridge
         private static void DrawFamily(string manifestPath)
         {
             var manifest = VoxelProductionFamily.Load(manifestPath);
-            EditorGUILayout.HelpBox("Rebuild actualiza sólo las mallas desde los .vox guardados. Duplicate y Reduce crean el nivel siguiente. Regenerate reemplaza explícitamente un .vox desde su padre; los niveles posteriores nunca se sobrescriben automáticamente. Los avisos de origen cambiado se propagan a los descendientes.", MessageType.None);
+            using (new EditorGUI.DisabledScope(EditorApplication.isPlayingOrWillChangePlaymode))
+                if (GUILayout.Button(new GUIContent("Duplicate Editable Family", "Crear una copia independiente de los VOX, bindings, mallas y prefab guardados. Comparte paletas, perfiles y materiales. No incluye borradores ni overrides de escena.")))
+                    Duplicate(manifest.prefabAssetPath);
+            EditorGUILayout.HelpBox("Rebuild actualiza sólo las mallas desde los .vox guardados. Duplicate Previous y Reduce Previous crean el nivel siguiente. Regenerate reemplaza explícitamente un .vox desde su padre; los niveles posteriores nunca se sobrescriben automáticamente. Los avisos de origen cambiado se propagan a los descendientes.", MessageType.None);
             foreach (var entry in manifest.lods)
             {
                 using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
@@ -118,6 +121,33 @@ namespace LocalModels.VoxelBridge
         [MenuItem("Assets/Voxel Bridge/Production/Rebuild", false, 2122)]
         [MenuItem("GameObject/Voxel Bridge/Production/Rebuild", false, 56)]
         private static void RebuildSelected() => Rebuild(SelectedPath);
+
+        [MenuItem("Assets/Voxel Bridge/Production/Duplicate Editable Family", false, 2123)]
+        [MenuItem("GameObject/Voxel Bridge/Production/Duplicate Editable Family", false, 57)]
+        private static void DuplicateSelected() => Duplicate(SelectedPath);
+
+        [MenuItem("Assets/Voxel Bridge/Production/Duplicate Editable Family", true)]
+        [MenuItem("GameObject/Voxel Bridge/Production/Duplicate Editable Family", true)]
+        private static bool ValidateDuplicate()
+        {
+            if (EditorApplication.isPlayingOrWillChangePlaymode || !ValidateSelection()) return false;
+            try { return !string.IsNullOrEmpty(VoxelProductionLink.Load(SelectedPath).manifestGuid); }
+            catch { return false; }
+        }
+
+        private static void Duplicate(string path) => Run(() =>
+        {
+            string manifest = AssetDatabase.GUIDToAssetPath(VoxelProductionLink.Load(path).manifestGuid);
+            string parent = System.IO.Path.GetDirectoryName(System.IO.Path.GetDirectoryName(manifest));
+            parent = string.IsNullOrEmpty(parent) ? "Assets" : parent.Replace('\\', '/');
+            string copy = VoxelProductionFamilyCopy.Duplicate(path, parent, value =>
+            {
+                if (EditorUtility.DisplayCancelableProgressBar("Voxel Bridge", "Duplicating editable family", value))
+                    throw new OperationCanceledException();
+            });
+            Selection.activeObject = AssetDatabase.LoadAssetAtPath<GameObject>(copy);
+            EditorGUIUtility.PingObject(Selection.activeObject);
+        });
 
         [MenuItem("Assets/Voxel Bridge/Production/Open in MagicaVoxel", true)]
         [MenuItem("GameObject/Voxel Bridge/Production/Open in MagicaVoxel", true)]

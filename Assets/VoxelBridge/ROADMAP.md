@@ -23,7 +23,7 @@ La consolidación artística de las paletas puede continuar durante la validaci�
 |---|---|
 | Conversión y reglas | Disponible: flujo físico individual y por lotes, normalización opcional Z-up → Y-up con colocación compensada, exclusión, `Keep Original` y detección de emisión con superficie de respaldo. |
 | Materiales semánticos | Disponible: paletas, catálogo recomendado de 44 superficies, visor HDRP temporal, perfiles cromáticos, bindings por slot, LUT y mesher opaco compartido. |
-| Familias y combinación | Disponible: edición de fuentes, reconstrucción, derivación de LODs y unión exacta de conjuntos compactos. |
+| Familias y combinación | Disponible: edición de fuentes, reconstrucción, duplicación independiente de familias guardadas, derivación de LODs y unión exacta de conjuntos compactos. La duplicación de variantes, prefabs anidados e impostores horneados queda fuera del alcance actual. |
 | DOTS y subescenas | Integración y diagnóstico disponibles; validación funcional inicial de instancias, recursos compartidos y frustum. No equivale a certificar rendimiento, sombras, oclusión o streaming de producción. |
 | Autoría visual de superficies | Disponible: selección espacial y semántica, edición independiente de ColorID/SurfaceID, cuentagotas, diagnóstico, aislamiento, miniaturas y comparación temporal sobre selección con confirmación, Undo/Redo y guardado recuperable. Pendiente: validación artística y certificación del intercambio externo de RGB duplicados. |
 | Intercambio de RGB duplicados | Pendiente de certificar en MagicaVoxel; la escritura y lectura controladas por Voxel Bridge conservan los pares. |
@@ -78,6 +78,8 @@ La previsualización debe utilizar recursos temporales aislados, sin crear GameO
 Cerrar la ventana o cambiar de fuente permite guardar, descartar o cancelar. Entrar en Play Mode deshabilita la edición y conserva el borrador, sin interrumpir la prueba de la escena. La serialización de la ventana conserva el borrador durante una recarga de scripts y verifica sus huellas antes de restaurarlo; el historial Undo se reinicia. El borrador es estado local del Editor, no una nueva fuente de verdad ni una copia persistente garantizada ante un crash. Guardar explícitamente antes de cerrar el Editor o realizar operaciones de riesgo.
 
 ### Relación con MagicaVoxel y LODs
+
+`Duplicate Editable Family` permite preparar una familia independiente como referencia o variante artística sin modificar el original. Copia los recursos editables guardados y mantiene compartidas las paletas, perfiles y materiales. El [procedimiento de duplicación](README.md#duplicación-de-familias-editables) describe sus límites; no sustituye la validación externa de slots con RGB duplicados.
 
 El flujo recomendado será: preparar geometría y colores de LOD0 en MagicaVoxel, asignar superficies en Unity, guardar, reconstruir y derivar los LODs inferiores. Las ediciones en MagicaVoxel posteriores a la pintura requieren conservar slots y sidecar. Dos slots con RGB idéntico pueden intercambiarse sin que una comparación de RGBA detecte el cambio; las huellas locales no certifican por sí solas ese intercambio.
 
