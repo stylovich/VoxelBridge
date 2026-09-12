@@ -40,7 +40,7 @@ namespace LocalModels.VoxelBridge
             {
                 reductionStale = true;
                 var candidate = new VoxelPainterReductionPreview(edit.Grid, size, profile.Padding, manifest.chunkCellSize,
-                    edit.HideInternalCavities, VoxelProductionEditor.Progress);
+                    edit.HideInternalCavities, VoxelProductionEditor.Progress, edit.Surfaces);
                 reductionPreview?.Dispose(); reductionPreview = candidate;
                 reductionRevision = edit.SurfaceRevision;
                 reductionProfile = profile; reductionProfileRevision = EditorUtility.GetDirtyCount(profile);

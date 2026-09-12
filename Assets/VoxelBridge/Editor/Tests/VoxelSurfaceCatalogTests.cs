@@ -15,13 +15,16 @@ namespace LocalModels.VoxelBridge.Tests
         public void CatalogHasStableIdsAndValidOpaquePresets()
         {
             Assert.That(palette.TryValidate(out string error), Is.True, error);
-            CollectionAssert.AreEqual(Enumerable.Range(0, 44), palette.Entries.Select(e => e.Id));
-            foreach (var entry in palette.Entries.Skip(16))
+            CollectionAssert.AreEqual(Enumerable.Range(0, 45), palette.Entries.Select(e => e.Id));
+            foreach (var entry in palette.Entries.Skip(16).Take(28))
             {
                 Assert.That(entry.RenderClass, Is.EqualTo(VoxelSurfaceRenderClass.Opaque));
                 Assert.That(entry.OcclusionMultiplier, Is.EqualTo(1));
                 Assert.That(entry.Metallic == 0 || entry.Metallic == 1, Is.True);
             }
+            Assert.That(palette.TryGetSurface(44, out var glass), Is.True);
+            Assert.That(glass.RenderClass, Is.EqualTo(VoxelSurfaceRenderClass.Transparent));
+            Assert.That(glass.Opacity, Is.EqualTo(.25f));
         }
 
         [Test]
@@ -52,7 +55,7 @@ namespace LocalModels.VoxelBridge.Tests
             var original = palette.Entries.ToArray();
             palette.SetGeneratedLut(null, "old");
             Assert.That(palette.TryAppendRecommendedEntries(out int added, out string error), Is.True, error);
-            Assert.That(added, Is.EqualTo(28));
+            Assert.That(added, Is.EqualTo(29));
             for (int i = 0; i < original.Length; i++) Assert.That(palette.Entries[i], Is.SameAs(original[i]));
             Assert.That(palette.GeneratedContentHash, Is.Null);
             palette.SetGeneratedLut(null, "current");
@@ -70,7 +73,7 @@ namespace LocalModels.VoxelBridge.Tests
             palette.MutableEntries.Add(custom);
             palette.MutableEntries.Add(new VoxelSurfaceDefinition(200, "  plaster  ", VoxelSurfaceRenderClass.Opaque, 0, 0, 0, 1));
             Assert.That(palette.TryAppendRecommendedEntries(out int added, out string error), Is.True, error);
-            Assert.That(added, Is.EqualTo(25));
+            Assert.That(added, Is.EqualTo(26));
             Assert.That(palette.TryGetSurface(16, out var entry), Is.True);
             Assert.That(entry, Is.SameAs(custom));
             Assert.That(palette.TryGetSurface(17, out _), Is.False);

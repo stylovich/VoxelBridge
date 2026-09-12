@@ -1171,10 +1171,10 @@ namespace LocalModels.VoxelBridge.Tests
         }
 
         [Test]
-        public void UnknownOrNonOpaqueSurfaceAndOversizedSelection_AreRejected()
+        public void UnknownOrUnsupportedSurfaceAndOversizedSelection_AreRejected()
         {
             Create();
-            surfaces.MutableEntries.Add(new VoxelSurfaceDefinition(200, "Glass", VoxelSurfaceRenderClass.Transparent, 0, 1, 0, 1));
+            surfaces.MutableEntries.Add(new VoxelSurfaceDefinition(200, "Foliage", VoxelSurfaceRenderClass.Foliage, 0, 1, 0, 1));
             var edit = new VoxelSurfaceEdit(path);
             Assert.Throws<InvalidDataException>(() => edit.Apply(new[] { 0 }, 255));
             Assert.Throws<InvalidDataException>(() => edit.Apply(new[] { 0 }, 200));

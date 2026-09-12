@@ -34,7 +34,7 @@ namespace LocalModels.VoxelBridge
 
         private void DrawSurfaceBrowser()
         {
-            var options = edit.Surfaces.Entries.Where(s => s != null && s.RenderClass == VoxelSurfaceRenderClass.Opaque).OrderBy(s => s.Id).ToArray();
+            var options = edit.Surfaces.Entries.Where(s => s != null && s.SupportsVoxelRendering).OrderBy(s => s.Id).ToArray();
             int index = Array.FindIndex(options, s => s.Id == surfaceId);
             if (options.Length == 0) return;
             int count = Mathf.Min(5, options.Length);
@@ -74,7 +74,7 @@ namespace LocalModels.VoxelBridge
             if (editColor) edit.ValidateColor(colorId);
             else ValidatePreviewSurface();
             CancelAppearancePreview();
-            var candidate = new VoxelPainterAppearancePreview(ViewGrid, selected, edit.HideInternalCavities, VoxelProductionEditor.Progress);
+            var candidate = new VoxelPainterAppearancePreview(ViewGrid, selected, edit.HideInternalCavities, VoxelProductionEditor.Progress, edit.Surfaces);
             appearancePreview = candidate;
             compareOriginalAppearance = false;
             try { UpdateAppearanceCandidate(); }
@@ -85,8 +85,8 @@ namespace LocalModels.VoxelBridge
 
         private void ValidatePreviewSurface()
         {
-            if (!edit.Surfaces.TryGetSurface(surfaceId, out var surface) || surface.RenderClass != VoxelSurfaceRenderClass.Opaque)
-                throw new InvalidOperationException("Choose an opaque surface from the current palette.");
+            if (!edit.Surfaces.TryGetSurface(surfaceId, out var surface) || !surface.SupportsVoxelRendering)
+                throw new InvalidOperationException("Choose an Opaque or Glass surface from the current palette.");
         }
 
         private void UpdateAppearanceCandidate()
@@ -102,7 +102,7 @@ namespace LocalModels.VoxelBridge
             Run(() =>
             {
                 int[] ids = editColor ? FilterColorChoices(edit.AllowedColors(), colorSearch).Select(c => c.Id).ToArray() :
-                    edit.Surfaces.Entries.Where(s => s != null && s.RenderClass == VoxelSurfaceRenderClass.Opaque).OrderBy(s => s.Id).Select(s => s.Id).ToArray();
+                    edit.Surfaces.Entries.Where(s => s != null && s.SupportsVoxelRendering).OrderBy(s => s.Id).Select(s => s.Id).ToArray();
                 if (ids.Length == 0) return;
                 int index = Array.IndexOf(ids, editColor ? colorId : surfaceId);
                 int next = ids[editColor ? Mathf.Clamp(Mathf.Max(0, index) + direction, 0, ids.Length - 1) :

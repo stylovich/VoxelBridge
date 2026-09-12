@@ -208,6 +208,7 @@ namespace LocalModels.VoxelBridge
             SerializedProperty smoothness = element.FindPropertyRelative("smoothness");
             SerializedProperty emission = element.FindPropertyRelative("emission");
             SerializedProperty occlusion = element.FindPropertyRelative("occlusionMultiplier");
+            bool glass = renderClass.enumValueIndex == (int)VoxelSurfaceRenderClass.Transparent;
 
             float line = EditorGUIUtility.singleLineHeight;
             float y = rect.y + 1f;
@@ -231,7 +232,7 @@ namespace LocalModels.VoxelBridge
             y += line + 3f;
             EditorGUI.PropertyField(new Rect(rect.x, y, half, line), emission, new GUIContent("Emission"));
             EditorGUI.PropertyField(new Rect(rect.x + half + 8f, y, half, line),
-                occlusion, new GUIContent("Occlusion"));
+                glass ? element.FindPropertyRelative("opacity") : occlusion, new GUIContent(glass ? "Opacity" : "Occlusion"));
         }
 
         private void AddEntry(ReorderableList list)

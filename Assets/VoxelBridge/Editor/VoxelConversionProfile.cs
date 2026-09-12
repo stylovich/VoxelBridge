@@ -75,8 +75,8 @@ namespace LocalModels.VoxelBridge
         {
             if (id < 0 || id > 255 || surfacePalette == null || !surfacePalette.TryGetSurface(id, out var surface))
                 throw new InvalidDataException($"Unknown SurfaceID {id} in the conversion profile.");
-            if (surface.RenderClass != VoxelSurfaceRenderClass.Opaque)
-                throw new InvalidDataException($"SurfaceID {id} is not opaque. Use Keep Original for transparent geometry.");
+            if (!surface.SupportsVoxelRendering)
+                throw new InvalidDataException($"SurfaceID {id} uses an unsupported render class. Use Opaque, Glass or Keep Original.");
         }
 
         internal void ValidateForExport()
@@ -152,6 +152,7 @@ namespace LocalModels.VoxelBridge
     {
         private readonly VoxelConversionProfile profile;
         private readonly VoxelColorDefinition[] candidates;
+        private readonly bool[] glassSurfaces = new bool[256];
         private readonly Dictionary<int, int> cache = new();
         internal float MaximumDistance { get; private set; }
         internal VoxelConversionColorMapper(VoxelConversionProfile profile)
@@ -159,7 +160,12 @@ namespace LocalModels.VoxelBridge
             this.profile = profile;
             profile.Validate();
             profile.colorMapping.TryGetAllowedColors(out candidates, out _);
+            foreach (var surface in profile.surfacePalette.Entries)
+                glassSurfaces[surface.Id] = surface.RenderClass == VoxelSurfaceRenderClass.Transparent;
         }
+
+        internal bool IsGlass(int surfaceId) => glassSurfaces[surfaceId < 0 ? profile.defaultSurfaceId : surfaceId];
+
         internal ushort Map(Color32 color, int surfaceId)
         {
             int key = color.r | color.g << 8 | color.b << 16;

@@ -36,7 +36,7 @@ El [enfoque de geometría limpia y detalle superficial](ART_DIRECTION_AND_DETAIL
 ## Edición visual de superficies
 
 1. Seleccionar un prefab de producción y pulsar `Edit Surfaces` en la fila del LOD correspondiente, o abrir `Tools > Voxel Bridge > Surface Painter`, arrastrar el prefab padre desde Project a `Source` y elegir un nivel en `Edit LOD`. El menú muestra los niveles existentes, no genera otros. LOD0 es el punto de partida recomendado. También se puede asignar un `.vox` con sidecar semántico v4 para editar sólo la fuente.
-2. Comprobar que las LUT estén actualizadas. La previsualización utiliza una malla y un material temporales; no modifica las instancias de la escena. Las piezas `Keep Original`, incluido el vidrio retenido, quedan fuera de esta vista.
+2. Comprobar que las LUT estén actualizadas. La previsualización utiliza mallas y materiales temporales; no modifica las instancias de la escena. Las piezas `Keep Original`, incluido el vidrio retenido, quedan fuera de esta vista.
 3. Elegir `Brush` o `Rectangle` en la barra de herramientas y marcar voxels con clic izquierdo o arrastre. `Replace` sustituye la selección, `Add` acumula celdas y `Subtract` las quita; mantener `Shift` al iniciar el gesto activa sustracción temporal. `Size` controla el diámetro de pantalla entre 1 y 128 píxeles de interfaz. `Alt` + arrastre o botón derecho rota la vista; botón central o `Alt+Shift` + arrastre izquierdo desplaza la cámara. La rueda permite acercarse a escala de celda. `Frame All` encuadra el volumen y `Frame Selection` centra la órbita en la selección.
 4. Elegir `Surface` y pulsar `Apply Surface` para conservar ColorID, o elegir `Color` y pulsar `Apply Color` para conservar SurfaceID. La asignación afecta al voxel completo, no sólo a la cara señalada. Ambas operaciones conservan ocupación, escala y pivote.
 5. Utilizar `Undo` y `Redo`, o `Ctrl+Z` y `Ctrl+Y`/`Ctrl+Shift+Z`, para revisar selecciones y asignaciones pendientes en orden cronológico. Los atajos actúan sobre el historial local mientras `Surface Painter` tenga el foco y no se esté editando texto; fuera de la ventana continúa el Undo habitual de Unity. `Clear Selection` no elimina las asignaciones aplicadas y permite recuperar la selección mediante Undo.
@@ -65,7 +65,7 @@ El muestreo de `Match` no cambia el atributo elegido como destino. `Use Surface`
 
 `Color` muestra los colores permitidos por el perfil cromático vinculado a la fuente en una cuadrícula lateral derecha, con desplazamiento vertical y búsqueda por nombre o ColorID. Los tooltips identifican cada muestra y su RGB; pulsar una celda elige el color destino sin aplicarlo. La rueda sobre el panel desplaza la paleta, no la cámara. Sin un perfil vinculado se utiliza la paleta global completa. Un perfil ausente o incompatible bloquea la pintura de color; no se sustituye silenciosamente por otro. Los colores existentes fuera del conjunto permitido se conservan al editar superficies. El guardado comprueba que los ColorIDs modificados sigan permitidos. La selección de un color nuevo para el archivo obtiene su RGBA de la paleta global y conserva los slots supervivientes.
 
-`Browse Surfaces` despliega cinco miniaturas alrededor del candidato activo; las flechas recorren las superficies opacas. Las esferas comparten un color neutro y una iluminación HDRP fija. El tooltip muestra nombre, ID y valores PBR; las miniaturas no simulan bloom ni la iluminación final de la escena.
+`Browse Surfaces` despliega cinco miniaturas alrededor del candidato activo; las flechas recorren las superficies Opaque y Glass. Las esferas comparten un color neutro y una iluminación HDRP fija. El tooltip muestra nombre, ID y valores PBR; las miniaturas no simulan bloom ni la iluminación final de la escena.
 
 Para comparar directamente sobre el modelo:
 
@@ -74,7 +74,7 @@ Para comparar directamente sobre el modelo:
 3. Elegir miniaturas de superficies o muestras de la cuadrícula de colores. `←` y `→` recorren los candidatos sin modificadores; en Color, `↑` y `↓` avanzan por filas del conjunto filtrado, sin retorno circular al llegar a sus extremos. Las teclas actúan en la ventana mientras no se esté editando texto ni arrastrando un control.
 4. Pulsar `Confirm` o `Enter` para registrar una única asignación en el borrador; después utilizar el guardado habitual. `Cancel` o `Esc` descarta la comparación sin modificar historial, selección ni archivos.
 
-El preview prepara una malla temporal que separa los límites de selección y reutiliza esa geometría al cambiar candidatos. Conserva los límites de selección y meshing; una selección muy fragmentada puede superar el presupuesto y requerir reducir su tamaño. `Original` compara con el borrador anterior al preview; `Confirm` aplica el candidato elegido. El tinte se suprime durante la comparación y `Outline` permite mostrar el contorno, oculto por defecto para no tapar el acabado. Cerrar la ventana, recargar scripts o entrar en Play Mode descarta el preview; los cambios previamente confirmados siguen sujetos al guardado y recuperación del borrador. Undo/Redo durante el preview lo cancela primero, sin recorrer el historial. La vista de diagnóstico anterior se conserva al salir. El intercambio externo de RGB duplicados continúa pendiente de certificación.
+El preview prepara una malla temporal que separa los límites de selección y reutiliza esa geometría entre candidatos de la misma clase de render. Cambiar entre opaco y vidrio recalcula las caras visibles y sus submeshes. Conserva los límites de selección y meshing; una selección muy fragmentada puede superar el presupuesto y requerir reducir su tamaño. `Original` compara con el borrador anterior al preview; `Confirm` aplica el candidato elegido. El tinte se suprime durante la comparación y `Outline` permite mostrar el contorno, oculto por defecto para no tapar el acabado. Cerrar la ventana, recargar scripts o entrar en Play Mode descarta el preview; los cambios previamente confirmados siguen sujetos al guardado y recuperación del borrador. Undo/Redo durante el preview lo cancela primero, sin recorrer el historial. La vista de diagnóstico anterior se conserva al salir. El intercambio externo de RGB duplicados continúa pendiente de certificación.
 
 ### Preview de reducción al siguiente LOD
 
@@ -85,6 +85,20 @@ El preview prepara una malla temporal que separa los límites de selección y re
 3. Pulsar `Return to Paint` o `Esc` para continuar editando. Undo/Redo durante el preview primero vuelve al pintor sin recorrer el historial. La selección y el aislamiento anterior se conservan; el cálculo siempre utiliza la fuente completa.
 
 El LOD guardado no se carga como resultado ni se modifica: puede contener retoques distintos del resultado hipotético. El preview no guarda archivos, crea assets ni regenera niveles. Se reutiliza mientras el borrador y los parámetros sigan vigentes; los cambios del proyecto pueden marcarlo como desactualizado. `Refresh` verifica fuentes y recalcula; un conflicto externo exige volver y recargar `Source`. La generación y el diagnóstico son cancelables y respetan los límites de volumen y meshing. Cerrar la ventana, recargar scripts o entrar en Play Mode libera los recursos temporales. La rejilla gruesa local y la inspección de votos por bloque quedan fuera de esta versión.
+
+### Vidrio voxel básico
+
+La superficie recomendada `044 · Glass` utiliza `Render Class = Glass (Transparent)`, `Opacity = 0,25` y `Smoothness = 0,9`. El tinte procede del ColorID. En paletas existentes, utilizar `Append Recommended` y reconstruir la LUT para incorporar el preset sin sustituir otras superficies.
+
+- **Por objeto:** añadir `Conversion Rule` al GameObject de las ventanas, elegir `Voxelize` y SurfaceID `44` y convertir el modelo completo con el `Conversion Profile` vinculado a esa paleta.
+- **Por material:** asignar el material del cristal en `Conversion Profile > Material Rules`, con `Voxelize` y SurfaceID `44`. Permite separar cristal y carrocería aunque compartan GameObject.
+- **Sobre voxels existentes:** elegir Glass en el Painter, previsualizar o aplicar a la selección y utilizar `Save & Rebuild`. La selección alcanza la primera celda ocupada, no atraviesa vidrio. Pintar una superficie transparente no elimina relleno interior ni crea una cabina hueca.
+
+`Keep Original` conserva su geometría y material originales y no activa el shader voxel. La identificación de vidrio es explícita: no se infiere de la transparencia del material fuente. Una regla de GameObject tiene prioridad sobre las reglas de materiales; asignar Glass a la raíz con aplicación a descendientes puede convertir todo el vehículo en vidrio.
+
+Glass utiliza la geometría fuente sin descartarla mediante `Alpha Cutoff`; la opacidad procede de la paleta. No reproduce recortes o variaciones de alpha de una textura. Para conservar esos efectos, utilizar `Keep Original`. Las superficies no transparentes mantienen el recorte por alpha.
+
+`Opacity` y smoothness se editan en la paleta y se transportan mediante su LUT. Cambiar `Render Class` requiere reconstruir las mallas afectadas; los descendientes pintados siguen requiriendo regeneración explícita para heredar cambios de IDs. El vidrio añade un segundo material compartido por pareja de paletas sólo donde existe geometría transparente. No incluye refracción, sombras transparentes, absorción por espesor ni ordenación por triángulo. Capas transparentes solapadas, interiores y detalles finos reducidos requieren revisión artística.
 
 ### Vistas de diagnóstico y aislamiento
 
@@ -125,7 +139,7 @@ El perfil recomendado `Default` (SurfaceID 0) utiliza Metallic 0, Smoothness 0, 
 
 El guardado y la reconstrucción son etapas separadas: un fallo de reconstrucción conserva la fuente guardada y la malla anterior. Reintentar la reconstrucción después de resolver el error; Undo no revierte los archivos guardados.
 
-La preasignación opcional de SurfaceID durante la conversión se describe en [SURFACE_MAPPING.md](SURFACE_MAPPING.md). La paleta recomendada contiene 44 superficies y permite inspeccionarlas con `Preview Selected Surface`; consultar [SURFACE_CATALOG.md](SURFACE_CATALOG.md) para el catálogo y sus límites. `Surface Painter` permite editar ColorID y comparar acabados sobre la selección sin modificar las definiciones globales.
+La preasignación opcional de SurfaceID durante la conversión se describe en [SURFACE_MAPPING.md](SURFACE_MAPPING.md). La paleta recomendada contiene 45 superficies y permite inspeccionarlas con `Preview Selected Surface`; consultar [SURFACE_CATALOG.md](SURFACE_CATALOG.md) para el catálogo y sus límites. `Surface Painter` permite editar ColorID y comparar acabados sobre la selección sin modificar las definiciones globales.
 
 ## Combinación de modelos voxel
 

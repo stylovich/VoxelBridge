@@ -22,7 +22,7 @@ La consolidación artística de las paletas puede continuar durante la validaci�
 | Bloque | Estado y alcance pendiente |
 |---|---|
 | Conversión y reglas | Disponible: flujo físico individual y por lotes, normalización opcional Z-up → Y-up con colocación compensada, exclusión, `Keep Original` y detección de emisión con superficie de respaldo. |
-| Materiales semánticos | Disponible: paletas, catálogo recomendado de 44 superficies, visor HDRP temporal, perfiles cromáticos, bindings por slot, LUT y mesher opaco compartido. |
+| Materiales semánticos | Disponible: paletas, catálogo recomendado de 45 superficies, visor HDRP temporal, perfiles cromáticos, bindings por slot, LUT, mesher con separación opaco/vidrio y shader HDRP de vidrio básico. |
 | Familias y combinación | Disponible: edición de fuentes, reconstrucción, duplicación independiente de familias guardadas, derivación de LODs y unión exacta de conjuntos compactos. La duplicación de variantes, prefabs anidados e impostores horneados queda fuera del alcance actual. |
 | DOTS y subescenas | Integración y diagnóstico disponibles; validación funcional inicial de instancias, recursos compartidos y frustum. No equivale a certificar rendimiento, sombras, oclusión o streaming de producción. |
 | Autoría visual de superficies | Disponible: selección espacial y semántica, edición independiente de ColorID/SurfaceID, diagnóstico, aislamiento, comparación temporal de acabados y reducción al siguiente LOD, Undo/Redo y guardado recuperable. Pendiente: validación artística, rejilla local de reducción y certificación del intercambio externo de RGB duplicados. |
@@ -69,7 +69,7 @@ La previsualización debe utilizar recursos temporales aislados, sin crear GameO
 
 ### Guardado, Undo y recuperación
 
-1. Cargar una fuente válida, sus paletas y las huellas del `.vox` y sidecar. Bloquear fuentes RGB sin bindings, IDs desconocidos, superficies no opacas, `IMAP` y correspondencias espaciales ambiguas.
+1. Cargar una fuente válida, sus paletas y las huellas del `.vox` y sidecar. Bloquear fuentes RGB sin bindings, IDs desconocidos, clases de render no compatibles, `IMAP` y correspondencias espaciales ambiguas.
 2. Mantener cambios locales y un historial acotado de diferencias por operación. Evitar una copia completa de millones de celdas por cada trazo. Una operación sin cambios no crea entradas de historial.
 3. Antes de guardar, comprobar que fuente, sidecar y paletas no hayan cambiado externamente. Un conflicto exige recargar o resolver las asignaciones; no se intenta fusionar automáticamente con un guardado de MagicaVoxel o de `Semantic Bindings`.
 4. Validar el límite de 255 pares utilizados y releer los bytes candidatos para comprobar geometría, ColorID y SurfaceID antes de reemplazar archivos. El exceso de pares debe dejar intactos fuente y edición pendiente, sin aproximar superficies ni colores.
@@ -104,7 +104,7 @@ Disponible: comparación del borrador completo, incluidos cambios sin guardar, c
 3. **Integración de autoría:** guardado y recuperación ante fallo entre archivos, rechazo de conflictos externos, reconstrucción del prefab manteniendo referencias y avisos de LODs derivados. Prueba de round-trip real con MagicaVoxel antes de certificarlo.
 4. **Asistencia de selección:** selección por ColorID, SurfaceID, color similar y regiones conectadas, con alcance visible u oculto explícito. La clasificación como LED, neón u otro material sigue siendo explícita. La intensidad emisiva original no se conserva como atributo por voxel en el formato actual; agrupar por esa intensidad exigiría ampliar su captura y transporte.
 
-Quedan fuera de esta primera versión la modificación de geometría, pintura por cara, selección a través del volumen, edición de vidrio/follaje voxel, un editor general de materiales, clasificación automática por intensidad y reemplazar MagicaVoxel, Blender o Vengi.
+Quedan fuera de esta primera versión la modificación de geometría, pintura por cara, selección a través del volumen, edición de follaje voxel, un editor general de materiales, clasificación automática por intensidad y reemplazar MagicaVoxel, Blender o Vengi.
 
 ### Estado de las herramientas de corrección
 
@@ -117,6 +117,12 @@ Implementar por bloques verificables, manteniendo las selecciones separadas de l
 5. **Comparación visual de acabados — disponible:** miniaturas HDRP y preview Lit sobre una selección fija. Recorrer candidatos reutiliza la geometría temporal; confirmar crea una operación y cancelar no altera datos. Validar comodidad, fidelidad visual y respuesta con selecciones grandes o fragmentadas.
 
 La representación HDR con bloom y una comparación visual antes/después pueden evaluarse después de estas herramientas. La referencia normalizada actual no constituye una vista de iluminación final. La captura de grupos emisivos de origen permanece pendiente; la preasignación PBR utiliza los materiales durante la conversión. Las herramientas de selección no recuperan atributos que no estén almacenados en el `.vox` y su sidecar.
+
+## Vidrio voxel básico
+
+Disponible: preset Glass, opacidad en la paleta, shader HDRP transparente, separación de submeshes y conservación de caras opacas visibles a través del cristal. La asignación utiliza las reglas existentes por GameObject o material, o el Surface Painter. `Keep Original` permanece como alternativa independiente; no requiere el shader voxel. Los usos y límites se describen en [Vidrio voxel básico](README.md#vidrio-voxel-básico).
+
+Pendientes para la revisión de shaders: refracción, absorción por espesor, sombras transparentes, capas solapadas y estrategias de ordenación. Ampliar las comprobaciones en subescenas y plataformas objetivo antes de certificar esos casos; no extrapolar el render en Editor a un presupuesto de producción. La rejilla local del preview de reducción permanece diferida.
 
 ## Preasignación de superficies por semejanza PBR
 
@@ -163,7 +169,7 @@ La unión es exacta: los LOD0 deben utilizar la misma unidad voxel efectiva y es
 
 - Leer los volúmenes LOD0 existentes para conservar los retoques realizados en MagicaVoxel.
 - Transformar las celdas al espacio local de la nueva familia y ajustar el pivote a la rejilla física.
-- Unir las celdas ocupadas dando prioridad a la primera fuente en el orden de la jerarquía. Los solapamientos con `ColorID` o `SurfaceID` diferentes requieren confirmación. Sólo se combinan celdas opacas; las piezas `Keep Original` mantienen su representación separada.
+- Unir las celdas ocupadas dando prioridad a la primera fuente en el orden de la jerarquía. Los solapamientos con `ColorID` o `SurfaceID` diferentes requieren confirmación. Se combinan celdas opacas y de vidrio básico; las piezas `Keep Original` mantienen su representación separada.
 - Mantener los chunks internos necesarios sin convertirlos en familias independientes.
 - Generar los LODs inferiores desde el volumen combinado, reduciendo el par `ColorID + SurfaceID` mediante una regla determinista.
 - Crear un manifiesto, los `.vox` editables y un prefab con un solo `LODGroup`.
@@ -225,7 +231,7 @@ Una primera configuración debería mantenerse en aproximadamente tres a cinco m
 - `UV0.x` contiene el `ColorID` crudo.
 - `UV1` queda reservado para lightmaps horneados.
 - `UV2` queda reservado para datos de iluminación en tiempo real u otra necesidad del pipeline.
-- `UV3.x` contiene el `SurfaceID` crudo.
+- `UV3.x` contiene el `SurfaceID` crudo; `UV3.y` identifica opaco (0) o vidrio (1).
 - Vertex Color queda disponible para suciedad, desgaste, variación de emisión y máscaras estilísticas.
 
 Los IDs se almacenan inicialmente en canales `Vector2` para evitar el coste de un `Vector4` cuando sólo se utiliza una componente. Cada triángulo debe tener un único `ColorID` y un único `SurfaceID`; el mesher separa vértices en las fronteras semánticas.
@@ -261,11 +267,11 @@ Las reglas `Voxelize`, `Ignore` y `Keep Original` se aplican antes del cálculo 
 
 La reducción manual de un volumen semántico selecciona combinaciones existentes mediante el área de caras expuestas compatibles con los límites del voxel reducido; los interiores mantienen la mayoría por volumen y los empates utilizan el par de IDs menor. Respeta las cavidades ocultas y consulta vecinos entre chunks. No cambia la ocupación ni promete conservar todos los detalles subvoxel. Duplicar un LOD conserva la tabla de slots sin reinterpretarla. El alcance de detección de emisión y la conservación de piezas se describen en [MATERIALS.md](MATERIALS.md#superficies-durante-la-conversión) y [README.md](README.md#reglas-de-conversión).
 
-La pintura visual de SurfaceID utiliza una herramienta acotada dentro de Unity; su contrato y etapas se describen en [Autoría visual de superficies en Unity](#autoría-visual-de-superficies-en-unity). La conversión utiliza una superficie emisiva de respaldo configurable, inicialmente Neon. La emisión con color independiente del albedo y los shaders voxel transparentes quedan fuera de la conversión opaca inicial.
+La pintura visual de SurfaceID utiliza una herramienta acotada dentro de Unity; su contrato y etapas se describen en [Autoría visual de superficies en Unity](#autoría-visual-de-superficies-en-unity). La conversión utiliza una superficie emisiva de respaldo configurable, inicialmente Neon. La emisión con color independiente del albedo permanece pendiente. El vidrio voxel básico utiliza una asignación explícita y un shader transparente separado, sin refracción avanzada.
 
 ### Mesh de producción
 
-La exportación independiente LOD0 opaca está disponible en `VOX to Unity`, con greedy meshing, IDs en UV0/UV3 y material HDRP compartido. El prefab mantiene un vínculo de autoría por GUID y permite abrir la fuente en MagicaVoxel y reconstruir explícitamente la misma malla. El lector localiza chunks por tamaño y posición después de un guardado externo, sin depender de sus índices internos ni descartar modelos adicionales ocupados. Su alcance y límites se describen en [MATERIALS.md](MATERIALS.md).
+La exportación independiente LOD0 opaca y de vidrio básico está disponible en `VOX to Unity`, con greedy meshing, IDs en UV0/UV3 y material HDRP compartido. El prefab mantiene un vínculo de autoría por GUID y permite abrir la fuente en MagicaVoxel y reconstruir explícitamente la misma malla. El lector localiza chunks por tamaño y posición después de un guardado externo, sin depender de sus índices internos ni descartar modelos adicionales ocupados. Su alcance y límites se describen en [MATERIALS.md](MATERIALS.md).
 
 Las familias semánticas de producción preservan chunks para culling, consultan vecinos a través de sus fronteras y mantienen la alineación física entre niveles. El prefab permite reconstruir cada nivel, derivar los siguientes por duplicación o reducción y revisar avisos de fuentes modificadas sin sobrescribir descendientes. El alcance, los límites de volumen y las operaciones con confirmación se describen en [MATERIALS.md](MATERIALS.md#familias-semánticas-de-producción). La reimportación automática y la ampliación de los límites de meshing requieren validación adicional de memoria y recuperación ante fallos.
 

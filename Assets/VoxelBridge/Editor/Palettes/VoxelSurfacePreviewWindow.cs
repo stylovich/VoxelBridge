@@ -76,10 +76,10 @@ namespace LocalModels.VoxelBridge
                 referenceColor = EditorGUILayout.ColorField(new GUIContent("View Color", "Color de referencia; no modifica ColorID ni la paleta."), referenceColor, true, false, false);
             }
             EditorGUILayout.LabelField($"Metallic {surface.Metallic:0.##}   Smoothness {surface.Smoothness:0.##}");
-            EditorGUILayout.LabelField($"Emission {surface.Emission:0.##}   Occlusion {surface.OcclusionMultiplier:0.##}");
-            EditorGUILayout.HelpBox("Referencia HDRP opaca con iluminación fija. Arrastrar para rotar. No reproduce exposición, bloom ni el entorno de la escena; la oclusión no es visible sin geometría o mapas que la produzcan.", MessageType.None);
-            if (surface.RenderClass != VoxelSurfaceRenderClass.Opaque)
-            { EditorGUILayout.HelpBox("La vista sólo admite superficies opacas; no simula esta clase de render.", MessageType.Info); return; }
+            EditorGUILayout.LabelField($"Emission {surface.Emission:0.##}   " + (surface.RenderClass == VoxelSurfaceRenderClass.Transparent ? $"Opacity {surface.Opacity:0.##}" : $"Occlusion {surface.OcclusionMultiplier:0.##}"));
+            EditorGUILayout.HelpBox("Referencia HDRP con iluminación fija. Arrastrar para rotar. No reproduce exposición, bloom, refracción ni el entorno de la escena.", MessageType.None);
+            if (!surface.SupportsVoxelRendering)
+            { EditorGUILayout.HelpBox("La vista admite Opaque y Glass; no simula esta clase de render.", MessageType.Info); return; }
             if (EditorApplication.isPlayingOrWillChangePlaymode)
             { EditorGUILayout.HelpBox("La vista está disponible fuera de Play Mode.", MessageType.Info); return; }
             Rect rect = GUILayoutUtility.GetRect(100, 100, GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true));
@@ -154,12 +154,18 @@ namespace LocalModels.VoxelBridge
                 throw new ArgumentException("The preview requires an HDRP/Lit material.", nameof(target));
             if ((target.hideFlags & HideFlags.DontSave) != HideFlags.DontSave || EditorUtility.IsPersistent(target))
                 throw new ArgumentException("The preview must not modify a persistent material.", nameof(target));
-            if (surface == null || surface.RenderClass != VoxelSurfaceRenderClass.Opaque)
-                throw new ArgumentException("The preview supports opaque surfaces only.", nameof(surface));
+            if (surface == null || !surface.SupportsVoxelRendering)
+                throw new ArgumentException("The preview supports Opaque and Glass surfaces only.", nameof(surface));
             if (!IsUnit(surface.Metallic) || !IsUnit(surface.Smoothness) || !IsUnit(surface.Emission) ||
-                !IsUnit(surface.OcclusionMultiplier) || !IsUnit(color.r) || !IsUnit(color.g) || !IsUnit(color.b))
+                !IsUnit(surface.OcclusionMultiplier) || !IsUnit(surface.Opacity) || !IsUnit(color.r) || !IsUnit(color.g) || !IsUnit(color.b))
                 throw new ArgumentException("Preview values must be finite and within 0..1.");
-            color.a = 1;
+            bool glass = surface.RenderClass == VoxelSurfaceRenderClass.Transparent;
+            color.a = glass ? surface.Opacity : 1;
+            target.SetFloat("_SurfaceType", glass ? 1 : 0);
+            target.SetFloat("_BlendMode", 0);
+            target.SetFloat("_ZWrite", glass ? 0 : 1);
+            target.SetFloat("_TransparentZWrite", 0);
+            target.SetFloat("_RefractionModel", 0);
             target.SetColor("_BaseColor", color);
             target.SetFloat("_Metallic", surface.Metallic);
             target.SetFloat("_Smoothness", surface.Smoothness);

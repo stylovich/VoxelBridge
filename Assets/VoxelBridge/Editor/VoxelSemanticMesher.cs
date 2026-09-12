@@ -28,20 +28,21 @@ namespace LocalModels.VoxelBridge
 
         // The caller owns and must destroy the returned mesh if it is not saved as an asset.
         public static Mesh Build(VoxelGrid grid, bool hideEnclosedCavities,
-            Action<float> progress = null, int maximumQuads = MaximumQuads)
+            Action<float> progress = null, int maximumQuads = MaximumQuads, VoxelSurfacePalette palette = null)
         {
             if (grid == null || !grid.IsSemantic)
                 throw new ArgumentException("Meshing requires a semantic voxel grid.", nameof(grid));
             ValidateGrid(grid.Size, grid.Origin, grid.VoxelSize);
             if (maximumQuads < 1 || maximumQuads > MaximumQuads)
                 throw new ArgumentOutOfRangeException(nameof(maximumQuads));
-            bool[] exterior = hideEnclosedCavities ? FindExterior(grid, progress) : null;
-            return BuildRegion(grid, exterior, Vector3Int.zero, grid.Size, progress, maximumQuads, false);
+            bool[] glass = GlassIds(palette);
+            bool[] exterior = hideEnclosedCavities ? FindExterior(grid, progress, glass) : null;
+            return BuildRegion(grid, exterior, Vector3Int.zero, grid.Size, progress, maximumQuads, false, glass: glass);
         }
 
         // The extra UV channel partitions selection boundaries for temporary authoring previews.
         internal static Mesh BuildSelectionPreview(VoxelGrid grid, HashSet<int> selection, bool hideEnclosedCavities,
-            Action<float> progress = null)
+            Action<float> progress = null, VoxelSurfacePalette palette = null)
         {
             if (grid == null || !grid.IsSemantic) throw new ArgumentException("A semantic grid is required.");
             ValidateGrid(grid.Size, grid.Origin, grid.VoxelSize);
@@ -49,28 +50,31 @@ namespace LocalModels.VoxelBridge
                 throw new ArgumentException("Choose a bounded, nonempty selection.");
             foreach (int cell in selection)
                 if (cell < 0 || cell >= grid.Occupied.Length || !grid.Occupied[cell]) throw new ArgumentException("Invalid preview selection.");
-            bool[] exterior = hideEnclosedCavities ? FindExterior(grid, progress) : null;
-            return BuildRegion(grid, exterior, Vector3Int.zero, grid.Size, progress, MaximumQuads, false, selection);
+            bool[] glass = GlassIds(palette);
+            bool[] exterior = hideEnclosedCavities ? FindExterior(grid, progress, glass) : null;
+            return BuildRegion(grid, exterior, Vector3Int.zero, grid.Size, progress, MaximumQuads, false, selection, glass: glass);
         }
 
         // Diagnostic face flags use the same bounded greedy mesher, without a painting selection limit.
         internal static Mesh BuildReductionLossPreview(VoxelGrid grid, byte[] faces, bool hideEnclosedCavities,
-            Action<float> progress = null)
+            Action<float> progress = null, VoxelSurfacePalette palette = null)
         {
             if (grid == null || !grid.IsSemantic || faces == null || faces.Length != grid.Occupied.Length)
                 throw new ArgumentException("A semantic grid and one face mask per cell are required.");
             ValidateGrid(grid.Size, grid.Origin, grid.VoxelSize);
-            bool[] exterior = hideEnclosedCavities ? FindExterior(grid, progress) : null;
-            return BuildRegion(grid, exterior, Vector3Int.zero, grid.Size, progress, MaximumQuads, false, null, faces);
+            bool[] glass = GlassIds(palette);
+            bool[] exterior = hideEnclosedCavities ? FindExterior(grid, progress, glass) : null;
+            return BuildRegion(grid, exterior, Vector3Int.zero, grid.Size, progress, MaximumQuads, false, null, faces, glass);
         }
 
         internal static Mesh[] BuildChunks(VoxelGrid grid, int chunkSize, bool hideEnclosedCavities,
-            Action<float> progress = null)
+            Action<float> progress = null, VoxelSurfacePalette palette = null)
         {
             if (grid == null || !grid.IsSemantic) throw new ArgumentException("A semantic grid is required.");
             ValidateGrid(grid.Size, grid.Origin, grid.VoxelSize);
             if (chunkSize < 16 || chunkSize > 256) throw new ArgumentOutOfRangeException(nameof(chunkSize));
-            bool[] exterior = hideEnclosedCavities ? FindExterior(grid, progress) : null;
+            bool[] glass = GlassIds(palette);
+            bool[] exterior = hideEnclosedCavities ? FindExterior(grid, progress, glass) : null;
             var meshes = new List<Mesh>();
             int quads = 0;
             try
@@ -81,7 +85,7 @@ namespace LocalModels.VoxelBridge
                 {
                     var offset = new Vector3Int(x, y, z);
                     Vector3Int size = Vector3Int.Min(Vector3Int.one * chunkSize, grid.Size - offset);
-                    Mesh mesh = BuildRegion(grid, exterior, offset, size, progress, MaximumQuads - quads, true);
+                    Mesh mesh = BuildRegion(grid, exterior, offset, size, progress, MaximumQuads - quads, true, glass: glass);
                     mesh.name = $"Chunk_{x / chunkSize}_{y / chunkSize}_{z / chunkSize}";
                     meshes.Add(mesh);
                     quads += mesh.vertexCount / 4;
@@ -97,7 +101,7 @@ namespace LocalModels.VoxelBridge
         }
 
         private static Mesh BuildRegion(VoxelGrid grid, bool[] exterior, Vector3Int offset, Vector3Int size,
-            Action<float> progress, int maximumQuads, bool allowEmpty, HashSet<int> selection = null, byte[] diagnosticFaces = null)
+            Action<float> progress, int maximumQuads, bool allowEmpty, HashSet<int> selection = null, byte[] diagnosticFaces = null, bool[] glass = null)
         {
             var vertices = new List<Vector3>();
             var normals = new List<Vector3>();
@@ -105,6 +109,7 @@ namespace LocalModels.VoxelBridge
             var colors = new List<Vector2>();
             var surfaces = new List<Vector2>();
             var triangles = new List<int>();
+            var glassTriangles = new List<int>();
             var selectedVertices = selection == null && diagnosticFaces == null ? null : new List<Vector2>();
             int totalSlices = size.x + size.y + size.z + 3;
             int completedSlices = 0;
@@ -129,17 +134,23 @@ namespace LocalModels.VoxelBridge
                         p[axis]--;
                         bool solidA = a >= 0 && grid.Occupied[a];
                         bool solidB = b >= 0 && grid.Occupied[b];
+                        bool glassA = solidA && IsGlass(grid, a, glass);
+                        bool glassB = solidB && IsGlass(grid, b, glass);
+                        // Opaque faces remain visible through glass. Glass/glass interfaces are culled,
+                        // including different tints; a coplanar glass face against opaque is redundant.
+                        bool emitA = solidA && (!solidB || !glassA && glassB);
+                        bool emitB = solidB && (!solidA || !glassB && glassA);
                         int value = 0;
-                        if (solidA != solidB && (solidA ? slice >= 0 : slice + 1 < size[axis]))
+                        if ((emitA || emitB) && (emitA ? slice >= 0 : slice + 1 < size[axis]))
                         {
-                            int air = solidA ? b : a;
+                            int air = emitA ? b : a;
                             if (exterior == null || air < 0 || exterior[air])
                             {
-                                int cell = solidA ? a : b;
-                                int faceBit = 1 << (axis * 2 + (solidA ? 1 : 0));
+                                int cell = emitA ? a : b;
+                                int faceBit = 1 << (axis * 2 + (emitA ? 1 : 0));
                                 int selectedFlag = (selection != null && selection.Contains(cell) ||
                                     diagnosticFaces != null && (diagnosticFaces[cell] & faceBit) != 0) ? 65536 : 0;
-                                value = (grid.SemanticIds[cell] + selectedFlag + 1) * (solidA ? 1 : -1);
+                                value = (grid.SemanticIds[cell] + selectedFlag + 1) * (emitA ? 1 : -1);
                             }
                         }
                         mask[x + width * y] = value;
@@ -172,21 +183,23 @@ namespace LocalModels.VoxelBridge
                         vertices.Add(corner); vertices.Add(corner + du);
                         vertices.Add(corner + du + dv); vertices.Add(corner + dv);
                         ushort semantic = (ushort)((Math.Abs(key) - 1) & 65535);
+                        bool isGlass = glass != null && glass[VoxelSemanticEncoding.SurfaceId(semantic)];
                         Vector4 tangent = Vector4.zero;
                         tangent[u] = 1; tangent.w = sign;
                         for (int i = 0; i < 4; i++)
                         {
                             normals.Add(normal); tangents.Add(tangent);
                             colors.Add(new Vector2(VoxelSemanticEncoding.ColorId(semantic), 0));
-                            surfaces.Add(new Vector2(VoxelSemanticEncoding.SurfaceId(semantic), 0));
+                            surfaces.Add(new Vector2(VoxelSemanticEncoding.SurfaceId(semantic), isGlass ? 1 : 0));
                             selectedVertices?.Add(new Vector2((Math.Abs(key) - 1 & 65536) != 0 ? 1 : 0, 0));
                         }
-                        triangles.Add(start);
-                        triangles.Add(start + (sign > 0 ? 1 : 2));
-                        triangles.Add(start + (sign > 0 ? 2 : 1));
-                        triangles.Add(start);
-                        triangles.Add(start + (sign > 0 ? 2 : 3));
-                        triangles.Add(start + (sign > 0 ? 3 : 2));
+                        var output = isGlass ? glassTriangles : triangles;
+                        output.Add(start);
+                        output.Add(start + (sign > 0 ? 1 : 2));
+                        output.Add(start + (sign > 0 ? 2 : 1));
+                        output.Add(start);
+                        output.Add(start + (sign > 0 ? 2 : 3));
+                        output.Add(start + (sign > 0 ? 3 : 2));
                         for (int j = 0; j < h; j++)
                         for (int i = 0; i < w; i++) mask[x + i + width * (y + j)] = 0;
                         x += w;
@@ -200,14 +213,27 @@ namespace LocalModels.VoxelBridge
                 mesh.SetVertices(vertices); mesh.SetNormals(normals); mesh.SetTangents(tangents);
                 mesh.SetUVs(0, colors); mesh.SetUVs(3, surfaces);
                 if (selectedVertices != null) mesh.SetUVs(1, selectedVertices);
+                mesh.subMeshCount = glassTriangles.Count > 0 ? 2 : 1;
                 mesh.SetTriangles(triangles, 0);
+                if (glassTriangles.Count > 0) mesh.SetTriangles(glassTriangles, 1);
                 mesh.RecalculateBounds();
                 return mesh;
             }
             catch { UnityEngine.Object.DestroyImmediate(mesh); throw; }
         }
 
-        internal static bool[] FindExterior(VoxelGrid grid, Action<float> progress)
+        internal static bool[] GlassIds(VoxelSurfacePalette palette)
+        {
+            if (palette == null) return null;
+            var ids = new bool[256];
+            foreach (var surface in palette.Entries) ids[surface.Id] = surface.RenderClass == VoxelSurfaceRenderClass.Transparent;
+            return ids;
+        }
+
+        internal static bool IsGlass(VoxelGrid grid, int cell, bool[] glass) =>
+            glass != null && glass[VoxelSemanticEncoding.SurfaceId(grid.SemanticIds[cell])];
+
+        internal static bool[] FindExterior(VoxelGrid grid, Action<float> progress, bool[] glass = null)
         {
             int count = grid.Occupied.Length;
             var exterior = new bool[count];
@@ -215,7 +241,7 @@ namespace LocalModels.VoxelBridge
             int tail = 0;
             void Visit(int index)
             {
-                if (grid.Occupied[index] || exterior[index]) return;
+                if (grid.Occupied[index] && !IsGlass(grid, index, glass) || exterior[index]) return;
                 exterior[index] = true;
                 queue[tail++] = index;
             }

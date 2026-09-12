@@ -271,7 +271,7 @@ namespace LocalModels.VoxelBridge
             if (metadata.semantic.colorPaletteGuid != first.semantic.colorPaletteGuid ||
                 metadata.semantic.surfacePaletteGuid != first.semantic.surfacePaletteGuid)
                 throw new InvalidDataException("All levels must use the same global palette pair.");
-            Mesh[] generated = VoxelSemanticMesher.BuildChunks(grid, manifest.chunkCellSize, metadata.hideInternalCavities, progress);
+            Mesh[] generated = VoxelSemanticMesher.BuildChunks(grid, manifest.chunkCellSize, metadata.hideInternalCavities, progress, surfaces);
             var oldMeshes = new Dictionary<string, Mesh>();
             var backups = new Dictionary<Mesh, Mesh>();
             var created = new List<string>();
@@ -290,6 +290,12 @@ namespace LocalModels.VoxelBridge
                 }
                 Material material = VoxelProductionExporter.GetSharedMaterial(colors, surfaces, shader, out string materialPath);
                 if (materialPath != null) created.Add(materialPath);
+                Material glass = null;
+                if (generated.Any(mesh => mesh.subMeshCount > 1))
+                {
+                    glass = VoxelProductionExporter.GetGlassMaterial(colors, surfaces, out string glassPath);
+                    if (glassPath != null) created.Add(glassPath);
+                }
                 root = existingPrefab ? PrefabUtility.LoadPrefabContents(manifest.prefabAssetPath) : new GameObject(manifest.sourceName);
                 if (existingPrefab) { backupRoot = Object.Instantiate(root); backupRoot.name = root.name; backupRoot.hideFlags = HideFlags.HideAndDontSave; }
                 Transform levelRoot = root.transform.Find("LOD" + level);
@@ -308,6 +314,13 @@ namespace LocalModels.VoxelBridge
                 if (levelRoot == null) { var child = new GameObject("LOD" + level); child.transform.SetParent(root.transform, false); levelRoot = child.transform; }
                 var saved = new List<Mesh>();
                 VoxelProductionExporter.RegisterMeshUndo(oldMeshes.Values.ToArray());
+                if (existingPrefab)
+                {
+                    var assetRoot = AssetDatabase.LoadAssetAtPath<GameObject>(manifest.prefabAssetPath);
+                    var assetLevel = assetRoot.transform.Find("LOD" + level);
+                    if (assetLevel != null)
+                        Undo.RegisterCompleteObjectUndo(assetLevel.GetComponentsInChildren<MeshRenderer>(true), "Rebuild Voxel Production Materials");
+                }
                 string folder = Path.GetDirectoryName(manifestPath).Replace('\\', '/');
                 foreach (Mesh mesh in generated)
                 {
@@ -338,8 +351,12 @@ namespace LocalModels.VoxelBridge
                         renderer.sharedMaterial.GetTexture("_PaletteColor") != colors.GeneratedLut ||
                         renderer.sharedMaterial.GetTexture("_PaletteSurface") != surfaces.GeneratedLut))
                         throw new InvalidDataException("A chunk material uses an incompatible shader or palette pair.");
+                    VoxelProductionExporter.ValidateAdditionalMaterials(renderer.sharedMaterials, colors, surfaces);
                     filter.sharedMesh = mesh;
-                    if (renderer.sharedMaterial == null) renderer.sharedMaterial = material;
+                    var opaque = renderer.sharedMaterial != null ? renderer.sharedMaterial : material;
+                    var currentMaterials = renderer.sharedMaterials;
+                    var retainedGlass = currentMaterials.Length == 2 ? currentMaterials[1] : glass;
+                    renderer.sharedMaterials = mesh.subMeshCount > 1 ? new[] { opaque, retainedGlass } : new[] { opaque };
                 }
                 entry.meshGuids = saved.Select(mesh => AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(mesh))).ToArray();
                 VoxelRetainedGeometry.Attach(levelRoot, manifest.retainedGeometryGuid);

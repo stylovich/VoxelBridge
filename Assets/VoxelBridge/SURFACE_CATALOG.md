@@ -1,6 +1,6 @@
 # Catálogo de superficies
 
-La paleta recomendada contiene 44 perfiles opacos con IDs estables entre `0` y `43`. Los IDs `0–15` conservan los perfiles iniciales; `16–43` ofrecen acabados adicionales para vehículos y arquitectura. Los valores son puntos de partida artísticos, no mediciones físicas ni identificación automática de sustancias.
+La paleta recomendada contiene 44 perfiles opacos con IDs estables entre `0` y `43`, y el preset `Glass` con ID `44`. Los IDs `0–15` conservan los perfiles iniciales; `16–43` ofrecen acabados adicionales para vehículos y arquitectura. Los valores son puntos de partida artísticos, no mediciones físicas ni identificación automática de sustancias.
 
 ## Uso y compatibilidad
 
@@ -10,7 +10,11 @@ En el Inspector de `VoxelSurfacePalette`, seleccionar `Append Recommended` para 
 
 Seleccionar una fila y abrir `Preview Selected Surface` para revisar sus valores actuales sin reconstruir la LUT. La ventana permite elegir otra superficie, alternar esfera y cubo, ajustar un color de referencia y rotar la cámara con el ratón. El color y la cámara pertenecen exclusivamente a la vista. No se crean materiales persistentes ni se modifican los modelos.
 
-La vista utiliza iluminación HDRP fija y materiales opacos temporales. No reproduce la exposición, el bloom, las reflexiones ambientales ni las sombras de una escena de producción. La oclusión se muestra como valor; su efecto requiere geometría o mapas de oclusión. Las clases no opacas no se simulan.
+La vista utiliza iluminación HDRP fija y materiales temporales para Opaque y Glass. No reproduce la exposición, el bloom, las reflexiones ambientales ni las sombras de una escena de producción. La oclusión se muestra como valor; su efecto requiere geometría o mapas de oclusión. El vidrio utiliza transparencia básica; no simula refracción. Foliage y Special no se representan.
+
+## Glass
+
+El ID `44` utiliza `Glass (Transparent)`: Metallic 0, Smoothness 0,9, Emission 0 y Opacity 0,25. El tinte procede de ColorID. Es un cristal funcional de autoría, sin refracción, absorción por espesor ni sombras transparentes. La opacidad 1 cubre el fondo; los reflejos especulares pueden permanecer con opacidad baja. Consultar [Vidrio voxel básico](README.md#vidrio-voxel-básico) para asignación y reconstrucción.
 
 ## Perfiles adicionales
 

@@ -354,8 +354,8 @@ namespace LocalModels.VoxelBridge
 
         private void ValidateSurface(int id)
         {
-            if (!surfaces.TryGetSurface(id, out var entry) || entry.RenderClass != VoxelSurfaceRenderClass.Opaque)
-                throw new InvalidDataException($"SurfaceID {id} is unknown or not opaque.");
+            if (!surfaces.TryGetSurface(id, out var entry) || !entry.SupportsVoxelRendering)
+                throw new InvalidDataException($"SurfaceID {id} is unknown or uses an unsupported render class.");
         }
 
         private void ValidatePaletteState()

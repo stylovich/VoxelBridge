@@ -4,7 +4,7 @@
 
 El sistema de materiales voxel separa el color visible de las propiedades físicas de la superficie. Un modelo puede reutilizar el mismo color con perfiles PBR diferentes sin crear un Material de Unity por combinación.
 
-El sistema proporciona paletas globales, IDs estables, generación de LUT, transporte de `ColorID + SurfaceID` en volúmenes y archivos `.vox`, exportación independiente de LOD0 y familias de producción opacas con chunks y material HDRP compartido. La integración con impostores semánticos y DOTS se describe en [ROADMAP.md](ROADMAP.md).
+El sistema proporciona paletas globales, IDs estables, generación de LUT, transporte de `ColorID + SurfaceID` en volúmenes y archivos `.vox`, exportación independiente de LOD0 y familias de producción con chunks, superficies opacas y vidrio básico con materiales HDRP compartidos. La integración con impostores semánticos y DOTS se describe en [ROADMAP.md](ROADMAP.md).
 
 ## Assets canónicos
 
@@ -50,13 +50,21 @@ La LUT lineal de superficies codifica:
 | R | Metallic | 0..1 |
 | G | Smoothness | 0..1 |
 | B | Emisión relativa | 0..1 |
-| A | Multiplicador de oclusión | 0..1 |
+| A | Oclusión en Opaque; opacidad en Glass | 0..1 |
 
 El multiplicador de oclusión controla cuánto participa la oclusión calculada o proporcionada por el pipeline. No representa una sombra fija horneada en el tipo de material.
 
-`Render Class` clasifica la superficie según su comportamiento de render: opaca, follaje, transparente o especial. La clase no forma parte de la LUT PBR; en una fase posterior determinará el material o submesh compartido correspondiente.
+`Render Class` clasifica la superficie según su comportamiento de render: opaca, follaje, transparente o especial. La clase determina el submesh y material compartido: Opaque y Glass están disponibles; Foliage y Special permanecen reservados. Cambiar la clase de una superficie utilizada requiere reconstruir sus mallas.
 
-El catálogo recomendado contiene 44 perfiles opacos, con IDs `0–43`. `Append Recommended` incorpora presets ausentes sin sobrescribir entradas ni reutilizar IDs retirados. `Preview Selected Surface` abre un visor temporal de esfera/cubo con los valores actuales, sin requerir una LUT reconstruida. Los valores son puntos de partida estilísticos: calibrarlos con el shader HDRP definitivo antes de producir materiales e impostores finales. Consultar [SURFACE_CATALOG.md](SURFACE_CATALOG.md).
+El catálogo recomendado contiene 44 perfiles opacos con IDs `0–43` y `Glass` con ID `44`. `Append Recommended` incorpora presets ausentes sin sobrescribir entradas ni reutilizar IDs retirados. `Preview Selected Surface` abre un visor temporal de esfera/cubo con los valores actuales, sin requerir una LUT reconstruida. Los valores son puntos de partida estilísticos: calibrarlos con el shader HDRP definitivo antes de producir materiales e impostores finales. Consultar [SURFACE_CATALOG.md](SURFACE_CATALOG.md).
+
+## Contrato de vidrio básico
+
+`Voxel Bridge/VoxelGlass` es un shader HDRP Lit transparente, con mezcla alpha, reflejo especular y sin refracción. Consume el ColorID como tinte y la fila SurfaceID de la LUT: R metallic, G smoothness, B emisión y A opacidad. La oclusión del vidrio queda en 1; el canal A de las superficies opacas conserva su significado anterior.
+
+El mesher conserva las caras opacas en contacto con vidrio y permite encontrar cavidades visibles a través de él. Suprime interfaces entre voxels de vidrio, incluso de distintos tintes, y evita una cara de vidrio coplanar contra una opaca. El submesh 0 contiene opacos y el 1 vidrio; una malla sin vidrio conserva un solo submesh. Cada clase utiliza un material compartido por pareja de paletas. Las copias `Keep Original` conservan sus materiales independientes.
+
+El shader y los meshes transportan la marca de clase en `UV3.y` (`mesh.uv4.y` en C#); cambiar la clase de una entrada requiere `Rebuild`, no sólo regenerar la LUT. El formato semántico del VOX conserva ColorID + SurfaceID y no almacena alpha por celda. La reducción mantiene un par por voxel grueso: puede perder ventanas o detalles delgados y no conserva capas transparentes superpuestas. Las reglas de uso y límites están en [Vidrio voxel básico](README.md#vidrio-voxel-básico).
 
 ## Flujo de edición
 
@@ -84,7 +92,7 @@ La prioridad de SurfaceID es:
 
 La preasignación opcional compara metallic y smoothness de HDRP/Lit Standard con los candidatos del `Surface Mapping Profile`; los casos ambiguos o no compatibles conservan el fallback. Cada LOD incluye un informe de la conversión. Consultar [SURFACE_MAPPING.md](SURFACE_MAPPING.md) para configuración, límites y revisión.
 
-El perfil rechaza IDs desconocidos y superficies no opacas destinadas a voxelización. `Keep Original` conserva vidrio u otras piezas con sus materiales originales fuera del volumen semántico. Los materiales temporales de autoría pueden asignarse a caras en Blender; en Unity se vinculan por referencia desde `Material Rules`. No existe resolución automática mediante prefijos `SURF_`.
+El perfil rechaza IDs desconocidos y clases distintas de Opaque o Glass destinadas a voxelización. `Keep Original` conserva vidrio u otras piezas con sus materiales originales fuera del volumen semántico. Los materiales temporales de autoría pueden asignarse a caras en Blender; en Unity se vinculan por referencia desde `Material Rules`. No existe resolución automática mediante prefijos `SURF_`.
 
 `Detect Emission` admite HDRP/Lit y Standard, con emisión uniforme o mapa en UV0. Respeta la activación del mapa en HDRP y la palabra clave de emisión en Standard. Las texturas se muestrean con su escala y desplazamiento, con una resolución de lectura máxima de 512 × 512. `Single Color` omite esta inferencia salvo cuando PBR está habilitado: en ese caso también separa las muestras emisivas antes de clasificar superficies. Los shaders no compatibles y las configuraciones HDRP con emisión dependiente del albedo o mapeo distinto de UV0 requieren asignación explícita y producen una advertencia.
 
@@ -188,7 +196,7 @@ La herramienta reutiliza el `.vox`, el sidecar v4 y el mesher existentes. La sup
 
 La emisión de la vista utiliza una referencia acotada sólo en su material temporal. La ayuda `?` y el tooltip de las propiedades PBR describen esta limitación. No representa la exposición ni el bloom de la escena; la intensidad de producción permanece intacta. `Save & Rebuild` guarda la fuente y reconstruye el LOD vinculado; los descendientes requieren regeneración explícita.
 
-El perfil recomendado `Default` utiliza Metallic 0, Smoothness 0, Emission 0 y AO 1. Es una superficie mate neutra, no un modo sin iluminación ni un sustituto de la asignación artística. Las otras superficies conservan sus propios valores. La vista de diagnóstico por SurfaceID está planificada para distinguir asignaciones con apariencias similares.
+El perfil recomendado `Default` utiliza Metallic 0, Smoothness 0, Emission 0 y AO 1. Es una superficie mate neutra, no un modo sin iluminación ni un sustituto de la asignación artística. Las otras superficies conservan sus propios valores. La vista de diagnóstico SurfaceID permite distinguir asignaciones con apariencias similares.
 
 ## Mesh semántico LOD0
 
@@ -199,7 +207,7 @@ El contrato del mesh es:
 - `UV0.x`: `ColorID` crudo.
 - `UV1`: reservado para lightmaps horneados, sin generar en esta exportación.
 - `UV2`: reservado, sin datos.
-- `UV3.x`: `SurfaceID` crudo.
+- `UV3.x`: `SurfaceID` crudo; `UV3.y`: 0 para opaco, 1 para vidrio.
 - Vertex Color: máscaras estilísticas futuras.
 
 Cada cara dispone de vértices propios, normales planas y tangentes. Los canales de IDs son Vector2 y cada triángulo contiene un único par. El origen de la rejilla y la unidad física se incorporan a los vértices; el prefab conserva transform identidad y el pivote local de la fuente.
@@ -238,7 +246,7 @@ Los prefabs generados sólo requieren sus mallas, material, shader y texturas en
 
 ### Límites de esta exportación
 
-- Sólo LOD0 semántico y superficies `Opaque`; otras clases producen un error explícito.
+- Sólo LOD0 semántico y superficies `Opaque` o `Glass`; otras clases producen un error explícito.
 - Una sola malla de salida, aunque la entrada contenga varios modelos internos. No sustituye al flujo de chunks y familias para edificios grandes.
 - Máximo de 8.000.000 de celdas, archivo `.vox` de 64 MiB y 500.000 quads. Estos límites acotan el trabajo de la exportación independiente; no son una garantía del consumo total de Unity. No modifican los presupuestos de voxelización ni reducen automáticamente la resolución.
 - Sin generación de LODGroup, colliders, impostores, UV de lightmap o actualización automática tras editar el `.vox`.
@@ -262,7 +270,7 @@ Cada nivel contiene renderers de chunks independientes. La eliminación de caras
 
 El manifiesto conserva huellas de las fuentes y del padre utilizado para cada derivación. Si cambia un antecesor, sus descendientes muestran un aviso de revisión. Reconstruir el mesh del padre no elimina ese aviso ni modifica los `.vox` descendientes. `Regenerate: Duplicate` y `Regenerate: Reduce` requieren confirmación antes de reemplazar un nivel existente; conservan su GUID, pero descartan sus retoques manuales y no admiten Undo del archivo fuente. Los errores y cancelaciones restauran los archivos reemplazados. La reconstrucción de varios niveles confirma cada nivel por separado y se detiene ante un fallo.
 
-Las familias admiten superficies opacas, una misma pareja de paletas globales y hasta 8 niveles consecutivos. Se mantienen los límites de 8.000.000 de celdas, 64 MiB de `.vox` y 500.000 quads por nivel; el límite de quads se aplica a la suma de sus chunks. La conversión física considera el límite de celdas al adaptar el tamaño inicial, antes de voxelizar. El meshing de una fuente editada no cambia su resolución: si supera un límite, se detiene con un error. Los colliders y UV de lightmap no se generan en esta ruta. El horneado de impostores semánticos está bloqueado hasta disponer de un shader de captura compatible con las LUT y los IDs.
+Las familias admiten superficies opacas y vidrio básico, una misma pareja de paletas globales y hasta 8 niveles consecutivos. Se mantienen los límites de 8.000.000 de celdas, 64 MiB de `.vox` y 500.000 quads por nivel; el límite de quads se aplica a la suma de sus chunks. La conversión física considera el límite de celdas al adaptar el tamaño inicial, antes de voxelizar. El meshing de una fuente editada no cambia su resolución: si supera un límite, se detiene con un error. Los colliders y UV de lightmap no se generan en esta ruta. El horneado de impostores semánticos está bloqueado hasta disponer de un shader de captura compatible con las LUT y los IDs.
 
 ## Materiales en conjuntos combinados
 

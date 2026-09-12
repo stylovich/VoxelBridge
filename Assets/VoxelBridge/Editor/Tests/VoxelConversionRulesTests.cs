@@ -86,6 +86,52 @@ namespace LocalModels.VoxelBridge.Tests
         private VoxelizationResult Voxelize() => MeshVoxelizer.Voxelize(root, new VoxelizationSettings
         { VoxelSize = .125f, Padding = 1, FillInterior = true, ConversionProfile = conversion });
 
+        [TestCase(false)]
+        [TestCase(true)]
+        public void AlphaCutoff_StillRejectsOpaqueButKeepsGlassGeometry(bool useDefaultSurface)
+        {
+            glass.SetColor("_BaseColor", new Color(.7f, .85f, 1, .01f));
+            var pane = Cube(Vector3.zero, glass);
+            var settings = new VoxelizationSettings { VoxelSize = .125f, Padding = 1, ConversionProfile = conversion,
+                ColorMode = VoxelColorMode.MaterialOnly, AlphaCutoff = .1f };
+            Assert.That(Assert.Throws<InvalidOperationException>(() => MeshVoxelizer.Voxelize(root, settings)).Message,
+                Does.StartWith("No voxels were generated"));
+            if (useDefaultSurface) conversion.defaultSurfaceId = 44;
+            else SetRule(pane, VoxelConversionAction.Voxelize, 44);
+            var result = MeshVoxelizer.Voxelize(root, settings);
+            Assert.That(result.OccupiedVoxelCount, Is.GreaterThan(0));
+            Assert.That(Enumerable.Range(0, result.Grid.Occupied.Length).Where(i => result.Grid.Occupied[i])
+                .All(i => VoxelSemanticEncoding.SurfaceId(result.Grid.SemanticIds[i]) == 44), Is.True);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void GlassRule_CanBeAssignedByMaterialOrGameObject(bool byObject)
+        {
+            glass.SetFloat("_SurfaceType", 1);
+            glass.SetColor("_BaseColor", new Color(.7f, .85f, 1, .01f));
+            Cube(Vector3.zero, body);
+            var pane = Cube(new Vector3(1.5f, 0, 0), glass);
+            if (byObject) SetRule(pane, VoxelConversionAction.Voxelize, 44);
+            else conversion.materialRules.Add(new VoxelMaterialConversionRule
+                { material = glass, action = VoxelConversionAction.Voxelize, surfaceId = 44 });
+            string glassMaterial = null;
+            try
+            {
+                var build = VoxelLodPipeline.GenerateAutomatic(root, style, new VoxelLodBuildOptions
+                    { ExportFolder = folder, GenerateLod0Only = true, ConversionProfile = conversion,
+                      ColorMode = VoxelColorMode.MaterialOnly, AlphaCutoff = .1f });
+                var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(build.PrefabAssetPath);
+                var renderer = prefab.GetComponentsInChildren<MeshRenderer>().First(r => r.sharedMaterials.Length == 2);
+                glassMaterial = AssetDatabase.GetAssetPath(renderer.sharedMaterials[1]);
+                Assert.That(renderer.sharedMaterials[1].shader, Is.EqualTo(VoxelProductionExporter.GlassShader()));
+                Assert.That(prefab.transform.Find("LOD0/" + VoxelRetainedGeometry.ChildName), Is.Null);
+                VoxelProductionFamily.DeriveLevel(build.ManifestAssetPath, 1, VoxelLodGenerationMode.ReduceParent);
+                Assert.That(prefab.transform.Find("LOD1").GetComponentsInChildren<MeshRenderer>().Any(r => r.sharedMaterials.Length == 2), Is.True);
+            }
+            finally { if (glassMaterial != null) AssetDatabase.DeleteAsset(glassMaterial); }
+        }
+
         [Test]
         public void SourceAxes_NormalizesBoundsMeshesAndRetainedGeometryWithoutChangingSource()
         {

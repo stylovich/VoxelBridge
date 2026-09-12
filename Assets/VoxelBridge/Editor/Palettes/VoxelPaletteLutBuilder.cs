@@ -74,7 +74,8 @@ namespace LocalModels.VoxelBridge
             EncodeUnit(surface.Metallic),
             EncodeUnit(surface.Smoothness),
             EncodeUnit(surface.Emission),
-            EncodeUnit(surface.OcclusionMultiplier));
+            // Glass uses alpha for opacity; opaque encoding and its existing LUT stay unchanged.
+            EncodeUnit(surface.RenderClass == VoxelSurfaceRenderClass.Transparent ? surface.Opacity : surface.OcclusionMultiplier));
 
         private static Color32[] CreateFilledPixels(Color32 value)
         {

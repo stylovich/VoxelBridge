@@ -427,9 +427,8 @@ namespace LocalModels.VoxelBridge
                 if (distance >= bestDistances[index]) continue;
                 Vector2 uv = uv0 * barycentric.x + uv1 * barycentric.y + uv2 * barycentric.z;
                 Color32 color = sampler.Sample(uv);
-                if (color.a / 255f < alphaCutoff) continue;
+                bool belowCutoff = color.a / 255f < alphaCutoff;
                 color.a = 255;
-                grid.Occupied[index] = true;
                 if (mapper != null)
                 {
                     int resolvedSurface = surfaceId;
@@ -457,10 +456,17 @@ namespace LocalModels.VoxelBridge
                             }
                         }
                     }
+                    // Glass opacity belongs to the semantic palette, not to geometric alpha clipping.
+                    if (belowCutoff && !mapper.IsGlass(resolvedSurface)) continue;
                     grid.SemanticIds[index] = mapper.Map(color, resolvedSurface);
                     if (decisions != null) decisions[index] = decision;
                 }
-                else grid.Colors[index] = color;
+                else
+                {
+                    if (belowCutoff) continue;
+                    grid.Colors[index] = color;
+                }
+                grid.Occupied[index] = true;
                 bestDistances[index] = distance;
             }
         }

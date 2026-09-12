@@ -17,6 +17,7 @@ namespace LocalModels.VoxelBridge
         [InspectorName("Standard Opaque")]
         Opaque,
         Foliage,
+        [InspectorName("Glass (Transparent)")]
         Transparent,
         Special
     }
@@ -55,6 +56,8 @@ namespace LocalModels.VoxelBridge
         [SerializeField] private float emission;
         [Range(0f, 1f)]
         [SerializeField] private float occlusionMultiplier;
+        [Range(0f, 1f)]
+        [SerializeField] private float opacity = .25f;
 
         public int Id => id;
         public string DisplayName => displayName;
@@ -63,10 +66,12 @@ namespace LocalModels.VoxelBridge
         public float Smoothness => smoothness;
         public float Emission => emission;
         public float OcclusionMultiplier => occlusionMultiplier;
+        public float Opacity => opacity;
+        public bool SupportsVoxelRendering => renderClass == VoxelSurfaceRenderClass.Opaque || renderClass == VoxelSurfaceRenderClass.Transparent;
 
         internal VoxelSurfaceDefinition(int id, string displayName,
             VoxelSurfaceRenderClass renderClass, float metallic, float smoothness,
-            float emission, float occlusionMultiplier)
+            float emission, float occlusionMultiplier, float opacity = .25f)
         {
             this.id = id;
             this.displayName = displayName;
@@ -75,6 +80,7 @@ namespace LocalModels.VoxelBridge
             this.smoothness = smoothness;
             this.emission = emission;
             this.occlusionMultiplier = occlusionMultiplier;
+            this.opacity = opacity;
         }
     }
 
@@ -129,7 +135,7 @@ namespace LocalModels.VoxelBridge
                     return false;
                 }
                 if (!IsUnit(entry.Metallic) || !IsUnit(entry.Smoothness) ||
-                    !IsUnit(entry.Emission) || !IsUnit(entry.OcclusionMultiplier))
+                    !IsUnit(entry.Emission) || !IsUnit(entry.OcclusionMultiplier) || !IsUnit(entry.Opacity))
                 {
                     error = $"SurfaceID {entry.Id} contains PBR properties outside the 0..1 range.";
                     return false;

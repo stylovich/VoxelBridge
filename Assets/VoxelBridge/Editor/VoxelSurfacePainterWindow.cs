@@ -46,6 +46,7 @@ namespace LocalModels.VoxelBridge
         private PreviewRenderUtility preview;
         private Mesh mesh;
         private Material material;
+        private Material glassMaterial;
         private Material diagnosticMaterial;
         private VoxelPainterIsolation isolation;
         private VoxelGrid ViewGrid => reductionActive ? ReductionViewGrid : isolation?.Grid ?? edit.Grid;
@@ -244,7 +245,7 @@ namespace LocalModels.VoxelBridge
         private void BuildPreview()
         {
             if (edit == null) return;
-            var generated = VoxelSemanticMesher.Build(edit.Grid, edit.HideInternalCavities, VoxelProductionEditor.Progress);
+            var generated = VoxelSemanticMesher.Build(edit.Grid, edit.HideInternalCavities, VoxelProductionEditor.Progress, palette: edit.Surfaces);
             try
             {
                 isolation?.Refresh(VoxelProductionEditor.Progress);
@@ -287,6 +288,8 @@ namespace LocalModels.VoxelBridge
 
         private void ReleasePreview()
         {
+            if (glassMaterial != null) DestroyImmediate(glassMaterial);
+            glassMaterial = null;
             ReleaseReductionPreview();
             legendGrid = null; legendRevision = -1; legendIds = Array.Empty<int>();
             CancelAppearancePreview();
@@ -396,7 +399,7 @@ namespace LocalModels.VoxelBridge
             if (editColor) DrawColorControls();
             else
             {
-            var options = edit.Surfaces.Entries.Where(s => s.RenderClass == VoxelSurfaceRenderClass.Opaque).OrderBy(s => s.Id).ToArray();
+            var options = edit.Surfaces.Entries.Where(s => s.SupportsVoxelRendering).OrderBy(s => s.Id).ToArray();
             int choice = Array.FindIndex(options, s => s.Id == surfaceId);
             using (new EditorGUILayout.HorizontalScope())
             {
@@ -500,13 +503,27 @@ namespace LocalModels.VoxelBridge
             return diagnosticMaterial;
         }
 
-        private Material ViewMaterial()
+        private Material ViewMaterial() => ViewMaterialForSubmesh(0);
+
+        private Material ViewMaterialForSubmesh(int submesh)
         {
             if (reductionActive && reductionOriginal && reductionLosses && !ReductionStale)
             {
                 var lossMaterial = GetDiagnosticMaterial(); lossMaterial.SetFloat(ViewModeProperty, 4); return lossMaterial;
             }
-            if (appearancePreview != null || viewMode == VoxelPainterViewMode.Lit) return material;
+            if (appearancePreview != null || viewMode == VoxelPainterViewMode.Lit)
+            {
+                if (submesh == 0) return material;
+                if (glassMaterial == null)
+                {
+                    glassMaterial = new Material(VoxelProductionExporter.GlassShader()) { hideFlags = HideFlags.HideAndDontSave };
+                    glassMaterial.SetTexture("_PaletteColor", edit.Colors.GeneratedLut);
+                    glassMaterial.SetTexture("_PaletteSurface", edit.Surfaces.GeneratedLut);
+                    glassMaterial.SetFloat("_EmissionIntensity", material.GetFloat("_EmissionIntensity"));
+                    HDMaterial.ValidateMaterial(glassMaterial);
+                }
+                return glassMaterial;
+            }
             Material view = GetDiagnosticMaterial();
             view.SetFloat(ViewModeProperty, (int)viewMode);
             return view;
@@ -516,7 +533,7 @@ namespace LocalModels.VoxelBridge
         {
             if (edit == null || selectionJob != null || EditorApplication.isPlayingOrWillChangePlaymode) return;
             if (!enabled) { ClearIsolation(); Repaint(); return; }
-            var next = new VoxelPainterIsolation(edit.Grid, selected, VoxelProductionEditor.Progress);
+            var next = new VoxelPainterIsolation(edit.Grid, selected, VoxelProductionEditor.Progress, edit.Surfaces);
             ClearIsolation(); isolation = next;
             sampledCell = -1;
             FrameCells(isolation.Cells);
@@ -655,7 +672,8 @@ namespace LocalModels.VoxelBridge
                 try
                 {
                     if (!reductionActive) UpdateSelectionOverlay();
-                    preview.DrawMesh(ViewMesh, Matrix4x4.identity, ViewMaterial(), 0);
+                    for (int submesh = 0; submesh < ViewMesh.subMeshCount; submesh++)
+                        preview.DrawMesh(ViewMesh, Matrix4x4.identity, ViewMaterialForSubmesh(submesh), submesh);
                     if (!reductionActive)
                     {
                         if (appearancePreview == null || previewOutline)

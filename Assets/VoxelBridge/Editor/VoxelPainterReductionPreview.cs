@@ -13,20 +13,22 @@ namespace LocalModels.VoxelBridge
         internal int ChangedCells { get; }
         private readonly VoxelGrid source;
         private readonly bool hideCavities;
+        private readonly VoxelSurfacePalette palette;
 
         internal VoxelPainterReductionPreview(VoxelGrid source, float size, int padding, int chunkSize,
-            bool hideCavities, Action<float> progress = null)
+            bool hideCavities, Action<float> progress = null, VoxelSurfacePalette palette = null)
         {
             if (source == null || !source.IsSemantic || !float.IsFinite(size) || size <= source.VoxelSize)
                 throw new ArgumentException("Preview requires a semantic draft and a coarser target size.");
             this.source = source; this.hideCavities = hideCavities;
+            this.palette = palette;
             try
             {
                 Reduced = VoxelGridDownsampler.Downsample(source, size, padding, chunkSize,
                     hideCavities, v => progress?.Invoke(v * .5f));
                 ChangedFaces = FindChangedFaces(source, Reduced, hideCavities, v => progress?.Invoke(.5f + v * .25f));
                 foreach (byte faces in ChangedFaces) if (faces != 0) ChangedCells++;
-                Mesh = VoxelSemanticMesher.Build(Reduced, hideCavities, v => progress?.Invoke(.75f + v * .25f));
+                Mesh = VoxelSemanticMesher.Build(Reduced, hideCavities, v => progress?.Invoke(.75f + v * .25f), palette: palette);
                 Mesh.hideFlags = HideFlags.HideAndDontSave;
                 progress?.Invoke(1);
             }
@@ -57,7 +59,7 @@ namespace LocalModels.VoxelBridge
         internal void BuildLossMesh(Action<float> progress = null)
         {
             if (LossMesh != null) return;
-            var candidate = VoxelSemanticMesher.BuildReductionLossPreview(source, ChangedFaces, hideCavities, progress);
+            var candidate = VoxelSemanticMesher.BuildReductionLossPreview(source, ChangedFaces, hideCavities, progress, palette);
             candidate.hideFlags = HideFlags.HideAndDontSave;
             LossMesh = candidate;
         }

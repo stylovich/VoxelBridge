@@ -190,7 +190,8 @@ namespace LocalModels.VoxelBridge
             Surface(40, "Rust", 0f, 0.13f, 0f, 1f),
             Surface(41, "Emissive Indicator", 0f, 0.55f, 0.35f, 1f),
             Surface(42, "Emissive Panel", 0f, 0.25f, 0.75f, 1f),
-            Surface(43, "Emissive Tube", 0f, 0.80f, 1f, 1f)
+            Surface(43, "Emissive Tube", 0f, 0.80f, 1f, 1f),
+            new(44, "Glass", VoxelSurfaceRenderClass.Transparent, 0f, .9f, 0f, 1f, .25f)
         };
 
         private static VoxelSurfaceDefinition Surface(int id, string displayName,

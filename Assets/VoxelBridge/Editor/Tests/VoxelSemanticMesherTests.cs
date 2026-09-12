@@ -144,13 +144,13 @@ namespace LocalModels.VoxelBridge.Tests
         }
 
         [Test]
-        public void NonOpaqueAndUnknownSurfaces_AreRejected()
+        public void UnsupportedAndUnknownSurfaces_AreRejected()
         {
             var palette = ScriptableObject.CreateInstance<VoxelSurfacePalette>();
             try
             {
                 palette.MutableEntries.Clear();
-                palette.MutableEntries.Add(new VoxelSurfaceDefinition(0, "Glass", VoxelSurfaceRenderClass.Transparent, 0, 0, 0, 1));
+                palette.MutableEntries.Add(new VoxelSurfaceDefinition(0, "Foliage", VoxelSurfaceRenderClass.Foliage, 0, 0, 0, 1));
                 Assert.Throws<InvalidDataException>(() => VoxelProductionExporter.ValidateSurfaces(Solid(Vector3Int.one), palette));
                 Assert.Throws<InvalidDataException>(() => VoxelProductionExporter.ValidateSurfaces(Solid(Vector3Int.one, 65535), palette));
             }

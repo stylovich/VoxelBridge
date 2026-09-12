@@ -10,11 +10,12 @@ namespace LocalModels.VoxelBridge
     {
         private readonly VoxelGrid source;
         private readonly int[] cells;
+        private readonly VoxelSurfacePalette palette;
         internal IReadOnlyCollection<int> Cells => cells;
         internal VoxelGrid Grid { get; }
         internal Mesh Mesh { get; private set; }
 
-        internal VoxelPainterIsolation(VoxelGrid source, IReadOnlyCollection<int> selection, Action<float> progress = null)
+        internal VoxelPainterIsolation(VoxelGrid source, IReadOnlyCollection<int> selection, Action<float> progress = null, VoxelSurfacePalette palette = null)
         {
             if (source == null || !source.IsSemantic) throw new ArgumentException("A semantic grid is required.");
             if (selection == null || selection.Count == 0 || selection.Count > VoxelSurfaceEdit.MaximumSelection)
@@ -25,6 +26,7 @@ namespace LocalModels.VoxelBridge
                 if (cell < 0 || cell >= source.Occupied.Length || !source.Occupied[cell])
                     throw new ArgumentException("The isolation contains an empty or invalid cell.");
             this.source = source;
+            this.palette = palette;
             Grid = new VoxelGrid(source.Size, source.Origin, source.VoxelSize, true);
             foreach (int cell in cells) Grid.Occupied[cell] = true;
             Refresh(progress);
@@ -34,7 +36,7 @@ namespace LocalModels.VoxelBridge
         {
             foreach (int cell in cells) Grid.SemanticIds[cell] = source.SemanticIds[cell];
             // Cut faces and enclosed regions must remain inspectable inside the isolated volume.
-            Mesh generated = VoxelSemanticMesher.Build(Grid, false, progress);
+            Mesh generated = VoxelSemanticMesher.Build(Grid, false, progress, palette: palette);
             generated.hideFlags = HideFlags.HideAndDontSave;
             generated.name = "Isolated Voxel Preview";
             if (Mesh != null) UnityEngine.Object.DestroyImmediate(Mesh);

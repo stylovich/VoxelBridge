@@ -11,6 +11,7 @@ namespace LocalModels.VoxelBridge
     {
         private const string UndoMeshKey = "VoxelBridge.ProductionMeshUndo.";
         internal const string ShaderPath = "Assets/VoxelBridge/Shaders/VoxelWorldOpaque.shadergraph";
+        internal const string GlassShaderPath = "Assets/VoxelBridge/Shaders/VoxelGlass.shadergraph";
         internal const string SharedMaterialFolder = "Assets/VoxelBridgeImports/SharedMaterials";
 
         static VoxelProductionExporter() => Undo.undoRedoEvent += RefreshRestoredMesh;
@@ -53,7 +54,7 @@ namespace LocalModels.VoxelBridge
         {
             VoxelGrid grid = ReadGrid(voxAssetPath, out metadata, out colors, out surfaces, out shader);
             if (metadata.lodIndex != 0) throw new InvalidDataException("Standalone export requires LOD0.");
-            return VoxelSemanticMesher.Build(grid, metadata.hideInternalCavities, progress);
+            return VoxelSemanticMesher.Build(grid, metadata.hideInternalCavities, progress, palette: surfaces);
         }
 
         internal static VoxelGrid ReadGrid(string voxAssetPath, out VoxelBridgeMetadata metadata,
@@ -88,11 +89,13 @@ namespace LocalModels.VoxelBridge
             GameObject root = null;
             string createdFolder = null;
             string createdMaterial = null;
+            string createdGlassMaterial = null;
             bool saved = false;
             try
             {
                 // All source validation and meshing complete before creating any output assets.
                 Material material = GetSharedMaterial(colors, surfaces, shader, out createdMaterial);
+                Material glass = mesh.subMeshCount > 1 ? GetGlassMaterial(colors, surfaces, out createdGlassMaterial) : null;
                 VoxelLodPipeline.EnsureAssetFolder(outputFolder);
                 string name = VoxelLodPipeline.MakeSafeFileName(Path.GetFileNameWithoutExtension(voxAssetPath));
                 createdFolder = AssetDatabase.GenerateUniqueAssetPath($"{outputFolder}/{name}_Production");
@@ -101,7 +104,7 @@ namespace LocalModels.VoxelBridge
                 AssetDatabase.CreateAsset(mesh, createdFolder + "/LOD0.asset");
                 root = new GameObject(string.IsNullOrWhiteSpace(metadata.sourceName) ? name : metadata.sourceName);
                 root.AddComponent<MeshFilter>().sharedMesh = mesh;
-                root.AddComponent<MeshRenderer>().sharedMaterial = material;
+                root.AddComponent<MeshRenderer>().sharedMaterials = glass == null ? new[] { material } : new[] { material, glass };
                 VoxelRetainedGeometry.Attach(root.transform, metadata.retainedGeometryGuid);
                 GameObject prefab = PrefabUtility.SaveAsPrefabAsset(root, createdFolder + "/" + name + ".prefab");
                 if (prefab == null) throw new IOException("Could not save the production prefab.");
@@ -117,6 +120,7 @@ namespace LocalModels.VoxelBridge
                 {
                     if (createdFolder != null) AssetDatabase.DeleteAsset(createdFolder);
                     if (createdMaterial != null) AssetDatabase.DeleteAsset(createdMaterial);
+                    if (createdGlassMaterial != null) AssetDatabase.DeleteAsset(createdGlassMaterial);
                 }
                 if (mesh != null && !AssetDatabase.Contains(mesh)) Object.DestroyImmediate(mesh);
             }
@@ -140,6 +144,8 @@ namespace LocalModels.VoxelBridge
             Mesh generated = BuildMesh(sourcePath, progress, out _, out VoxelColorPalette colors,
                 out VoxelSurfacePalette surfaces, out Shader shader);
             Mesh backup = null;
+            GameObject contents = null;
+            string createdGlassMaterial = null;
             try
             {
                 Material material = renderer.sharedMaterial;
@@ -147,12 +153,24 @@ namespace LocalModels.VoxelBridge
                     material.GetTexture("_PaletteColor") != colors.GeneratedLut ||
                     material.GetTexture("_PaletteSurface") != surfaces.GeneratedLut)
                     throw new InvalidDataException("The prefab material does not use the source's current palette pair. Assign a compatible production material before rebuilding.");
+                ValidateAdditionalMaterials(renderer.sharedMaterials, colors, surfaces);
+                Material glass = generated.subMeshCount > 1 ? (renderer.sharedMaterials.Length == 2 ? renderer.sharedMaterials[1] :
+                    GetGlassMaterial(colors, surfaces, out createdGlassMaterial)) : null;
+                Material[] materials = glass == null ? new[] { material } : new[] { material, glass };
                 backup = Object.Instantiate(target);
                 generated.name = target.name;
                 RegisterMeshUndo(target);
+                // Rebuild can add/remove the glass submesh: keep its material layout in the same Undo step.
+                Undo.RegisterCompleteObjectUndo(renderer, "Rebuild Voxel Production Materials");
                 ReplaceMeshData(generated, target);
                 EditorUtility.SetDirty(target);
                 AssetDatabase.SaveAssetIfDirty(target);
+                if (!System.Linq.Enumerable.SequenceEqual(renderer.sharedMaterials, materials))
+                {
+                    contents = PrefabUtility.LoadPrefabContents(prefabPath);
+                    contents.GetComponent<MeshRenderer>().sharedMaterials = materials;
+                    if (PrefabUtility.SaveAsPrefabAsset(contents, prefabPath) == null) throw new IOException("Could not save production materials.");
+                }
                 SceneView.RepaintAll();
                 return prefab;
             }
@@ -165,12 +183,14 @@ namespace LocalModels.VoxelBridge
                     EditorUtility.SetDirty(target);
                     AssetDatabase.SaveAssetIfDirty(target);
                 }
+                if (createdGlassMaterial != null) AssetDatabase.DeleteAsset(createdGlassMaterial);
                 throw;
             }
             finally
             {
                 Object.DestroyImmediate(generated);
                 if (backup != null) Object.DestroyImmediate(backup);
+                if (contents != null) PrefabUtility.UnloadPrefabContents(contents);
             }
         }
 
@@ -203,9 +223,27 @@ namespace LocalModels.VoxelBridge
                 seen[id] = true;
                 if (!surfaces.TryGetSurface(id, out VoxelSurfaceDefinition surface))
                     throw new InvalidDataException($"SurfaceID {id} does not exist.");
-                if (surface.RenderClass != VoxelSurfaceRenderClass.Opaque)
-                    throw new InvalidDataException($"SurfaceID {id} ({surface.DisplayName}) uses {surface.RenderClass}. Standalone production export supports only Opaque surfaces.");
+                if (!surface.SupportsVoxelRendering)
+                    throw new InvalidDataException($"SurfaceID {id} ({surface.DisplayName}) uses unsupported {surface.RenderClass}. Use Opaque, Glass or Keep Original.");
             }
+        }
+
+        internal static Shader GlassShader()
+        {
+            var shader = AssetDatabase.LoadAssetAtPath<Shader>(GlassShaderPath);
+            if (shader == null || !shader.isSupported || ShaderUtil.ShaderHasError(shader))
+                throw new InvalidOperationException("The Voxel Bridge glass shader is missing, unsupported or has compilation errors.");
+            return shader;
+        }
+
+        internal static Material GetGlassMaterial(VoxelColorPalette colors, VoxelSurfacePalette surfaces, out string createdPath) =>
+            GetSharedMaterial(colors, surfaces, GlassShader(), out createdPath);
+
+        internal static void ValidateAdditionalMaterials(Material[] materials, VoxelColorPalette colors, VoxelSurfacePalette surfaces)
+        {
+            if (materials.Length > 2 || materials.Length == 2 && (materials[1] == null || materials[1].shader != GlassShader() ||
+                materials[1].GetTexture("_PaletteColor") != colors.GeneratedLut || materials[1].GetTexture("_PaletteSurface") != surfaces.GeneratedLut))
+                throw new InvalidDataException("The glass material slot was replaced or uses another palette pair. Restore its reference before rebuilding.");
         }
 
         internal static Material GetSharedMaterial(VoxelColorPalette colors, VoxelSurfacePalette surfaces,
@@ -214,7 +252,8 @@ namespace LocalModels.VoxelBridge
             createdPath = null;
             string key = AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(colors)) + ":" +
                          AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(surfaces));
-            string path = $"{SharedMaterialFolder}/VoxelWorld_{Hash128.Compute(key)}.mat";
+            bool glass = AssetDatabase.GetAssetPath(shader) == GlassShaderPath;
+            string path = $"{SharedMaterialFolder}/{(glass ? "VoxelGlass" : "VoxelWorld")}_{Hash128.Compute(key)}.mat";
             if (!VoxelPaletteLutGenerator.TryValidateAssetType<Material>(path, out string error))
                 throw new InvalidDataException(error);
             Material material = AssetDatabase.LoadAssetAtPath<Material>(path);
@@ -226,12 +265,17 @@ namespace LocalModels.VoxelBridge
                 return material;
             }
             VoxelLodPipeline.EnsureAssetFolder(SharedMaterialFolder);
-            material = new Material(shader) { name = "VoxelWorldOpaque", enableInstancing = true };
+            material = new Material(shader) { name = glass ? "VoxelGlass" : "VoxelWorldOpaque", enableInstancing = true };
             try
             {
                 material.SetTexture("_PaletteColor", colors.GeneratedLut);
                 material.SetTexture("_PaletteSurface", surfaces.GeneratedLut);
                 material.SetFloat("_EmissionIntensity", 1f);
+                if (glass)
+                {
+                    UnityEngine.Rendering.HighDefinition.HDMaterial.ValidateMaterial(material);
+                    material.SetShaderPassEnabled("ShadowCaster", false);
+                }
                 AssetDatabase.CreateAsset(material, path);
                 createdPath = path;
                 return material;
