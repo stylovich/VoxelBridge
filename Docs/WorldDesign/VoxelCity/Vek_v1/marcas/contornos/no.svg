@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="40" height="32" viewBox="0 0 40 32" role="img" aria-labelledby="title desc">
+<title id="title">VEK · Negación</title><desc id="desc">Dos cortes diagonales junto a la esquina superior derecha. Niegan el bloque completo.</desc>
+<path d="M 20.182,10 L 17,6.818 L 3.409,20.409 L 1.818,22 L 5,25.182 L 18.591,11.591 Z M 38.182,10 L 35,6.818 L 21.409,20.409 L 19.818,22 L 23,25.182 L 36.591,11.591 Z" fill="currentColor" fill-rule="evenodd"/>
+</svg>

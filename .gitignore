@@ -1,4 +1,4 @@
-# This repository tracks VoxelBridge and the archived DynamicGI prototype.
+# This repository tracks VoxelBridge, VoxelCity design, and the archived DynamicGI prototype.
 # The Polygon environment, scenes, imported packages, generated data, and Unity
 # caches belong to the local laboratory and are deliberately excluded.
 *
@@ -7,6 +7,14 @@
 !/.gitignore
 !/.gitattributes
 !/README.md
+
+# World design sources and references; other local documentation stays excluded.
+!/Docs/
+/Docs/*
+!/Docs/WorldDesign/
+/Docs/WorldDesign/*
+!/Docs/WorldDesign/VoxelCity/
+!/Docs/WorldDesign/VoxelCity/**
 
 # Portable Unity package content, including every required .meta file.
 !/Assets/

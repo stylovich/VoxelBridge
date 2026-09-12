@@ -10,12 +10,21 @@ Voxel Bridge debe producir familias voxel físicamente coherentes y editables, i
 2. Validar artísticamente `Surface Painter`, la edición de ColorID/SurfaceID, sus herramientas de selección, cuentagotas, vistas de diagnóstico, aislamiento y comparación temporal de acabados sobre modelos representativos.
 3. Validar artísticamente el preview temporal del siguiente LOD con el reductor real; continuar la validación de la preasignación PBR y del intercambio con MagicaVoxel.
 4. Completar las validaciones funcionales pendientes de materiales especiales, iluminación y carga/descarga de subescenas sobre assets representativos.
-5. Evaluar primero la autoría de geometría uniforme con detalle superficial separado; retomar las mediciones de rendimiento por LOD, sombras, transparencias, culling y streaming cuando exista una distribución representativa del mapa.
-6. Adaptar el horneado de impostores a las paletas semánticas antes de evaluar su calidad y coste. Comparar agrupación manual, HLOD e impostores sin imponer una técnica a todos los assets.
+5. Preparar con VoxelCity una manzana piloto de geometría uniforme, detalle superficial separado y señalización en textura. Retomar las mediciones de rendimiento por LOD, sombras, transparencias, culling y streaming sobre esa distribución representativa.
+6. Evaluar LODs de malla adicionales y HLOD de malla antes de recurrir a impostores selectivos. Adaptar el horneado de impostores a las paletas semánticas antes de incluirlos en la comparación; no imponer un atlas por edificio.
 7. Implementar el análisis de visibilidad y presupuesto por zonas, apoyado en las mediciones anteriores.
-8. Crear y hornear el plan final de impostores cuando la distribución del mapa y los materiales sean estables.
+8. Crear y hornear únicamente los impostores aprobados por el plan de representación cuando la distribución del mapa y los materiales sean estables.
 
 La consolidación artística de las paletas puede continuar durante la validación funcional de DOTS. Las paletas y los materiales deben estabilizarse antes de producir atlas definitivos: un cambio de shader, paleta o material compartido puede requerir regenerarlos.
+
+### Coordinación con VoxelCity
+
+Voxel Bridge mantiene la responsabilidad sobre conversión, paletas, autoría, familias y representaciones de producción. La [hoja de ruta de VoxelCity](../../Docs/WorldDesign/VoxelCity/ROADMAP.md) organiza escala urbana, composición, generación procedural, sockets, semillas y propiedad de las capas editables.
+
+- Unidad objetivo del perfil urbano: `0.03125 m`, con múltiplos binarios y origen coherente. Preparar el perfil y regenerar explícitamente los modelos del laboratorio antes de trasladarlos al proyecto del juego; no reinterpretar fuentes existentes ni imponer la escala a otras bibliotecas.
+- Rejilla visual: escala física fija entre LODs, anclada al modelo en objetos dinámicos y con origen mundial compatible en arquitectura estática. El filtrado a distancia no debe cambiar el tamaño físico de las juntas.
+- Primera referencia compartida: una manzana sencilla, seguida del prototipo de detalle del shader y Vek en textura; la generación procedural y la prueba 3×3 parten de esa referencia.
+- Importancia de detalles: evaluación con el preview y retoques de LOD existentes, sin añadir un atributo ni una herramienta específica de prioridad. La conservación automática de siluetas subvoxel no forma parte de esa garantía.
 
 ### Estado por bloque
 
@@ -28,10 +37,10 @@ La consolidación artística de las paletas puede continuar durante la validaci�
 | Autoría visual de superficies | Disponible: selección espacial y semántica, edición independiente de ColorID/SurfaceID, diagnóstico, aislamiento, comparación temporal de acabados y reducción al siguiente LOD, Undo/Redo y guardado recuperable. Pendiente: validación artística, rejilla local de reducción y certificación del intercambio externo de RGB duplicados. |
 | Intercambio de RGB duplicados | Pendiente de certificar en MagicaVoxel; la escritura y lectura controladas por Voxel Bridge conservan los pares. |
 | Preasignación PBR | Disponible y opcional para HDRP/Lit Standard: candidatos por perfil, muestreo de constantes o Mask Map UV0, distancia y separación mínimas, fallback e informe por LOD. Pendientes: validación artística, calidad espacial de la clasificación y ampliación de shaders/configuraciones según casos reales. |
-| Geometría limpia y detalle separado | Enfoque de diseño para una fase posterior: regiones uniformes, detalle del shader alineado a la unidad voxel mínima y anuncios sobre quads separados. Prototipo y mediciones pendientes. |
+| Geometría limpia y detalle separado | Próximo prototipo visual sobre la manzana piloto: regiones uniformes, rejilla de escala física fija y anuncios sobre quads separados. Implementación y mediciones pendientes. |
 | Meshing híbrido | Fase posterior: evaluar caras coplanares con texturas de ColorID/SurfaceID para modelos cuyo detalle por voxel deba conservarse, después de evaluar la autoría con detalle superficial separado. |
 | Impostores semánticos | Horneado bloqueado hasta adaptar la captura a las LUT y los canales de IDs. La ruta RGB existente no demuestra compatibilidad semántica. |
-| Rendimiento, HLOD y presupuesto | Fase diferida; requiere escenas, cámaras y plataformas objetivo representativas. |
+| Rendimiento, HLOD y presupuesto | Fase diferida hasta disponer de una distribución representativa. Evaluar LODs adicionales y HLOD de malla antes de impostores selectivos, midiendo memoria y renderizado. |
 
 ## Autoría visual de superficies en Unity
 
@@ -301,7 +310,7 @@ El shader de horneado de Amplify Impostors debe leer las mismas LUT y los mismos
 - Compatibilidad visual con HDRP, HTrace e impostores.
 - Compatibilidad del material compartido con SRP Batcher y Entities Graphics.
 
-## Geometría limpia y detalle superficial — fase posterior
+## Geometría limpia y detalle superficial — prototipo visual pendiente
 
 Priorizar como decisión de autoría zonas planas con ColorID y SurfaceID uniformes. Reservar la geometría para siluetas, huecos y relieves reales; evaluar manchas y variaciones de acabado en el shader. Alinear ese detalle a la unidad voxel mínima del perfil, con un origen coherente entre chunks y LODs y filtrado a distancia.
 
@@ -346,6 +355,8 @@ El tamaño máximo recomendado para una familia combinada debe derivarse de esto
 La comprobación funcional de materiales y descarte por frustum no certifica un presupuesto de producción. Retomar las mediciones con la misma cámara, resolución, iluminación y distribución, registrando tiempos CPU/GPU por frame, LOD activo, draws y recursos residentes. Separar el coste de geometría opaca, piezas transparentes, sombras, HTrace y APV; incluir un Player de la plataforma objetivo además del Editor.
 
 La combinación manual actual produce un único asset y un `LODGroup`; no constituye un sistema HLOD. Un HLOD permitiría sustituir varios objetos por una representación conjunta distante y recuperar las representaciones originales al acercarse. Antes de implementarlo, definir propiedad de los grupos, límites de streaming, transiciones, exclusión mutua entre originales y sustituto, y tratamiento de piezas transparentes. Comparar el beneficio con LODs convencionales y agrupaciones compactas, sin combinar automáticamente escenas completas.
+
+Priorizar la evaluación de LODs adicionales y HLOD basados en mallas simplificadas para reducir la dependencia de atlas. La disponibilidad de más niveles no obliga a utilizarlos en todos los assets: también pueden aumentar la memoria de mallas residente. Un HLOD de malla no depende del horneado de impostores. Medir originales, sustitutos y atlas cargados simultáneamente antes de afirmar un ahorro; los impostores permanecen como opción selectiva cuando su coste y calidad lo justifiquen.
 
 El frustum descarta trabajo de render, pero no descarga entidades, meshes ni atlas. Medir por separado la carga/descarga de subescenas y su residencia. La oclusión requiere una evaluación independiente; un objeto detrás de otro no queda cubierto por la validación de frustum. La adaptación del horneado semántico precede a cualquier comparación de impostores o HLOD que los utilice.
 

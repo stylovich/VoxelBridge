@@ -135,10 +135,51 @@ namespace LocalModels.VoxelBridge.Tests
             try
             {
                 Assert.That(material.GetFloat("_SurfaceType"), Is.EqualTo(1));
+                Assert.That(material.GetFloat("_AlphaCutoffEnable"), Is.EqualTo(1), "Render-class rejection must use HDRP's native alpha test.");
                 Assert.That(material.renderQueue, Is.EqualTo(3000));
                 Assert.That(ShaderUtil.ShaderHasError(shader), Is.False);
             }
             finally { Object.DestroyImmediate(material); }
+        }
+
+        [TestCase("Forward", false)]
+        [TestCase("Forward", true)]
+        [TestCase("ForwardDXR", false)]
+        [TestCase("IndirectDXR", false)]
+        [TestCase("VisibilityDXR", false)]
+        [TestCase("GBufferDXR", false)]
+        [TestCase("DebugDXR", false)]
+        [TestCase("PathTracingDXR", false)]
+        public void Shader_CompilesRasterAndRayTracingVariants(string passName, bool dots)
+        {
+            if (Application.platform != RuntimePlatform.WindowsEditor)
+                Assert.Ignore("This regression compiles the Windows D3D variants used by HDRP.");
+
+            // Import alone does not compile DXR hit programs. A clip() in a custom function
+            // can pass raster checks and only fail when HDRP requests ForwardDXR later.
+            var shader = AssetDatabase.LoadAssetAtPath<Shader>(VoxelProductionExporter.GlassShaderPath);
+            Assert.That(shader, Is.Not.Null);
+            var keywords = new List<string> { "PROBE_VOLUMES_L2", "_DISABLE_DECALS", "_DISABLE_SSR_TRANSPARENT", "_SURFACE_TYPE_TRANSPARENT", "_ALPHATEST_ON" };
+            if (passName == "Forward")
+                keywords.AddRange(new[] { "PUNCTUAL_SHADOW_MEDIUM", "DIRECTIONAL_SHADOW_MEDIUM", "AREA_SHADOW_MEDIUM" });
+            if (dots) keywords.Add("DOTS_INSTANCING_ON");
+            var data = ShaderUtil.GetShaderData(shader);
+            for (int i = 0; i < data.SubshaderCount; i++)
+            {
+                var subshader = data.GetSubshader(i);
+                for (int j = 0; j < subshader.PassCount; j++)
+                {
+                    var pass = subshader.GetPass(j);
+                    if (pass.Name != passName) continue;
+                    var result = pass.CompileVariant(
+                        passName.EndsWith("DXR", StringComparison.Ordinal)
+                            ? UnityEditor.Rendering.ShaderType.RayTracing : UnityEditor.Rendering.ShaderType.Fragment,
+                        keywords.ToArray(), UnityEditor.Rendering.ShaderCompilerPlatform.D3D, BuildTarget.StandaloneWindows64);
+                    Assert.That(result.Success, Is.True, passName + ": " + string.Join("\n", result.Messages.Select(m => m.message)));
+                    return;
+                }
+            }
+            Assert.Fail("Missing HDRP pass: " + passName);
         }
 
         [Test]

@@ -1,8 +1,8 @@
 # Voxel Bridge para Unity
 
-Este repositorio contiene las herramientas de Editor Voxel Bridge y el prototipo
-Dynamic GI archivado. El entorno local de pruebas Polygon, las escenas, los
-paquetes importados, `Library`, los exports voxel y los datos de iluminación
+Este repositorio contiene las herramientas de Editor Voxel Bridge, la documentación
+de diseño de VoxelCity y el prototipo Dynamic GI archivado. El entorno local de
+pruebas Polygon, las escenas, los paquetes importados, `Library`, los exports voxel y los datos de iluminación
 generados quedan excluidos del control de versiones.
 
 ## Voxel Bridge
@@ -12,6 +12,14 @@ conversión de mallas a MagicaVoxel. Los parches opcionales de integración se
 distribuyen como transformaciones de código; los paquetes comerciales se instalan
 por separado. Consultar [la guía de Voxel Bridge](Assets/VoxelBridge/README.md) para
 uso y mantenimiento.
+
+## Diseño del mundo VoxelCity
+
+La [guía visual](Docs/WorldDesign/VoxelCity/lenguaje_visual_ciudad_voxel.md) define
+escala, lenguaje arquitectónico y señalización. Su [hoja de ruta](Docs/WorldDesign/VoxelCity/ROADMAP.md)
+organiza la manzana piloto, generación procedural y representación a distancia.
+Las referencias visuales y el kit Vek son fuentes de diseño, no assets de runtime
+ni sistemas implementados. No son necesarios para reutilizar Voxel Bridge.
 
 ## Prototipo Dynamic GI archivado
 
