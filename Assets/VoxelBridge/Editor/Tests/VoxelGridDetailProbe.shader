@@ -5,7 +5,9 @@ Shader "Hidden/Voxel Bridge/Grid Detail Probe"
         _TestMultiscale("Multiscale", Float) = 0 _TestTargetPixels("Target", Float) = 12
         _TestMaxScaleLevels("Max Levels", Float) = 4
         _TestDistanceStart("Distance Start", Float) = 12 _TestDistanceStep("Distance Step", Float) = 20
-        _TestLevelOnly("Level Only", Float) = 0 }
+        _TestLevelOnly("Level Only", Float) = 0
+        _TestProfile("Profile", Float) = 0 _TestBevelWidth("Bevel", Float) = .06
+        _TestJointDepth("Depth", Float) = .025 _TestPatternOnly("Pattern Only", Float) = 0 }
     SubShader
     {
         Pass
@@ -25,11 +27,17 @@ Shader "Hidden/Voxel Bridge/Grid Detail Probe"
             float _TestMultiscale, _TestTargetPixels, _TestMaxScaleLevels;
             float _TestAnchor;
             float _TestDistanceStart, _TestDistanceStep, _TestLevelOnly;
+            float _TestProfile, _TestBevelWidth, _TestJointDepth, _TestPatternOnly;
             float4 frag(v2f_img i) : SV_Target
             {
                 float3 n; float s;
                 if (_TestLevelOnly > .5)
                     return VoxelGridDistanceLevel(_TestDistance, _TestDistanceStart, _TestDistanceStep, _TestMaxScaleLevels);
+                if (_TestPatternOnly > .5)
+                {
+                    float2 q = i.uv * float2(_TestSpan, _TestSpanY) + _TestOffset;
+                    return VoxelGridBevelPattern(q, max(fwidth(q), .0001), .04, _TestBevelWidth, _TestJointDepth);
+                }
                 // A translated camera and surface make distance independent of grid phase.
                 float3 p = mul(_TestObjectToWorld, float4(i.uv * float2(_TestSpan, _TestSpanY) + _TestOffset, _TestDistance, 1)).xyz;
                 float3 normal = normalize(mul(float3(0,0,1), (float3x3)_TestWorldToObject));
@@ -38,7 +46,7 @@ Shader "Hidden/Voxel Bridge/Grid Detail Probe"
                 VoxelGridDetail_float(p, normal, tangent, bitangent,
                     _TestEnabled, .03125, .2, .2, .2, 2, 8, .6,
                     _TestMultiscale, _TestTargetPixels, _TestMaxScaleLevels, _TestAnchor,
-                    _TestDistanceStart, _TestDistanceStep, n, s);
+                    _TestDistanceStart, _TestDistanceStep, _TestProfile, _TestBevelWidth, _TestJointDepth, n, s);
                 return float4(n * .5 + .5, s);
             }
             ENDHLSL

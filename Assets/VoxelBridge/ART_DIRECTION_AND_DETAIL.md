@@ -44,6 +44,16 @@ Este modo separa la escala artística del filtrado: suelo y pared con iguales pa
 
 La integración conserva LUT, ColorID, SurfaceID, emisión y ajustes de instancing. No afecta al vidrio, a `Keep Original`, a materiales RGB ni a las transiciones de geometría. Normales y rugosidad constituyen el alcance de esta etapa; no incluye bisel geométrico, desplazamiento, AO de juntas ni POM/SPOM.
 
+### Perfil de juntas y biseles
+
+`Grid Profile = Beveled` utiliza un campo de altura analítico con junta plana hundida, bisel suave y cara central plana. Las esquinas del contorno son redondeadas. La altura sólo se utiliza para calcular normales y la máscara de rugosidad: la malla, la silueta, el buffer de profundidad y las colisiones no cambian. No produce paralaje, sombras propias de la junta ni oclusión entre cubitos.
+
+`Grid JointWidth` controla la separación total entre celdas; `Grid BevelWidth`, la anchura del bisel a cada lado; `Grid JointDepth`, la profundidad aparente. Los tres valores son proporciones de la celda visual activa. Como referencia inicial, utilizar `JointWidth = 0.04`, `BevelWidth = 0.06`, `JointDepth = 0.025` y `NormalStrength = 1`. La profundidad equivale a aproximadamente `1.56 mm` para una celda de `0.0625 m`; al crecer la rejilla conserva su proporción, no una profundidad fija en metros.
+
+Profundidad cero anula la contribución del perfil. La anchura del bisel se limita internamente al intervalo `0.005–0.2` y la profundidad a `0–0.25`. `NormalStrength` modula las normales sin modificar la máscara de rugosidad. La parte central de la cara y el fondo de la junta permanecen planos; aumentar la profundidad inclina más el bisel, sin hundir vértices.
+
+El perfil conserva los modos de escala y el filtrado existentes; las franjas sin detalle a ras de suelo y la estabilidad temporal requieren evaluación artística posterior. `Grid Profile = Lines`, predeterminado, conserva el aspecto anterior para comparar. La selección por SurfaceID y los hundimientos aleatorios de celdas son fases posteriores; esta configuración pertenece al material opaco compartido.
+
 ### Prototipo de comparación
 
 `Shaders/VoxelGridPrototype.shadergraph` conserva las LUT de color y superficie del shader opaco y añade `Shaders/VoxelGridDetail.hlsl`. El patrón proyecta sobre el plano principal de la cara en el espacio elegido mediante `Grid Anchor`, sin reutilizar UV0 o UV3. Modifica normales y smoothness; no desplaza geometría, profundidad, color, emisión ni colisiones. No incluye POM/SPOM.
@@ -55,6 +65,7 @@ Para probarlo, duplicar un material semántico opaco, asignarle el shader `Voxel
 | Control del material | Uso |
 |---|---|
 | Grid Enabled | `0`: referencia sin detalle; `1`: rejilla activa. |
+| Grid Profile | `Lines`: perfil original. `Beveled`: junta plana y bisel suave con esquinas redondeadas, disponible en producción. |
 | Grid Anchor | `World`: origen y ejes mundiales. `Family Local`: origen y ejes compartidos por los renderers de la familia; sigue su posición y rotación. Predeterminado en producción: `Family Local`; en el prototipo: `World`. |
 | Grid CellSize | Tamaño físico fijo o mínimo en metros. Punto inicial de comparación: `0.0625`. |
 | Grid Mode | `Fixed`: tamaño constante con atenuación; `Multiscale`: crecimiento binario por tamaño proyectado; `Distance`: crecimiento binario por distancia, disponible en producción. Ninguno modifica el LOD geométrico. Predeterminado en producción: `Multiscale`; en el prototipo: `Fixed`. |
@@ -62,6 +73,7 @@ Para probarlo, duplicar un material semántico opaco, asignarle el shader `Voxel
 | Grid TargetPixels | Sólo `Multiscale`: objetivo aproximado de tamaño en pantalla, entre 4 y 64 píxeles. Aumentarlo produce bloques visuales mayores; punto inicial: `12`. |
 | Grid MaxScaleLevels | Máximo exponente binario, limitado a 0–8. Con base `0.0625` y valor `4`, el máximo es `1 m`. |
 | Grid JointWidth | Anchura total de la junta como fracción de celda; valor inicial `0.12`. |
+| Grid BevelWidth / JointDepth | Sólo `Beveled`: anchura del bisel y profundidad aparente como fracciones de celda; valores iniciales `0.06` y `0.025`. |
 | Grid NormalStrength | Intensidad del cambio de normal; `0` desactiva este componente. |
 | Grid RoughnessStrength | Reducción de smoothness en juntas; no cambia SurfaceID. Una superficie con smoothness cero no puede hacerse más rugosa. |
 | Grid FadeStart / FadeEnd | Sólo en modo fijo: distancias en metros para atenuar el efecto. Multiescala las ignora y conserva el filtrado de detalle no resoluble, incluso al alcanzar el tamaño máximo. |

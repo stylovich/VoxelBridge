@@ -10,7 +10,8 @@ namespace LocalModels.VoxelBridge.Tests
     public sealed class VoxelProductionGridRenderTests
     {
         // Isolated HDRP preview: no Test2 reload or persistent material changes.
-        internal static Texture2D Render(string shaderPath, bool enabled, bool zeroStrength = false, float gridMode = 1)
+        internal static Texture2D Render(string shaderPath, bool enabled, bool zeroStrength = false, float gridMode = 1,
+            float profile = 0, float depth = .025f, float bevelWidth = .06f, int geometry = 0, float orbit = 0)
         {
             var shader = AssetDatabase.LoadAssetAtPath<Shader>(shaderPath);
             Assert.That(shader, Is.Not.Null);
@@ -35,6 +36,16 @@ namespace LocalModels.VoxelBridge.Tests
                     material.SetFloat("_GridAnchor", 1); material.SetFloat("_GridMultiscale", gridMode);
                     material.SetFloat("_GridNormalStrength", zeroStrength ? 0 : .16f);
                     material.SetFloat("_GridRoughnessStrength", zeroStrength ? 0 : .1f);
+                    if (material.HasProperty("_GridProfile"))
+                    {
+                        material.SetFloat("_GridProfile", profile); material.SetFloat("_GridJointDepth", depth);
+                        material.SetFloat("_GridBevelWidth", bevelWidth);
+                        if (profile > .5f)
+                        {
+                            material.SetFloat("_GridJointWidth", .04f);
+                            material.SetFloat("_GridNormalStrength", zeroStrength ? 0 : 1);
+                        }
+                    }
                 }
                 HDMaterial.ValidateMaterial(material);
                 preview.camera.fieldOfView = 35;
@@ -43,6 +54,11 @@ namespace LocalModels.VoxelBridge.Tests
                 preview.camera.backgroundColor = new Color(.12f, .13f, .15f);
                 preview.camera.aspect = 1;
                 preview.camera.transform.SetPositionAndRotation(new Vector3(0, 0, -2.5f), Quaternion.identity);
+                if (geometry > 0)
+                {
+                    var position = Quaternion.Euler(0, orbit, 0) * new Vector3(0, geometry == 2 ? 1 : .3f, -2.5f);
+                    preview.camera.transform.SetPositionAndRotation(position, Quaternion.LookRotation(-position));
+                }
                 preview.ambientColor = new Color(.25f, .25f, .25f);
                 for (int i = 0; i < preview.lights.Length; i++)
                 {
@@ -60,7 +76,9 @@ namespace LocalModels.VoxelBridge.Tests
                     preview.BeginPreview(new Rect(0, 0, 256, 256), GUIStyle.none);
                     try
                     {
-                        preview.DrawMesh(cube, Matrix4x4.Rotate(Quaternion.Euler(10, 25, 0)), material, 0);
+                        var matrix = geometry == 0 ? Matrix4x4.Rotate(Quaternion.Euler(10, 25, 0)) :
+                            Matrix4x4.Scale(geometry == 1 ? new Vector3(1.5f, 1.5f, .125f) : new Vector3(1.5f, .0625f, 1.5f));
+                        preview.DrawMesh(cube, matrix, material, 0);
                         preview.Render(true, false);
                     }
                     finally { rendered = preview.EndPreview(); }
@@ -117,6 +135,25 @@ namespace LocalModels.VoxelBridge.Tests
             {
                 if (expected) Object.DestroyImmediate(expected);
                 if (actual) Object.DestroyImmediate(actual);
+            }
+        }
+
+        [TestCase(1)]
+        [TestCase(2)]
+        public void Production_BevelDepthChangesWallAndFloorWithoutChangingGeometry(int geometry)
+        {
+            Texture2D flat = null, bevel = null;
+            try
+            {
+                flat = Render(VoxelProductionExporter.ShaderPath, true, gridMode: 2, profile: 1, depth: 0, geometry: geometry);
+                bevel = Render(VoxelProductionExporter.ShaderPath, true, gridMode: 2, profile: 1, geometry: geometry);
+                var a = flat.GetPixels(); var b = bevel.GetPixels();
+                Assert.That(a.Zip(b, (x, y) => Vector4.Distance(x, y)).Count(d => d > .02f), Is.GreaterThan(100));
+                CollectionAssert.AreEqual(a.Select(p => p.a).ToArray(), b.Select(p => p.a).ToArray());
+            }
+            finally
+            {
+                if (flat) Object.DestroyImmediate(flat); if (bevel) Object.DestroyImmediate(bevel);
             }
         }
     }

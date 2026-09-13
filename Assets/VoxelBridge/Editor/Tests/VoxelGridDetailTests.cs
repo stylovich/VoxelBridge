@@ -10,7 +10,8 @@ namespace LocalModels.VoxelBridge.Tests
         private static Color[] Render(float enabled = 1, float distance = 1, float offset = 0, float span = .25f,
             float multiscale = 0, float targetPixels = 12, float maxLevels = 4,
             float anchor = 0, Matrix4x4? objectToWorld = null, float? spanY = null,
-            float distanceStart = 12, float distanceStep = 20, bool levelOnly = false)
+            float distanceStart = 12, float distanceStep = 20, bool levelOnly = false,
+            float profile = 0, float bevelWidth = .06f, float jointDepth = .025f, bool patternOnly = false)
         {
             var shader = AssetDatabase.LoadAssetAtPath<Shader>("Assets/VoxelBridge/Editor/Tests/VoxelGridDetailProbe.shader");
             Assert.That(shader, Is.Not.Null);
@@ -31,6 +32,8 @@ namespace LocalModels.VoxelBridge.Tests
                 material.SetFloat("_TestAnchor", anchor);
                 material.SetFloat("_TestDistanceStart", distanceStart); material.SetFloat("_TestDistanceStep", distanceStep);
                 material.SetFloat("_TestLevelOnly", levelOnly ? 1 : 0);
+                material.SetFloat("_TestProfile", profile); material.SetFloat("_TestBevelWidth", bevelWidth);
+                material.SetFloat("_TestJointDepth", jointDepth); material.SetFloat("_TestPatternOnly", patternOnly ? 1 : 0);
                 material.SetMatrix("_TestObjectToWorld", objectToWorld ?? Matrix4x4.identity);
                 material.SetMatrix("_TestWorldToObject", (objectToWorld ?? Matrix4x4.identity).inverse);
                 Graphics.Blit(Texture2D.whiteTexture, rt, material);
@@ -285,11 +288,84 @@ namespace LocalModels.VoxelBridge.Tests
                 Assert.That(material.GetFloat("_GridMaxScaleLevels"), Is.EqualTo(4));
                 Assert.That(material.GetFloat("_GridDistanceStart"), Is.EqualTo(12));
                 Assert.That(material.GetFloat("_GridDistanceStep"), Is.EqualTo(20));
+                Assert.That(material.GetFloat("_GridProfile"), Is.Zero);
+                Assert.That(material.GetFloat("_GridBevelWidth"), Is.EqualTo(.06f));
+                Assert.That(material.GetFloat("_GridJointDepth"), Is.EqualTo(.025f));
                 Assert.That(material.HasProperty("_PaletteColor"), Is.True);
                 Assert.That(material.HasProperty("_PaletteSurface"), Is.True);
                 Assert.That(material.HasProperty("_EmissionIntensity"), Is.True);
             }
             finally { Object.DestroyImmediate(material); }
+        }
+
+        [Test]
+        public void Bevel_HasFlatFaceFlatRecessedJointAndRoundedCorners()
+        {
+            var p = Render(span: 1, patternOnly: true);
+            Assert.That(Vector4.Distance(p[32 + 32 * 64], Color.clear), Is.LessThan(.001f), "Flat top.");
+            var joint = p[32 * 64];
+            Assert.That(joint.r, Is.Zero.Within(.001f)); Assert.That(joint.g, Is.Zero.Within(.001f));
+            Assert.That(joint.a, Is.EqualTo(-.025f).Within(.001f));
+            var edge = p[4 + 32 * 64];
+            Assert.That(edge.r, Is.GreaterThan(.1f)); Assert.That(edge.g, Is.Zero.Within(.001f));
+            var corner = p[5 + 5 * 64];
+            Assert.That(corner.r, Is.GreaterThan(.1f)); Assert.That(corner.g, Is.EqualTo(corner.r).Within(.001f));
+            Assert.That(corner.a, Is.LessThan(edge.a), "Rounded corner is lower than the straight edge at this sample.");
+        }
+
+        [Test]
+        public void Bevel_DepthAndWidthAreIndependentControls()
+        {
+            var a = Render(span: 1, patternOnly: true);
+            var deep = Render(span: 1, patternOnly: true, jointDepth: .05f);
+            var wide = Render(span: 1, patternOnly: true, bevelWidth: .12f);
+            for (int i = 0; i < a.Length; i++)
+            {
+                Assert.That(deep[i].r, Is.EqualTo(a[i].r * 2).Within(.001f));
+                Assert.That(deep[i].a, Is.EqualTo(a[i].a * 2).Within(.001f));
+            }
+            Assert.That(a[7 + 32 * 64].r, Is.Zero.Within(.001f));
+            Assert.That(wide[7 + 32 * 64].r, Is.GreaterThan(.1f));
+        }
+
+        [TestCase(0f, 1f, .25f)]
+        [TestCase(1f, 0f, .25f)]
+        [TestCase(1f, 1f, 2f)]
+        public void Bevel_DisabledFlatOrUnresolvedPreservesBase(float enabled, float depth, float span)
+        {
+            foreach (var pixel in Render(enabled: enabled, profile: 1, jointDepth: depth * .025f, span: span))
+                Assert.That(Vector4.Distance(pixel, new Color(.5f, .5f, 1, .6f)), Is.LessThan(.001f));
+        }
+
+        [TestCase(0f)]
+        [TestCase(90f)]
+        public void Bevel_FollowsFamilyFrameAndWholeCellOffsets(float angle)
+        {
+            var a = Render(profile: 1, anchor: 1);
+            var b = Render(profile: 1, anchor: 1, offset: .03125f,
+                objectToWorld: Matrix4x4.TRS(new Vector3(.7f, 0, 0), Quaternion.Euler(angle, angle, 0), Vector3.one));
+            for (int i = 0; i < a.Length; i++) Assert.That(Vector4.Distance(a[i], b[i]), Is.LessThan(.003f));
+        }
+
+        [TestCase(12f)]
+        [TestCase(32f)]
+        public void Bevel_DistanceBlendIsContinuous(float distance)
+        {
+            var a = Render(profile: 1, multiscale: 2, distance: distance - .0001f);
+            var b = Render(profile: 1, multiscale: 2, distance: distance + .0001f);
+            for (int i = 0; i < a.Length; i++) Assert.That(Vector4.Distance(a[i], b[i]), Is.LessThan(.002f));
+        }
+
+        [Test]
+        public void Bevel_ResolvedPatternIsContinuousDuringSmallMotion()
+        {
+            var previous = Render(profile: 1, span: .03125f);
+            for (int frame = 1; frame <= 8; frame++)
+            {
+                var current = Render(profile: 1, span: .03125f, offset: frame * .000001f);
+                Assert.That(previous.Zip(current, (a, b) => Vector4.Distance(a, b)).Max(), Is.LessThan(.003f));
+                previous = current;
+            }
         }
     }
 }

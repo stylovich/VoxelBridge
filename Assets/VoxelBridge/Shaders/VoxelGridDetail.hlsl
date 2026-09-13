@@ -15,19 +15,49 @@ float3 VoxelGridPattern(float2 q, float2 footprint, float width)
     return float3(slope, 1.0 - profile.x * profile.y) * filtered;
 }
 
-// Family-local requires all renderers to retain the shared family frame (no static batching).
-// UV0/UV3 remain semantic IDs. Geometric LOD is independent.
+// Rounded-square height field: a flat recessed joint, a smooth bevel and a flat face.
+// Depth/width are fractions of the displayed cell. xy: height gradient, z: joint mask, w: height.
+float4 VoxelGridBevelPattern(float2 q, float2 footprint, float jointWidth, float bevelWidth, float depth)
+{
+    float halfSize = 0.5 - clamp(jointWidth * 0.5, 0.0, 0.24);
+    float bevel = clamp(bevelWidth, 0.005, 0.2);
+    float radius = min(bevel * 2.0, halfSize);
+    float2 centered = frac(q) - 0.5;
+    float2 corner = abs(centered) - (halfSize - radius);
+    float2 outside = max(corner, 0.0);
+    float outsideLength = length(outside);
+    float insideDistance = radius - outsideLength - min(max(corner.x, corner.y), 0.0);
+    float2 nearestAxis = corner.x >= corner.y ? float2(1, 0) : float2(0, 1);
+    float2 inward = -(outsideLength > 0.000001 ? outside / max(outsideLength, 0.000001) : nearestAxis) * sign(centered);
+    float effectiveBevel = max(bevel, max(footprint.x, footprint.y) * 0.5);
+    float t = saturate(insideDistance / effectiveBevel);
+    float face = t * t * (3.0 - 2.0 * t);
+    float safeDepth = clamp(depth, 0.0, 0.25);
+    float2 gradient = inward * (safeDepth / effectiveBevel) * (6.0 * t * (1.0 - t));
+    float filtered = 1.0 - smoothstep(0.15, 0.65, max(footprint.x, footprint.y));
+    // No depth means no bevel or joint contribution; color/IDs remain untouched.
+    return float4(gradient, (1.0 - face) * step(0.000001, safeDepth), -safeDepth * (1.0 - face)) * filtered;
+}
+
+float3 VoxelGridSurfacePattern(float2 q, float2 footprint, float jointWidth, float profile, float bevelWidth, float depth)
+{
+    if (profile >= 0.5) return VoxelGridBevelPattern(q, footprint, jointWidth, bevelWidth, depth).xyz;
+    return VoxelGridPattern(q, footprint, clamp(jointWidth * 0.5, 0.005, 0.24));
+}
+
 float VoxelGridDistanceLevel(float cameraDistance, float startDistance, float transitionDistance, float maxLevels)
 {
     return clamp((cameraDistance - max(startDistance, 0.0)) / max(transitionDistance, 0.01),
         0.0, floor(clamp(maxLevels, 0.0, 8.0)));
 }
 
+// Family-local requires a shared renderer frame (no static batching). UV0/UV3 remain IDs.
 void VoxelGridDetail_float(float3 Position, float3 Normal, float3 Tangent, float3 Bitangent,
     float Enabled, float CellSize, float JointWidth, float NormalStrength,
     float RoughnessStrength, float FadeStart, float FadeEnd, float BaseSmoothness,
     float Multiscale, float TargetPixels, float MaxScaleLevels,
     float AnchorMode, float DistanceStart, float DistanceStep,
+    float Profile, float BevelWidth, float JointDepth,
     out float3 DetailNormalTS, out float DetailSmoothness)
 {
     DetailNormalTS = float3(0, 0, 1);
@@ -60,7 +90,6 @@ void VoxelGridDetail_float(float3 Position, float3 Normal, float3 Tangent, float
     float2 footprint = max(fwidth(q), 0.0001);
     float weight = saturate(Enabled);
     if (weight <= 0.0001) return;
-    float width = clamp(JointWidth * 0.5, 0.005, 0.24);
     float3 pattern;
     if (Multiscale >= 0.5)
     {
@@ -76,15 +105,15 @@ void VoxelGridDetail_float(float3 Position, float3 Normal, float3 Tangent, float
         float upper = min(lower + 1.0, maxLevel);
         float lowerScale = exp2(lower), upperScale = exp2(upper);
         float blend = smoothstep(0.0, 1.0, frac(level));
-        pattern = lerp(VoxelGridPattern(q / lowerScale, footprint / lowerScale, width),
-            VoxelGridPattern(q / upperScale, footprint / upperScale, width), blend);
+        pattern = lerp(VoxelGridSurfacePattern(q / lowerScale, footprint / lowerScale, JointWidth, Profile, BevelWidth, JointDepth),
+            VoxelGridSurfacePattern(q / upperScale, footprint / upperScale, JointWidth, Profile, BevelWidth, JointDepth), blend);
         // At the size cap, filtering still fades detail that can no longer be resolved.
     }
     else
     {
         float cameraDistance = distance(Position, _WorldSpaceCameraPos);
         weight *= 1.0 - smoothstep(max(0, FadeStart), max(FadeStart + 0.01, FadeEnd), cameraDistance);
-        pattern = VoxelGridPattern(q, footprint, width);
+        pattern = VoxelGridSurfacePattern(q, footprint, JointWidth, Profile, BevelWidth, JointDepth);
     }
     float3 gradient = u * pattern.x + v * pattern.y;
     gradient -= n * dot(gradient, n);
@@ -93,6 +122,20 @@ void VoxelGridDetail_float(float3 Position, float3 Normal, float3 Tangent, float
         dot(detailN, normalize(Bitangent)), dot(detailN, n)));
     DetailSmoothness = saturate(BaseSmoothness - pattern.z * saturate(RoughnessStrength) * weight);
 #endif
+}
+
+// Preserve the distance-only signature and its original line profile.
+void VoxelGridDetail_float(float3 Position, float3 Normal, float3 Tangent, float3 Bitangent,
+    float Enabled, float CellSize, float JointWidth, float NormalStrength,
+    float RoughnessStrength, float FadeStart, float FadeEnd, float BaseSmoothness,
+    float Multiscale, float TargetPixels, float MaxScaleLevels,
+    float AnchorMode, float DistanceStart, float DistanceStep,
+    out float3 DetailNormalTS, out float DetailSmoothness)
+{
+    VoxelGridDetail_float(Position, Normal, Tangent, Bitangent, Enabled, CellSize, JointWidth,
+        NormalStrength, RoughnessStrength, FadeStart, FadeEnd, BaseSmoothness,
+        Multiscale, TargetPixels, MaxScaleLevels, AnchorMode, DistanceStart, DistanceStep,
+        0.0, 0.06, 0.025, DetailNormalTS, DetailSmoothness);
 }
 
 // Retain the original signature for the standalone prototype and external graphs.
