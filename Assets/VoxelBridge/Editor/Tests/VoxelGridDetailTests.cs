@@ -182,13 +182,17 @@ namespace LocalModels.VoxelBridge.Tests
             finally { Object.DestroyImmediate(root); }
         }
 
-        [TestCase("Forward", false)]
-        [TestCase("Forward", true)]
-        [TestCase("GBuffer", false)]
-        [TestCase("GBuffer", true)]
-        public void Prototype_CompilesRasterVariants(string passName, bool dots)
+        [TestCase("VoxelGridPrototype", "Forward", false)]
+        [TestCase("VoxelGridPrototype", "Forward", true)]
+        [TestCase("VoxelGridPrototype", "GBuffer", false)]
+        [TestCase("VoxelGridPrototype", "GBuffer", true)]
+        [TestCase("VoxelWorldOpaque", "Forward", false)]
+        [TestCase("VoxelWorldOpaque", "Forward", true)]
+        [TestCase("VoxelWorldOpaque", "GBuffer", false)]
+        [TestCase("VoxelWorldOpaque", "GBuffer", true)]
+        public void GridShaders_CompileRasterVariants(string shaderName, string passName, bool dots)
         {
-            var shader = AssetDatabase.LoadAssetAtPath<Shader>("Assets/VoxelBridge/Shaders/VoxelGridPrototype.shadergraph");
+            var shader = AssetDatabase.LoadAssetAtPath<Shader>($"Assets/VoxelBridge/Shaders/{shaderName}.shadergraph");
             Assert.That(shader, Is.Not.Null);
             var sub = ShaderUtil.GetShaderData(shader).GetSubshader(0);
             var pass = Enumerable.Range(0, sub.PassCount).Select(sub.GetPass).First(p => p.Name == passName);
@@ -197,6 +201,27 @@ namespace LocalModels.VoxelBridge.Tests
             var result = pass.CompileVariant(UnityEditor.Rendering.ShaderType.Fragment, keywords,
                 UnityEditor.Rendering.ShaderCompilerPlatform.D3D, BuildTarget.StandaloneWindows64);
             Assert.That(result.Success, Is.True, string.Join("\n", result.Messages.Select(m => m.message)));
+        }
+
+        [Test]
+        public void Production_DefaultsPreserveExistingMaterialsAndOfferLocalMultiscaleGrid()
+        {
+            var shader = AssetDatabase.LoadAssetAtPath<Shader>(VoxelProductionExporter.ShaderPath);
+            Assert.That(shader, Is.Not.Null);
+            var material = new Material(shader);
+            try
+            {
+                Assert.That(material.GetFloat("_GridEnabled"), Is.Zero);
+                Assert.That(material.GetFloat("_GridCellSize"), Is.EqualTo(.0625f));
+                Assert.That(material.GetFloat("_GridAnchor"), Is.EqualTo(1));
+                Assert.That(material.GetFloat("_GridMultiscale"), Is.EqualTo(1));
+                Assert.That(material.GetFloat("_GridTargetPixels"), Is.EqualTo(12));
+                Assert.That(material.GetFloat("_GridMaxScaleLevels"), Is.EqualTo(4));
+                Assert.That(material.HasProperty("_PaletteColor"), Is.True);
+                Assert.That(material.HasProperty("_PaletteSurface"), Is.True);
+                Assert.That(material.HasProperty("_EmissionIntensity"), Is.True);
+            }
+            finally { Object.DestroyImmediate(material); }
         }
     }
 }

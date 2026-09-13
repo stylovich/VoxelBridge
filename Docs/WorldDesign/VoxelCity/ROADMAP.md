@@ -35,12 +35,12 @@ El laboratorio dispone de vidrio voxel básico y un perfil físico de `0.03125 m
 - Validar escala humana, espacio transitable, alturas, lectura de volúmenes y composición desde el nivel de calle.
 - Utilizar iluminación diurna controlada y una escena pequeña sin APV como referencia inicial. No interpretar esta prueba como validación de la iluminación final del juego.
 
-### 3. Acabado superficial y señalización
+### 3. Acabado superficial y coherencia de LODs
 
-- Comparar ausencia de rejilla con normal, rugosidad y AO; evaluar microbisel después. Comprobar estabilidad temporal y continuidad entre chunks, LODs y transformaciones.
+- Utilizar la rejilla opcional del shader opaco de producción sobre los modelos convertidos. Comparar ausencia de rejilla con normal y rugosidad; evaluar AO de juntas y microbisel después. Comprobar estabilidad temporal y continuidad entre chunks, LODs y transformaciones antes de ampliar el acabado.
 - Comparar `World` para módulos estáticos con `Family Local` para props y vehículos. Validar el marco compartido de sus renderers y mantener el batching estático clásico desactivado en el modo local. Evaluar la regla de colocación antes de automatizar su validación; no corregir posiciones de forma implícita.
 - Evaluar posteriormente [relieve voxel POM/SPOM](../../../Assets/VoxelBridge/ROADMAP.md#relieve-voxel-pomspom--evaluación-futura) como acabado cercano sutil sobre el mundo voxel, con atenuación a distancia y sin requerir ray tracing. El asset CSPOM es un candidato, no una dependencia de producción aprobada; conservar la manzana piloto como prioridad.
-- Integrar [Vek](Vek_v1/LEEME.txt) mediante rasterización controlada de SVG y un atlas compartido sobre una pantalla y una pared. Conservar JSON y SVG como fuentes; probar legibilidad, escala, desgaste y emisión.
+- Posponer la señalización hasta consolidar la base voxel, el acabado superficial y su relación con los LODs. En esa fase, integrar [Vek](Vek_v1/LEEME.txt) mediante rasterización controlada de SVG y un atlas compartido sobre una pantalla y una pared. Conservar JSON y SVG como fuentes; probar legibilidad, escala, desgaste y emisión.
 - Separar las imágenes del volumen voxel. No introducir un material por símbolo ni ampliar el mesher híbrido antes de evaluar esta ruta.
 
 ### 4. Generación procedural mínima

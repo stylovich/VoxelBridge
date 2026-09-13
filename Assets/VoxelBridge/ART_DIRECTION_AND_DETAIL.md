@@ -2,7 +2,7 @@
 
 ## Estado y objetivo
 
-Enfoque de diseño para validar el acabado visual sobre una manzana piloto antes de ampliar las optimizaciones. Existe un prototipo aislado de rejilla superficial con anclaje mundial o de familia; la gestión específica de anuncios y las mediciones de rendimiento permanecen pendientes. No requiere sustituir el flujo de autoría actual. La dirección del mundo y sus prioridades se describen en la [hoja de ruta de VoxelCity](../../Docs/WorldDesign/VoxelCity/ROADMAP.md).
+Enfoque de diseño para validar el acabado visual sobre una manzana piloto antes de ampliar las optimizaciones. El shader opaco de producción dispone de rejilla superficial opcional con anclaje mundial o de familia; el acabado avanzado, la gestión específica de anuncios y las mediciones de rendimiento permanecen pendientes. No requiere sustituir el flujo de autoría actual. La dirección del mundo y sus prioridades se describen en la [hoja de ruta de VoxelCity](../../Docs/WorldDesign/VoxelCity/ROADMAP.md).
 
 Priorizar modelos con zonas amplias de ColorID y SurfaceID uniformes, reservando la geometría voxel para volumen, silueta, huecos y relieves intencionales. El detalle puramente superficial puede proceder del shader o de una imagen separada, en lugar de fragmentar las caras del modelo mediante pintura por voxel.
 
@@ -32,7 +32,15 @@ Para VoxelCity, comparar la base geométrica candidata de `0.0625 m` con las fam
 
 Comenzar con una rejilla opcional de intensidad ajustable, comparando normal, rugosidad y AO con una referencia sin detalle. Evaluar el microbisel y la variación superficial después de comprobar continuidad y estabilidad temporal. Comparar ruido calculado con una textura pequeña compartida cuando se incorpore desgaste. Evitar un sistema general de capas sin una necesidad demostrada.
 
-## Prototipo estático de rejilla
+## Rejilla superficial de producción
+
+`Voxel Bridge/VoxelWorldOpaque` incluye la sección `Voxel Grid`. Activar `Grid Enabled` en el material semántico opaco permite aplicar el efecto a familias existentes sin reconvertir ni reconstruir sus mallas. El valor predeterminado es desactivado; los materiales existentes conservan su apariencia. La exportación reutiliza el material compartido y conserva sus ajustes. Modificarlo afecta a todas las familias que lo utilizan; para una comparación aislada, utilizar una copia del material.
+
+Los valores iniciales de producción son `CellSize = 0.0625`, `Anchor = Family Local`, `Mode = Multiscale`, `TargetPixels = 12` y `MaxScaleLevels = 4`. El tamaño visual es una propiedad del material, no se deduce del perfil de conversión. Bibliotecas con otra unidad deben configurar un tamaño compatible. Antes de activar el anclaje local, comprobar el contrato descrito más abajo, especialmente el marco común de los chunks y la ausencia de `Batching Static`.
+
+La integración conserva LUT, ColorID, SurfaceID, emisión y ajustes de instancing. No afecta al vidrio, a `Keep Original`, a materiales RGB ni a las transiciones de geometría. Normales y rugosidad constituyen el alcance de esta etapa; no incluye bisel geométrico, desplazamiento, AO de juntas ni POM/SPOM.
+
+### Prototipo de comparación
 
 `Shaders/VoxelGridPrototype.shadergraph` conserva las LUT de color y superficie del shader opaco y añade `Shaders/VoxelGridDetail.hlsl`. El patrón proyecta sobre el plano principal de la cara en el espacio elegido mediante `Grid Anchor`, sin reutilizar UV0 o UV3. Modifica normales y smoothness; no desplaza geometría, profundidad, color, emisión ni colisiones. No incluye POM/SPOM.
 
@@ -43,9 +51,9 @@ Para probarlo, duplicar un material semántico opaco, asignarle el shader `Voxel
 | Control del material | Uso |
 |---|---|
 | Grid Enabled | `0`: referencia sin detalle; `1`: rejilla activa. |
-| Grid Anchor | `World`: origen y ejes mundiales, valor predeterminado. `Family Local`: origen y ejes compartidos por los renderers de la familia; sigue su posición y rotación. |
+| Grid Anchor | `World`: origen y ejes mundiales. `Family Local`: origen y ejes compartidos por los renderers de la familia; sigue su posición y rotación. Predeterminado en producción: `Family Local`; en el prototipo: `World`. |
 | Grid CellSize | Tamaño físico fijo o mínimo en metros. Punto inicial de comparación: `0.0625`. |
-| Grid Mode | `Fixed`: tamaño constante con atenuación; `Multiscale`: crecimiento visual binario independiente de la geometría. Los materiales existentes conservan `Fixed` por defecto. |
+| Grid Mode | `Fixed`: tamaño constante con atenuación; `Multiscale`: crecimiento visual binario independiente de la geometría. Predeterminado en producción: `Multiscale`; en el prototipo: `Fixed`. |
 | Grid TargetPixels | Objetivo aproximado de tamaño en pantalla para multiescala, entre 4 y 64 píxeles. Aumentarlo produce bloques visuales mayores; punto inicial: `12`. |
 | Grid MaxScaleLevels | Máximo exponente binario, limitado a 0–8. Con base `0.0625` y valor `4`, el máximo es `1 m`. |
 | Grid JointWidth | Anchura total de la junta como fracción de celda; valor inicial `0.12`. |
@@ -64,7 +72,7 @@ Comparar con la misma cámara e iluminación. Para retirar la prueba, reasignar 
 
 El origen de la malla y su unidad física deben ser compatibles con la rejilla. El anclaje local evita el deslizamiento al trasladar o rotar la familia, pero no alinea módulos independientes entre sí. Tampoco garantiza que una celda visual multiescala coincida con cada borde geométrico fino: una celda grande agrupa deliberadamente varios voxels.
 
-La validación completa de subescenas, Entities Graphics, movimiento y presupuesto GPU permanece pendiente. El shader conserva DOTS Instancing, pero compilar esa variante no sustituye una prueba de Entities Graphics. No utilizar este prototipo como shader de ray tracing.
+La validación completa de subescenas, Entities Graphics, movimiento y presupuesto GPU permanece pendiente. Ambos shaders conservan DOTS Instancing, pero compilar esa variante no sustituye una prueba de Entities Graphics. El efecto de rejilla no se evalúa en ray tracing.
 
 ### Colocación de arquitectura estática
 

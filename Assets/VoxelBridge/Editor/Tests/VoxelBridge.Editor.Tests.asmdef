@@ -11,7 +11,8 @@
     "Unity.Transforms",
     "Unity.Mathematics",
     "Unity.Mathematics.Extensions",
-    "Unity.Collections"
+    "Unity.Collections",
+    "Unity.RenderPipelines.HighDefinition.Runtime"
   ],
   "includePlatforms": [
     "Editor"
