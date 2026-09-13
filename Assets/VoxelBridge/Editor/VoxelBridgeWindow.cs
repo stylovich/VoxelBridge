@@ -16,7 +16,11 @@ namespace LocalModels.VoxelBridge
         private const string DefaultImpostorProfilePath =
             "Assets/VoxelBridgeSettings/VoxelImpostorProfile.asset";
 
-        private Object source;
+        internal enum WorkflowTab { Individual, Batch, ManualLods, Impostors, Results }
+        private static readonly string[] TabLabels = { "Individual", "Batch", "Editar LODs", "Impostores", "Resultados" };
+        [SerializeField] private WorkflowTab activeTab;
+        [SerializeField] private bool showSharedSettings = true;
+        [SerializeField] private Object source;
         [SerializeField] private bool generateLod0Only = true;
         [SerializeField] private bool normalizeScale = true;
         [SerializeField] private bool individualIgnoreInactiveObjects = true;
@@ -29,7 +33,7 @@ namespace LocalModels.VoxelBridge
         [SerializeField, Min(100_000)] private int individualMaximumImportedVoxelCount =
             VoxelLodBatchOptions.DefaultMaximumImportedVoxelCount;
         private VoxelLodBatchSourceEstimate individualPreflight;
-        private GameObject batchParent;
+        [SerializeField] private GameObject batchParent;
         [SerializeField] private bool batchReusePrefabSources = true;
         [SerializeField] private VoxelPrefabOverrideHandling batchModifiedPrefabHandling =
             VoxelPrefabOverrideHandling.UsePrefabSource;
@@ -50,18 +54,18 @@ namespace LocalModels.VoxelBridge
             VoxelImpostorBatchOptions.DefaultAtlasBudgetMb;
         [SerializeField] private bool batchShowPlanDetails;
         private VoxelLodBatchPreflight batchPreflight;
-        private VoxelStyleProfile styleProfile;
-        private VoxelImpostorProfile impostorProfile;
+        [SerializeField] private VoxelStyleProfile styleProfile;
+        [SerializeField] private VoxelImpostorProfile impostorProfile;
         [SerializeField] private VoxelImpostorQuality impostorQuality = VoxelImpostorQuality.Medium;
-        private VoxelColorMode colorMode = VoxelColorMode.MaterialAndTexture;
+        [SerializeField] private VoxelColorMode colorMode = VoxelColorMode.MaterialAndTexture;
         [SerializeField] private VoxelConversionProfile conversionProfile;
-        private Color singleColor = new Color32(180, 180, 180, 255);
-        private float alphaCutoff = 0.1f;
-        private string exportFolder = DefaultExportFolder;
-        private Object manualParentVox;
+        [SerializeField] private Color singleColor = new Color32(180, 180, 180, 255);
+        [SerializeField] private float alphaCutoff = 0.1f;
+        [SerializeField] private string exportFolder = DefaultExportFolder;
+        [SerializeField] private Object manualParentVox;
         private int manualTargetLod = 1;
         private VoxelLodGenerationMode manualGenerationMode = VoxelLodGenerationMode.ReduceParent;
-        private TextAsset lodSetManifest;
+        [SerializeField] private TextAsset lodSetManifest;
         private Object lastVoxAsset;
         private Object lastPrefabAsset;
         private Object lastImpostorAsset;
@@ -73,6 +77,7 @@ namespace LocalModels.VoxelBridge
         private static void OpenWindow()
         {
             VoxelBridgeWindow window = GetOrCreateWindow();
+            window.SelectTab(WorkflowTab.Individual);
             if (VoxelBridgeSourceSelection.IsSupported(Selection.activeObject))
                 window.source = Selection.activeObject;
             window.Show();
@@ -98,6 +103,7 @@ namespace LocalModels.VoxelBridge
         {
             var window = GetOrCreateWindow();
             window.batchParent = Selection.activeGameObject;
+            window.SelectTab(WorkflowTab.Batch);
             window.Show();
             window.Focus();
         }
@@ -111,6 +117,7 @@ namespace LocalModels.VoxelBridge
         {
             var window = GetOrCreateWindow();
             if (!window.TryLoadFamilyFromAsset(Selection.activeObject)) return;
+            window.SelectTab(WorkflowTab.ManualLods);
             window.Show();
             window.Focus();
         }
@@ -126,6 +133,7 @@ namespace LocalModels.VoxelBridge
             var window = GetOrCreateWindow();
             if (!window.TryLoadFamilyFromAsset(Selection.activeObject)) return;
             window.status = "Family loaded. Select a profile to generate the final impostor.";
+            window.SelectTab(WorkflowTab.Impostors);
             window.Show();
             window.Focus();
         }
@@ -171,6 +179,7 @@ namespace LocalModels.VoxelBridge
                 return;
             var window = GetOrCreateWindow();
             window.TryLoadFamilyFromAsset(AssetDatabase.LoadMainAssetAtPath(prefabAssetPath));
+            window.SelectTab(WorkflowTab.ManualLods);
             window.Show();
             window.Focus();
         }
@@ -188,6 +197,7 @@ namespace LocalModels.VoxelBridge
             var window = GetOrCreateWindow();
             if (!window.TryLoadFamilyFromAsset(AssetDatabase.LoadMainAssetAtPath(prefabAssetPath))) return;
             window.status = "Family loaded. Select a profile to generate the final impostor.";
+            window.SelectTab(WorkflowTab.Impostors);
             window.Show();
             window.Focus();
         }
@@ -236,29 +246,60 @@ namespace LocalModels.VoxelBridge
             Repaint();
         }
 
+        internal void SelectTab(WorkflowTab tab)
+        {
+            if (!Enum.IsDefined(typeof(WorkflowTab), tab)) throw new ArgumentOutOfRangeException(nameof(tab));
+            if (activeTab == tab) return;
+            activeTab = tab;
+            scroll = Vector2.zero;
+        }
+
         private void OnGUI()
         {
+            float previousLabelWidth = EditorGUIUtility.labelWidth;
+            try
+            {
+                EditorGUIUtility.labelWidth = Mathf.Clamp(position.width * .4f, 180f, 240f);
+                DrawWorkflow();
+            }
+            finally { EditorGUIUtility.labelWidth = previousLabelWidth; }
+        }
+
+        private void DrawWorkflow()
+        {
+            var nextTab = (WorkflowTab)GUILayout.Toolbar((int)activeTab, TabLabels, GUILayout.Height(25));
+            SelectTab(nextTab);
             scroll = EditorGUILayout.BeginScrollView(scroll);
-            EditorGUILayout.LabelField("Physical Models and LODs", EditorStyles.boldLabel);
-            EditorGUILayout.HelpBox(
-                "Genera una familia de archivos .vox con unidad física consistente, sus LODs y el prefab final para Unity.",
-                MessageType.Info);
-            EditorGUILayout.Space(8);
-            DrawAutomaticSection();
-            EditorGUILayout.Space(18);
-            DrawManualSection();
-            EditorGUILayout.Space(18);
-            DrawImpostorSection();
-            EditorGUILayout.Space(18);
-            DrawOutputSection();
+            if (activeTab == WorkflowTab.Individual || activeTab == WorkflowTab.Batch)
+            {
+                using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+                {
+                    showSharedSettings = EditorGUILayout.Foldout(showSharedSettings, "Ajustes compartidos · Individual + Batch", true);
+                    if (showSharedSettings) DrawSharedConversionSettings();
+                    else EditorGUILayout.LabelField($"{(styleProfile != null ? styleProfile.name : "Sin Voxel Profile")} · Normalize Scale: {(normalizeScale ? "On" : "Off")} · {(generateLod0Only ? "LOD0" : "Todos los LODs")}", EditorStyles.wordWrappedMiniLabel);
+                }
+                EditorGUILayout.Space(8);
+            }
+            switch (activeTab)
+            {
+                case WorkflowTab.Individual: DrawIndividualSection(); break;
+                case WorkflowTab.Batch: DrawBatchSection(); break;
+                case WorkflowTab.ManualLods: DrawManualSection(); break;
+                case WorkflowTab.Impostors: DrawImpostorSection(); break;
+                case WorkflowTab.Results: DrawOutputSection(); break;
+            }
+            if (activeTab != WorkflowTab.Results && !string.IsNullOrEmpty(status))
+            {
+                EditorGUILayout.Space(8);
+                EditorGUILayout.HelpBox(status, MessageType.None);
+                if (GUILayout.Button("Ver resultados")) SelectTab(WorkflowTab.Results);
+            }
             EditorGUILayout.EndScrollView();
         }
 
-        private void DrawAutomaticSection()
+        private void DrawSharedConversionSettings()
         {
-            EditorGUILayout.LabelField("1. Automatic Generation", EditorStyles.boldLabel);
-            source = EditorGUILayout.ObjectField(new GUIContent("Source Model", "GameObject, prefab, FBX/OBJ o Mesh"),
-                source, typeof(Object), true);
+            EditorGUILayout.LabelField("Estos valores se aplican a ambas conversiones.", EditorStyles.wordWrappedMiniLabel);
             styleProfile = (VoxelStyleProfile)EditorGUILayout.ObjectField(
                 new GUIContent("Voxel Profile", "Unidad física, LODs, chunks y transiciones compartidos"),
                 styleProfile, typeof(VoxelStyleProfile), false);
@@ -278,21 +319,27 @@ namespace LocalModels.VoxelBridge
             {
                 string levels = string.Join(", ", Enumerable.Range(0, styleProfile.LodCount)
                     .Select(i => $"LOD{i}=x{styleProfile.GetLodMultiplier(i)} " +
-                                 $"({styleProfile.BaseVoxelSize * styleProfile.GetLodMultiplier(i):0.###} m)"));
+                                 $"({styleProfile.BaseVoxelSize * styleProfile.GetLodMultiplier(i):0.#####} m)"));
                 EditorGUILayout.HelpBox(
-                    $"Base voxel size: {styleProfile.BaseVoxelSize:0.###} m · Chunk: {styleProfile.ChunkCellSize} cells\n{levels}",
+                    $"Base voxel size: {styleProfile.BaseVoxelSize:0.#####} m · Chunk: {styleProfile.ChunkCellSize} cells\n{levels}",
                     MessageType.Info);
             }
 
             DrawColorSettings();
             normalizeScale = EditorGUILayout.Toggle(new GUIContent("Normalize Scale",
-                "Incorpora la escala mundial a la geometría. Produce instancias a escala 1 sin cambiar su tamaño visible; las variantes escaladas pueden requerir familias separadas."), normalizeScale);
-            individualIgnoreInactiveObjects = EditorGUILayout.Toggle(new GUIContent("Ignore Inactive (Single)",
-                "Omite variantes desactivadas en la conversión individual. El lote utiliza su propia opción Ignore Inactive Objects."), individualIgnoreInactiveObjects);
+                "Compartido: incorpora escala y reflejos a la geometría. Produce instancias a escala 1 sin cambiar su apariencia; las variantes escaladas o reflejadas pueden requerir familias separadas."), normalizeScale);
             generateLod0Only = EditorGUILayout.Popup(new GUIContent("Generate Levels",
                 "LOD0 Only permite editar y asignar IDs antes de derivar los demás niveles. Se aplica a la conversión individual y por lotes; no cambia Maximum Allowed Base."),
                 generateLod0Only ? 0 : 1, new[] { "LOD0 Only", "All Profile Levels" }) == 0;
             VoxelBridgeFolderPicker.Draw("Family Folder", ref exportFolder);
+        }
+
+        private void DrawIndividualSection()
+        {
+            EditorGUILayout.LabelField("Conversión individual · Opciones específicas", EditorStyles.boldLabel);
+            source = EditorGUILayout.ObjectField(new GUIContent("Source Model", "GameObject, prefab, FBX/OBJ o Mesh"), source, typeof(Object), true);
+            individualIgnoreInactiveObjects = EditorGUILayout.Toggle(new GUIContent("Ignore Inactive Objects",
+                "Sólo Individual. Batch conserva su propia opción de objetos desactivados."), individualIgnoreInactiveObjects);
             DrawIndividualSafetyOptions();
             bool individualImpostorReady = DrawIndividualImpostorOptions();
             GameObject individualSceneSource = source as GameObject;
@@ -332,8 +379,11 @@ namespace LocalModels.VoxelBridge
             if (source != null && !VoxelBridgeSourceSelection.IsSupported(source))
                 EditorGUILayout.HelpBox("Selecciona un GameObject, prefab, FBX/OBJ o Mesh.", MessageType.Warning);
 
-            EditorGUILayout.Space(12);
-            EditorGUILayout.LabelField("Batch Generation", EditorStyles.miniBoldLabel);
+        }
+
+        private void DrawBatchSection()
+        {
+            EditorGUILayout.LabelField("Conversión batch · Opciones específicas", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox(
                 "Convierte cada hijo directo del padre en una familia independiente. Cada familia incluye las mallas de sus descendientes según la opción de objetos desactivados. Los hijos sin mallas utilizables se omiten.",
                 MessageType.Info);
@@ -763,7 +813,8 @@ namespace LocalModels.VoxelBridge
 
         private void DrawManualSection()
         {
-            EditorGUILayout.LabelField("2. Manual LOD", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Editar y derivar LODs", EditorStyles.boldLabel);
+            styleProfile = (VoxelStyleProfile)EditorGUILayout.ObjectField(new GUIContent("Voxel Profile", "Perfil compartido de unidad y niveles, también utilizado en conversión."), styleProfile, typeof(VoxelStyleProfile), false);
             EditorGUILayout.HelpBox(
                 "Parte del .vox editado anterior: duplícalo para una simplificación libre o redúcelo a la rejilla física del nuevo nivel.",
                 MessageType.Info);
@@ -858,7 +909,7 @@ namespace LocalModels.VoxelBridge
 
         private void DrawOutputSection()
         {
-            EditorGUILayout.LabelField("4. Results", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Resultados", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox(
                 "Los niveles editables siguen siendo archivos .vox. El prefab los agrupa para la escena y, si se generó, añade el impostor de Amplify como último LOD.",
                 MessageType.Info);
@@ -897,7 +948,8 @@ namespace LocalModels.VoxelBridge
 
         private void DrawImpostorSection()
         {
-            EditorGUILayout.LabelField("3. Final Impostor", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Impostor final", EditorStyles.boldLabel);
+            lodSetManifest = (TextAsset)EditorGUILayout.ObjectField(".voxset Manifest", lodSetManifest, typeof(TextAsset), false);
             EditorGUILayout.HelpBox(
                 "Hornea LOD0 —incluidos sus chunks— y añade el resultado como último nivel sin reemplazar los LOD voxel.",
                 MessageType.Info);
@@ -1003,6 +1055,7 @@ namespace LocalModels.VoxelBridge
 
             EditorGUILayout.Space(6);
             EditorGUILayout.LabelField("Existing Families", EditorStyles.miniBoldLabel);
+            VoxelBridgeFolderPicker.Draw("Family Folder (shared)", ref exportFolder);
             EditorGUILayout.HelpBox(
                 "Procesa las familias RGB de la carpeta de exportación cuyo manifiesto todavía no contiene un impostor válido. Las familias semánticas se excluyen hasta disponer de un shader de captura compatible. Utiliza el perfil seleccionado y no vuelve a voxelizar los modelos.",
                 MessageType.None);

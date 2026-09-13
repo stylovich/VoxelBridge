@@ -27,6 +27,7 @@ Voxel Bridge mantiene la responsabilidad sobre conversión, paletas, autoría, f
 - Primera referencia compartida: una manzana sencilla, seguida del prototipo de detalle del shader y Vek en textura; la generación procedural y la prueba 3×3 parten de esa referencia.
 - Importancia de detalles: evaluación con el preview y retoques de LOD existentes, sin añadir un atributo ni una herramienta específica de prioridad. La conservación automática de siluetas subvoxel no forma parte de esa garantía.
 - Transiciones geométricas: curva opcional de retención de detalle para pequeños y medianos, con retorno gradual a la curva de edificios grandes. Calibrar los porcentajes con assets representativos; el ajuste de umbrales no sustituye el control de la reducción ni implementa cross-fade.
+- Normalización y autoría: incorporar reflejos a la geometría manteniendo la apariencia y escala unitaria de salida; rechazar escalas degeneradas y cizallamiento. La ventana distingue ajustes compartidos de conversión y opciones específicas mediante pestañas de trabajo.
 - Iteración y diagnóstico: reaplicación del perfil de transiciones sin reconstruir geometría e informes de tiempo por etapa para conversión individual y batch. Priorizar optimizaciones con mediciones representativas; el paralelismo y la reutilización de preparación entre LODs requieren evaluación posterior.
 
 ### Estado por bloque

@@ -313,6 +313,9 @@ namespace LocalModels.VoxelBridge
                 {
                     if (mesh.GetTopology(i) != MeshTopology.Triangles) throw new InvalidOperationException("Conversion requires triangle submeshes.");
                     triangles[i] = mesh.GetTriangles(i);
+                    if (transform.determinant < 0)
+                        for (int t = 0; t < triangles[i].Length; t += 3)
+                            (triangles[i][t + 1], triangles[i][t + 2]) = (triangles[i][t + 2], triangles[i][t + 1]);
                     selected |= triangles[i].Length > 0;
                 }
                 else triangles[i] = Array.Empty<int>();
@@ -364,6 +367,7 @@ namespace LocalModels.VoxelBridge
                     try
                     {
                         mesh.CombineMeshes(new[] { new CombineInstance { mesh = item.Mesh, subMeshIndex = submesh, transform = item.Transform } }, true, true);
+                        // CombineMeshes handles reflected winding itself; do not reverse it again.
                         // CombineMeshes can retain unused vertices from other submeshes. Bounds must describe only drawn triangles.
                         var bounds = new Bounds(item.Vertices[item.Triangles[submesh][0]], Vector3.zero);
                         foreach (int vertex in item.Triangles[submesh]) bounds.Encapsulate(item.Vertices[vertex]);

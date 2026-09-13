@@ -83,10 +83,11 @@ namespace LocalModels.VoxelBridge.Tests
             data.ApplyModifiedPropertiesWithoutUndo();
         }
 
-        [Test]
-        public void NormalizeScale_PreservesRetainedGeometryAcrossDerivedLods()
+        [TestCase(false)]
+        [TestCase(true)]
+        public void NormalizeScale_PreservesRetainedGeometryAcrossDerivedLods(bool reflected)
         {
-            root.transform.localScale = Vector3.one * 2;
+            root.transform.localScale = new Vector3(reflected ? -2 : 2, 2, 2);
             Cube(Vector3.zero, body);
             var retained = Cube(new Vector3(1.5f, 0, 0), glass);
             SetRule(retained, VoxelConversionAction.KeepOriginal);
@@ -99,12 +100,18 @@ namespace LocalModels.VoxelBridge.Tests
             Assert.That(manifest.normalizedScale, Is.True);
             var kept = AssetDatabase.LoadAssetAtPath<GameObject>(AssetDatabase.GUIDToAssetPath(manifest.retainedGeometryGuid));
             var mesh = kept.GetComponentInChildren<MeshFilter>().sharedMesh;
-            Assert.That(mesh.bounds.center.x, Is.EqualTo(3).Within(.0001));
+            Assert.That(mesh.bounds.center.x, Is.EqualTo(reflected ? -3 : 3).Within(.0001));
             Assert.That(mesh.bounds.size.x, Is.EqualTo(2).Within(.0001));
+            var vertices = mesh.vertices;
+            var triangles = mesh.triangles;
+            float volume = 0;
+            for (int i = 0; i < triangles.Length; i += 3)
+                volume += Vector3.Dot(vertices[triangles[i]], Vector3.Cross(vertices[triangles[i + 1]], vertices[triangles[i + 2]])) / 6f;
+            Assert.That(volume, Is.GreaterThan(0), "Retained geometry must preserve outward-facing triangle winding.");
             VoxelProductionFamily.DeriveLevel(build.ManifestAssetPath, 1, VoxelLodGenerationMode.ReduceParent);
             manifest = VoxelProductionFamily.Load(build.ManifestAssetPath);
             Assert.That(manifest.normalizedScale, Is.True);
-            Assert.That(manifest.bakedRootScale, Is.EqualTo(Vector3.one * 2));
+            Assert.That(manifest.bakedRootScale, Is.EqualTo(new Vector3(reflected ? -2 : 2, 2, 2)));
             var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(build.PrefabAssetPath);
             Assert.That(prefab.transform.Find("LOD1").GetComponentsInChildren<MeshFilter>()
                 .Any(f => f.sharedMesh == mesh), Is.True);
@@ -112,6 +119,28 @@ namespace LocalModels.VoxelBridge.Tests
 
         private VoxelizationResult Voxelize() => MeshVoxelizer.Voxelize(root, new VoxelizationSettings
         { VoxelSize = .125f, Padding = 1, FillInterior = true, ConversionProfile = conversion });
+
+        [Test]
+        public void ReflectedVoxelization_PreservesMirroredOccupancyAndSemanticIds()
+        {
+            Cube(new Vector3(.375f, .25f, 0), body);
+            var original = Voxelize().Grid;
+            root.transform.localScale = new Vector3(-1, 1, 1);
+            var reflected = MeshVoxelizer.Voxelize(root, new VoxelizationSettings
+            {
+                VoxelSize = .125f, Padding = 1, FillInterior = true, ConversionProfile = conversion,
+                RootScale = VoxelScaleNormalization.SourceScale(root)
+            }).Grid;
+            Assert.That(reflected.Size, Is.EqualTo(original.Size));
+            for (int z = 0; z < original.Size.z; z++)
+            for (int y = 0; y < original.Size.y; y++)
+            for (int x = 0; x < original.Size.x; x++)
+            {
+                int a = original.Index(x, y, z), b = reflected.Index(original.Size.x - 1 - x, y, z);
+                Assert.That(reflected.Occupied[b], Is.EqualTo(original.Occupied[a]));
+                if (original.Occupied[a]) Assert.That(reflected.SemanticIds[b], Is.EqualTo(original.SemanticIds[a]));
+            }
+        }
 
         [Test]
         public void BatchTiming_WritesOneExclusiveReportForTwoFamilies()

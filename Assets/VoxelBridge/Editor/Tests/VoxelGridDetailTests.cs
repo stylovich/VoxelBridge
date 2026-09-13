@@ -175,6 +175,9 @@ namespace LocalModels.VoxelBridge.Tests
                 chunk.transform.localPosition = Vector3.zero;
                 GameObjectUtility.SetStaticEditorFlags(chunk, StaticEditorFlags.BatchingStatic);
                 Assert.That(VoxelGridAnchorValidation.Validate(group), Does.Contain("Batching Static"));
+                GameObjectUtility.SetStaticEditorFlags(chunk, 0);
+                root.transform.localScale = new Vector3(-1, 1, 1);
+                Assert.That(VoxelGridAnchorValidation.Validate(group), Does.Contain("reflejo"));
             }
             finally { Object.DestroyImmediate(root); }
         }

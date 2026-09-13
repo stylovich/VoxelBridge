@@ -175,7 +175,7 @@ Un error o cancelación elimina solamente la nueva carpeta incompleta. Las fuent
 
 ## Conversión física y LODs
 
-1. Abrir `Physical Models and LODs`.
+1. Abrir `Physical Models and LODs` y seleccionar la pestaña `Individual` o `Batch`.
 2. Seleccionar un FBX, OBJ, prefab, GameObject o Mesh como `Source Model`.
 3. Crear o seleccionar un `Voxel Style Profile`.
 4. Configurar `Base Voxel Size` en unidades de Unity. El valor predeterminado `0.032` equivale a 3,2 cm cuando una unidad representa un metro.
@@ -190,13 +190,25 @@ Para volver a calcular la ocupación desde los triángulos originales, realizar 
 
 ### Escala y variantes de origen
 
+La ventana `Voxel LODs` separa las funciones en cinco pestañas:
+
+| Pestaña | Alcance |
+|---|---|
+| Individual | Una fuente; exclusión de inactivos, límites de memoria, impostor opcional y colocación específicos. |
+| Batch | Hijos del padre; reutilización, overrides, inactivos, límites, recuperación y colocación específicos. |
+| Editar LODs | Derivar un nivel desde un VOX, reconstruir el prefab y consultar los niveles de una familia. |
+| Impostores | Configurar el impostor de una familia o procesar pendientes de la carpeta compartida. |
+| Resultados | Acceder a los últimos assets y al estado de la operación. |
+
+`Ajustes compartidos · Individual + Batch` presenta el mismo estado en ambas pestañas: Voxel Profile, Conversion Profile, color, Alpha Cutoff, Normalize Scale, niveles y carpeta de salida. Cambiar de pestaña no copia ni restablece esos valores. Los límites y la colocación de cada modo son independientes. El perfil voxel también se utiliza en la derivación manual; el perfil de impostores y su calidad son compartidos por los controles que lo utilizan. Los accesos contextuales abren la pestaña correspondiente.
+
 `Normalize Scale`, activado por defecto en la ventana, incorpora la escala mundial de la fuente a la geometría antes del análisis de memoria y la voxelización. Los prefabs y las instancias colocadas utilizan escala `(1,1,1)`, conservando posición, orientación y dimensiones mundiales dentro de la precisión de voxelización. El tamaño de celda del perfil representa metros efectivos, no una medida multiplicada después por el Transform.
 
-La colocación conserva un padre sin escala cuando existe; si la jerarquía aplica escala, utiliza el primer ancestro compatible o la raíz de la escena. No aplica snapping de posición en este modo. Se admiten escalas positivas uniformes o no uniformes sin cizallamiento; las reflexiones, escalas nulas y jerarquías con cizallamiento requieren aplicar los transforms en la fuente antes de convertir. El resultado no mantiene la dependencia de una escala animada del padre.
+La colocación conserva un padre sin escala cuando existe; si la jerarquía aplica escala, utiliza el primer ancestro compatible o la raíz de la escena. No aplica snapping de posición en este modo. Se admiten escalas uniformes o no uniformes y reflejos sin cizallamiento. La reflexión se incorpora a la geometría y se compensa la rotación de colocación; no se elimina el espejo de la pieza. Las escalas nulas, no finitas y jerarquías con cizallamiento se rechazan. El resultado no mantiene la dependencia de una escala animada del padre.
 
 En lotes, una instancia cuya escala mundial difiera de la del prefab fuente utiliza una familia independiente. `Use Source Prefab` sigue descartando los overrides visuales, pero la escala incorporada corresponde a la instancia. Las piezas `Keep Original` reciben la misma transformación que los voxels. El manifiesto registra `normalizedScale` y `bakedRootScale`; las familias antiguas conservan su contrato anterior y requieren una conversión nueva para normalizarse. `Rebuild` no incorpora la escala de sus instancias.
 
-`Ignore Inactive (Single)` excluye hijos desactivados de la conversión individual y está activado por defecto. Los lotes conservan su opción `Ignore Inactive Objects`. Para personajes modulares, seleccionar una jerarquía que contenga sólo la variante deseada y los huesos necesarios. Las mallas animadas se capturan como geometría estática en su pose actual; la conversión no exporta rig ni animaciones.
+`Ignore Inactive Objects` conserva valores independientes en `Individual` y `Batch`. Para personajes modulares, seleccionar una jerarquía que contenga sólo la variante deseada y los huesos necesarios. Las mallas animadas se capturan como geometría estática en su pose actual; la conversión no exporta rig ni animaciones.
 
 ### Ejes de origen
 

@@ -21,6 +21,8 @@ namespace LocalModels.VoxelBridge
             if (!group) return "Se requiere un LODGroup de familia.";
             try { VoxelScaleNormalization.SourceScale(group.gameObject); }
             catch (InvalidOperationException e) { return e.Message; }
+            if (group.transform.localToWorldMatrix.determinant < 0)
+                return "Family Local requiere incorporar el reflejo a la geometría mediante Normalize Scale antes de usar la rejilla.";
             var renderers = group.GetLODs().SelectMany(l => l.renderers).Where(r => r).Distinct().ToArray();
             if (renderers.Length == 0) return "La familia no contiene renderers.";
             foreach (var renderer in renderers)
