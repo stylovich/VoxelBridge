@@ -58,6 +58,8 @@ namespace LocalModels.VoxelBridge
         [SerializeField] private float occlusionMultiplier;
         [Range(0f, 1f)]
         [SerializeField] private float opacity = .25f;
+        [Range(0f, .25f)]
+        [SerializeField] private float cellHeightVariation;
 
         public int Id => id;
         public string DisplayName => displayName;
@@ -67,11 +69,12 @@ namespace LocalModels.VoxelBridge
         public float Emission => emission;
         public float OcclusionMultiplier => occlusionMultiplier;
         public float Opacity => opacity;
+        public float CellHeightVariation => cellHeightVariation;
         public bool SupportsVoxelRendering => renderClass == VoxelSurfaceRenderClass.Opaque || renderClass == VoxelSurfaceRenderClass.Transparent;
 
         internal VoxelSurfaceDefinition(int id, string displayName,
             VoxelSurfaceRenderClass renderClass, float metallic, float smoothness,
-            float emission, float occlusionMultiplier, float opacity = .25f)
+            float emission, float occlusionMultiplier, float opacity = .25f, float cellHeightVariation = 0f)
         {
             this.id = id;
             this.displayName = displayName;
@@ -81,6 +84,7 @@ namespace LocalModels.VoxelBridge
             this.emission = emission;
             this.occlusionMultiplier = occlusionMultiplier;
             this.opacity = opacity;
+            this.cellHeightVariation = cellHeightVariation;
         }
     }
 
@@ -138,6 +142,11 @@ namespace LocalModels.VoxelBridge
                     !IsUnit(entry.Emission) || !IsUnit(entry.OcclusionMultiplier) || !IsUnit(entry.Opacity))
                 {
                     error = $"SurfaceID {entry.Id} contains PBR properties outside the 0..1 range.";
+                    return false;
+                }
+                if (!IsUnit(entry.CellHeightVariation) || entry.CellHeightVariation > .25f)
+                {
+                    error = $"SurfaceID {entry.Id} has Cell Height Variation outside the finite 0..0.25 range.";
                     return false;
                 }
             }

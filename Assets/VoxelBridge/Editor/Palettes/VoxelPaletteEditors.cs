@@ -140,7 +140,7 @@ namespace LocalModels.VoxelBridge
                 draggable: true, displayHeader: true, displayAddButton: true,
                 displayRemoveButton: true)
             {
-                elementHeightCallback = _ => EditorGUIUtility.singleLineHeight * 3f + 8f,
+                elementHeightCallback = _ => EditorGUIUtility.singleLineHeight * 4f + 11f,
                 drawHeaderCallback = rect => EditorGUI.LabelField(
                     rect, "ID        Name                           Render Class"),
                 drawElementCallback = DrawEntry,
@@ -159,7 +159,7 @@ namespace LocalModels.VoxelBridge
             var palette = (VoxelSurfacePalette)target;
             using (new EditorGUILayout.HorizontalScope())
             {
-                if (GUILayout.Button(new GUIContent("Preview Selected Surface", "Vista temporal con los valores actuales; no requiere reconstruir la LUT.")))
+                if (GUILayout.Button(new GUIContent("Preview Selected Surface", "Vista PBR temporal; no requiere reconstruir la LUT. El relieve voxel se evalúa en el material de producción.")))
                 {
                     serializedObject.ApplyModifiedProperties();
                     int index = entriesList.index;
@@ -233,6 +233,10 @@ namespace LocalModels.VoxelBridge
             EditorGUI.PropertyField(new Rect(rect.x, y, half, line), emission, new GUIContent("Emission"));
             EditorGUI.PropertyField(new Rect(rect.x + half + 8f, y, half, line),
                 glass ? element.FindPropertyRelative("opacity") : occlusion, new GUIContent(glass ? "Opacity" : "Occlusion"));
+            y += line + 3f;
+            using (new EditorGUI.DisabledScope(renderClass.enumValueIndex != (int)VoxelSurfaceRenderClass.Opaque))
+                EditorGUI.PropertyField(new Rect(rect.x, y, rect.width, line), element.FindPropertyRelative("cellHeightVariation"),
+                    new GUIContent("Cell Height Variation", "Hundimiento máximo como fracción de celda. Cero conserva el perfil uniforme. Sólo opacos; requiere Beveled y reconstruir la LUT. POM hace visible el cambio de altura."));
         }
 
         private void AddEntry(ReorderableList list)

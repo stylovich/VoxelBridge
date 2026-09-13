@@ -12,7 +12,8 @@ namespace LocalModels.VoxelBridge.Tests
             float anchor = 0, Matrix4x4? objectToWorld = null, float? spanY = null,
             float distanceStart = 12, float distanceStep = 20, bool levelOnly = false,
             float profile = 0, float bevelWidth = .06f, float jointDepth = .025f, bool patternOnly = false,
-            float pom = 0, float pomMaxDepth = .003f, bool pomTrace = false, Vector3? view = null)
+            float pom = 0, float pomMaxDepth = .003f, bool pomTrace = false, Vector3? view = null,
+            float variation = 0, Vector3? plane = null, Vector3? cellV = null)
         {
             var shader = AssetDatabase.LoadAssetAtPath<Shader>("Assets/VoxelBridge/Editor/Tests/VoxelGridDetailProbe.shader");
             Assert.That(shader, Is.Not.Null);
@@ -39,6 +40,8 @@ namespace LocalModels.VoxelBridge.Tests
                 material.SetFloat("_TestJointDepth", jointDepth); material.SetFloat("_TestPatternOnly", patternOnly ? 1 : 0);
                 material.SetFloat("_TestPom", pom); material.SetFloat("_TestPomMaxDepth", pomMaxDepth);
                 material.SetFloat("_TestPomTrace", pomTrace ? 1 : 0); material.SetVector("_TestView", view ?? Vector3.forward);
+                material.SetFloat("_TestVariation", variation); material.SetVector("_TestPlane", plane ?? Vector3.zero);
+                material.SetVector("_TestCellV", cellV ?? Vector3.up);
                 material.SetMatrix("_TestObjectToWorld", objectToWorld ?? Matrix4x4.identity);
                 material.SetMatrix("_TestWorldToObject", (objectToWorld ?? Matrix4x4.identity).inverse);
                 Graphics.Blit(Texture2D.whiteTexture, rt, material);
@@ -418,6 +421,61 @@ namespace LocalModels.VoxelBridge.Tests
             var a = Render(profile: 1, distance: distance, multiscale: 2);
             var b = Render(profile: 1, distance: distance, multiscale: 2, pom: enabled, pomMaxDepth: cap);
             for (int i = 0; i < a.Length; i++) Assert.That(Vector4.Distance(a[i], b[i]), Is.LessThan(.001f));
+        }
+
+        [Test]
+        public void CellVariation_HasFlatRandomTopsAndOneCommonJointFloor()
+        {
+            var pixels = Render(span: 4, offset: -.03125f, patternOnly: true, variation: .08f);
+            var heights = new System.Collections.Generic.List<float>();
+            for (int y = 0; y < 4; y++) for (int x = 0; x < 4; x++)
+            {
+                var top = pixels[(x * 16 + 8) + (y * 16 + 8) * 64];
+                Assert.That(top.r, Is.Zero.Within(.001f)); Assert.That(top.g, Is.Zero.Within(.001f));
+                Assert.That(top.a, Is.InRange(-.0801f, .0001f)); heights.Add(top.a);
+                var joint = pixels[x * 16 + (y * 16 + 8) * 64];
+                Assert.That(joint.a, Is.EqualTo(-.105f).Within(.001f));
+            }
+            Assert.That(heights.Distinct().Count(), Is.GreaterThan(10));
+        }
+
+        [Test]
+        public void CellVariation_UsesSameCellIdentityAcrossFaceOrientations()
+        {
+            var front = Render(span: 4, patternOnly: true, variation: .08f);
+            var top = Render(span: 4, patternOnly: true, variation: .08f, cellV: Vector3.forward);
+            for (int x = 0; x < 4; x++)
+                Assert.That(front[x * 16 + 8 + 8 * 64].a, Is.EqualTo(top[x * 16 + 8 + 8 * 64].a).Within(.001f));
+        }
+
+        [TestCase(0f)]
+        [TestCase(90f)]
+        public void CellVariation_FollowsFamilyAndIsStableOnNegativeCoordinates(float angle)
+        {
+            var a = Render(profile: 1, anchor: 1, variation: .08f, offset: -.25f);
+            var b = Render(profile: 1, anchor: 1, variation: .08f, offset: -.25f,
+                objectToWorld: Matrix4x4.TRS(new Vector3(.1f, .2f, .1f), Quaternion.Euler(angle, angle, 0), Vector3.one));
+            for (int i = 0; i < a.Length; i++) Assert.That(Vector4.Distance(a[i], b[i]), Is.LessThan(.003f));
+        }
+
+        [Test]
+        public void CellVariation_FadesOutWithoutReseedingCoarseGrid()
+        {
+            var a = Render(profile: 1, multiscale: 2, distance: 40);
+            var b = Render(profile: 1, multiscale: 2, distance: 40, variation: .08f);
+            for (int i = 0; i < a.Length; i++) Assert.That(Vector4.Distance(a[i], b[i]), Is.LessThan(.001f));
+        }
+
+        [Test]
+        public void CellVariation_PomIntersectsTheVariedHeightField()
+        {
+            var shape = Render(span: 4, patternOnly: true, variation: .08f);
+            var hits = Render(span: 4, pomTrace: true, variation: .08f);
+            for (int y = 0; y < 4; y++) for (int x = 0; x < 4; x++)
+            {
+                int i = x * 16 + 8 + (y * 16 + 8) * 64;
+                Assert.That(hits[i].b, Is.EqualTo(-shape[i].a / .105f).Within(.004f));
+            }
         }
     }
 }

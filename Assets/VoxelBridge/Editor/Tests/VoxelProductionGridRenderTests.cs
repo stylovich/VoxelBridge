@@ -12,14 +12,15 @@ namespace LocalModels.VoxelBridge.Tests
         // Isolated HDRP preview: no Test2 reload or persistent material changes.
         internal static Texture2D Render(string shaderPath, bool enabled, bool zeroStrength = false, float gridMode = 1,
             float profile = 0, float depth = .025f, float bevelWidth = .06f, int geometry = 0, float orbit = 0,
-            float pom = 0, float pomMaxDepth = .003f)
+            float pom = 0, float pomMaxDepth = .003f, float variation = 0, int surfaceId = 0)
         {
             var shader = AssetDatabase.LoadAssetAtPath<Shader>(shaderPath);
             Assert.That(shader, Is.Not.Null);
             Assert.That(ShaderUtil.ShaderHasError(shader), Is.False);
             var material = new Material(shader);
             var colors = new Texture2D(256, 1, TextureFormat.RGBA32, false, true);
-            var surfaces = new Texture2D(1, 1, TextureFormat.RGBA32, false, true);
+            var surfaces = new Texture2D(2, variation > 0 ? 2 : 1, TextureFormat.RGBA32, false, true) { filterMode = FilterMode.Point };
+            Mesh ownedMesh = null;
             var preview = new PreviewRenderUtility();
             var previous = RenderTexture.active;
             RenderTexture rt = null;
@@ -27,7 +28,13 @@ namespace LocalModels.VoxelBridge.Tests
             try
             {
                 colors.SetPixels(Enumerable.Repeat(new Color(.6f, .42f, .25f, 1), 256).ToArray()); colors.Apply();
-                surfaces.SetPixel(0, 0, new Color(0, .5f, 0, 1)); surfaces.Apply();
+                surfaces.SetPixel(0, 0, new Color(0, .5f, 0, 1)); surfaces.SetPixel(1, 0, new Color(0, .5f, 0, 1));
+                if (variation > 0)
+                {
+                    surfaces.SetPixel(0, 1, Color.clear);
+                    surfaces.SetPixel(1, 1, new Color(variation / .25f, 0, 0, 0));
+                }
+                surfaces.Apply();
                 material.SetTexture("_PaletteColor", colors); material.SetTexture("_PaletteSurface", surfaces);
                 material.SetFloat("_EmissionIntensity", 1);
                 if (material.HasProperty("_GridEnabled"))
@@ -72,6 +79,9 @@ namespace LocalModels.VoxelBridge.Tests
                 }
                 Texture rendered = null;
                 var cube = Resources.GetBuiltinResource<Mesh>("Cube.fbx");
+                // Built-in meshes have no semantic UV3. Supply IDs even for surface zero.
+                ownedMesh = Object.Instantiate(cube); cube = ownedMesh;
+                cube.uv4 = Enumerable.Repeat(new Vector2(surfaceId, 0), cube.vertexCount).ToArray();
                 // Warm up the HDRP preview scene before capturing the result.
                 for (int i = 0; i < 3; i++)
                 {
@@ -98,6 +108,7 @@ namespace LocalModels.VoxelBridge.Tests
                 if (rt) RenderTexture.ReleaseTemporary(rt);
                 preview.Cleanup();
                 Object.DestroyImmediate(material); Object.DestroyImmediate(colors); Object.DestroyImmediate(surfaces);
+                if (ownedMesh) Object.DestroyImmediate(ownedMesh);
             }
         }
 
@@ -173,6 +184,25 @@ namespace LocalModels.VoxelBridge.Tests
                 CollectionAssert.AreEqual(a.Select(p => p.a).ToArray(), b.Select(p => p.a).ToArray());
             }
             finally { if (off) Object.DestroyImmediate(off); if (on) Object.DestroyImmediate(on); }
+        }
+
+        [Test]
+        public void Production_HeightVariationIsSelectedBySurfaceId()
+        {
+            Texture2D baseline = null, unchanged = null, varied = null;
+            try
+            {
+                baseline = Render(VoxelProductionExporter.ShaderPath, true, gridMode: 0, profile: 1, pom: 1, geometry: 1, orbit: 45);
+                unchanged = Render(VoxelProductionExporter.ShaderPath, true, gridMode: 0, profile: 1, pom: 1, geometry: 1, orbit: 45, variation: .08f);
+                varied = Render(VoxelProductionExporter.ShaderPath, true, gridMode: 0, profile: 1, pom: 1, geometry: 1, orbit: 45, variation: .08f, surfaceId: 1);
+                var a = baseline.GetPixels(); var b = unchanged.GetPixels(); var c = varied.GetPixels();
+                Assert.That(a.Zip(b, (x,y) => Vector4.Distance(x,y)).Max(), Is.LessThan(.01f));
+                Assert.That(b.Zip(c, (x,y) => Vector4.Distance(x,y)).Count(d => d > .01f), Is.GreaterThan(100));
+            }
+            finally
+            {
+                if (baseline) Object.DestroyImmediate(baseline); if (unchanged) Object.DestroyImmediate(unchanged); if (varied) Object.DestroyImmediate(varied);
+            }
         }
     }
 }

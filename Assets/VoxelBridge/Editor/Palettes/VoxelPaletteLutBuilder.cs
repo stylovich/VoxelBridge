@@ -65,7 +65,18 @@ namespace LocalModels.VoxelBridge
                 renderClasses[entry.Id] = (byte)entry.RenderClass;
             }
 
-            contentHash = ComputeHash("surface-v1", pixels, renderClasses);
+            bool hasVariation = false;
+            foreach (VoxelSurfaceDefinition entry in palette.Entries)
+                hasVariation |= entry.RenderClass == VoxelSurfaceRenderClass.Opaque && entry.CellHeightVariation > 0;
+            if (hasVariation)
+            {
+                Array.Resize(ref pixels, VoxelPaletteConstants.EntryCount * 2);
+                for (int i = VoxelPaletteConstants.EntryCount; i < pixels.Length; i++)
+                    pixels[i] = EncodeVariation(fallback);
+                foreach (VoxelSurfaceDefinition entry in palette.Entries)
+                    pixels[VoxelPaletteConstants.EntryCount + entry.Id] = EncodeVariation(entry);
+            }
+            contentHash = ComputeHash(hasVariation ? "surface-v2" : "surface-v1", pixels, renderClasses);
             error = null;
             return true;
         }
@@ -76,6 +87,10 @@ namespace LocalModels.VoxelBridge
             EncodeUnit(surface.Emission),
             // Glass uses alpha for opacity; opaque encoding and its existing LUT stay unchanged.
             EncodeUnit(surface.RenderClass == VoxelSurfaceRenderClass.Transparent ? surface.Opacity : surface.OcclusionMultiplier));
+
+        private static Color32 EncodeVariation(VoxelSurfaceDefinition surface) => new(
+            surface.RenderClass == VoxelSurfaceRenderClass.Opaque ? EncodeUnit(surface.CellHeightVariation / .25f) : (byte)0,
+            0, 0, 0);
 
         private static Color32[] CreateFilledPixels(Color32 value)
         {
@@ -142,7 +157,8 @@ namespace LocalModels.VoxelBridge
             Undo.RecordObject(palette, "Rebuild Voxel Color LUT");
             palette.SetGeneratedLut(texture, hash);
             EditorUtility.SetDirty(palette);
-            AssetDatabase.SaveAssets();
+            AssetDatabase.SaveAssetIfDirty(texture);
+            AssetDatabase.SaveAssetIfDirty(palette);
             return true;
         }
 
@@ -160,7 +176,8 @@ namespace LocalModels.VoxelBridge
             Undo.RecordObject(palette, "Rebuild Voxel Surface LUT");
             palette.SetGeneratedLut(texture, hash);
             EditorUtility.SetDirty(palette);
-            AssetDatabase.SaveAssets();
+            AssetDatabase.SaveAssetIfDirty(texture);
+            AssetDatabase.SaveAssetIfDirty(palette);
             return true;
         }
 
@@ -227,7 +244,7 @@ namespace LocalModels.VoxelBridge
         private static Texture2D CreateTexture(string textureName, Color32[] pixels, bool linear)
         {
             var texture = new Texture2D(
-                VoxelPaletteConstants.EntryCount, 1, TextureFormat.RGBA32,
+                VoxelPaletteConstants.EntryCount, pixels.Length / VoxelPaletteConstants.EntryCount, TextureFormat.RGBA32,
                 mipChain: false, linear: linear)
             {
                 name = textureName,
@@ -246,7 +263,7 @@ namespace LocalModels.VoxelBridge
             if (texture == null || string.IsNullOrEmpty(storedHash) ||
                 !string.Equals(storedHash, expectedHash, StringComparison.Ordinal))
                 return false;
-            if (texture.width != VoxelPaletteConstants.EntryCount || texture.height != 1 ||
+            if (texture.width != VoxelPaletteConstants.EntryCount || texture.height != expectedPixels.Count / VoxelPaletteConstants.EntryCount ||
                 texture.format != TextureFormat.RGBA32 || texture.mipmapCount != 1 ||
                 texture.filterMode != FilterMode.Point || texture.wrapMode != TextureWrapMode.Clamp ||
                 texture.anisoLevel != 0 || texture.isDataSRGB != expectSrgb || !texture.isReadable)

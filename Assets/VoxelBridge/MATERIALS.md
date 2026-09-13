@@ -43,7 +43,7 @@ Los slots no definidos contienen el valor del `ColorID 0`. Esta regla sólo comp
 
 Cada `SurfaceID` define un perfil PBR reutilizable. Por ejemplo, `Aluminum` se configura una vez y cualquier voxel que utilice su ID recibe esas propiedades. No es necesario introducir valores PBR distintos en cada voxel.
 
-La LUT lineal de superficies codifica:
+La primera fila de la LUT lineal de superficies codifica:
 
 | Canal | Valor | Rango |
 | --- | --- | --- |
@@ -53,6 +53,12 @@ La LUT lineal de superficies codifica:
 | A | Oclusión en Opaque; opacidad en Glass | 0..1 |
 
 El multiplicador de oclusión controla cuánto participa la oclusión calculada o proporcionada por el pipeline. No representa una sombra fija horneada en el tipo de material.
+
+`Cell Height Variation` configura el hundimiento aparente máximo por celda como fracción de la unidad visual base, entre `0` y `0.25`. Sólo se utiliza en superficies Opaque; Glass, Foliage y Special generan variación cero. El valor predeterminado es cero para todas las entradas: no se infiere irregularidad del nombre, del metallic ni de la rugosidad.
+
+Sin variación opaca, la LUT conserva el formato `256 x 1`. Si alguna entrada la utiliza, adopta `256 x 2`: la segunda fila codifica `Cell Height Variation / 0.25` en R y cero en GBA. Ambas filas utilizan RGBA32 lineal, filtrado Point, Clamp y ningún mipmap. La primera fila conserva sus valores PBR y la regeneración mantiene GUID, identificador interno y referencias de materiales. La reconstrucción guarda únicamente la paleta y su LUT, no otros assets con cambios pendientes.
+
+Para probarlo, seleccionar la paleta de superficies, configurar por ejemplo `0.04` en Concrete y pulsar `Rebuild Surface LUT`. Utilizar `Grid Profile = Beveled` y `Grid POM = On` en el material de producción para apreciar el paralaje. No requiere reconversión ni reconstrucción de mallas. Los materiales que comparten la paleta reciben la configuración por SurfaceID; un modelo asignado a Default no adopta la configuración de Concrete por su aspecto. El visor `Preview Selected Surface` muestra PBR, no este relieve procedural. Consultar [variación por celda](ART_DIRECTION_AND_DETAIL.md#variación-de-altura-por-surfaceid).
 
 `Render Class` clasifica la superficie según su comportamiento de render: opaca, follaje, transparente o especial. La clase determina el submesh y material compartido: Opaque y Glass están disponibles; Foliage y Special permanecen reservados. Cambiar la clase de una superficie utilizada requiere reconstruir sus mallas.
 

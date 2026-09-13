@@ -39,9 +39,31 @@ float4 VoxelGridBevelPattern(float2 q, float2 footprint, float jointWidth, float
     return float4(gradient, (1.0 - face) * step(0.000001, safeDepth), -safeDepth * (1.0 - face)) * filtered;
 }
 
-float3 VoxelGridSurfacePattern(float2 q, float2 footprint, float jointWidth, float profile, float bevelWidth, float depth)
+float VoxelGridCellRandom(float3 cell)
 {
-    if (profile >= 0.5) return VoxelGridBevelPattern(q, footprint, jointWidth, bevelWidth, depth).xyz;
+    uint3 p = asuint((int3)cell);
+    uint h = p.x * 0x8da6b343u ^ p.y * 0xd8163841u ^ p.z * 0xcb1ab31fu;
+    h ^= h >> 16; h *= 0x7feb352du; h ^= h >> 15; h *= 0x846ca68bu; h ^= h >> 16;
+    return (h & 0x00ffffffu) / 16777215.0;
+}
+
+float4 VoxelGridVariedBevel(float2 q, float2 footprint, float jointWidth, float bevelWidth,
+    float depth, float variation, float3 planeCell, float3 cellU, float3 cellV)
+{
+    depth = clamp(depth, 0.0, 0.25);
+    variation = min(clamp(variation, 0.0, 0.25), 0.25 - depth);
+    if (variation <= 0) return VoxelGridBevelPattern(q, footprint, jointWidth, bevelWidth, depth);
+    float sink = variation * VoxelGridCellRandom(planeCell + cellU * floor(q.x) + cellV * floor(q.y));
+    // A common joint floor avoids a discontinuity when adjacent cells have different heights.
+    float4 result = VoxelGridBevelPattern(q, footprint, jointWidth, bevelWidth, depth + variation - sink);
+    result.w -= sink * (1.0 - smoothstep(0.15, 0.65, max(footprint.x, footprint.y)));
+    return result;
+}
+
+float3 VoxelGridSurfacePattern(float2 q, float2 footprint, float jointWidth, float profile, float bevelWidth, float depth,
+    float variation, float3 planeCell, float3 cellU, float3 cellV)
+{
+    if (profile >= 0.5) return VoxelGridVariedBevel(q, footprint, jointWidth, bevelWidth, depth, variation, planeCell, cellU, cellV).xyz;
     return VoxelGridPattern(q, footprint, clamp(jointWidth * 0.5, 0.005, 0.24));
 }
 
@@ -54,21 +76,23 @@ float VoxelGridDistanceLevel(float cameraDistance, float startDistance, float tr
 // Intersect a bounded ray with the same filtered procedural bevel height field.
 // xy: hit coordinates, z: normalized hit depth. No textures, clipping or depth-buffer writes.
 float3 VoxelGridParallax(float2 q, float2 footprint, float jointWidth, float bevelWidth,
-    float depthInCells, float3 viewInGrid)
+    float depthInCells, float3 viewInGrid, float jointDepth, float variation,
+    float3 planeCell, float3 cellU, float3 cellV)
 {
     if (depthInCells <= 0.000001 || viewInGrid.z <= 0.12) return float3(q, 0);
     float2 ray = -viewInGrid.xy / max(viewInGrid.z, 0.12) * depthInCells;
     float rayLength = length(ray);
     ray *= min(1.0, 0.2 / max(rayLength, 0.000001));
     // Using the existing height output keeps the POM shape identical to the normals.
-    if (-4.0 * VoxelGridBevelPattern(q, footprint, jointWidth, bevelWidth, 0.25).w <= 0.000001)
+    float total = max(min(0.25, max(jointDepth, 0.0) + max(variation, 0.0)), 0.000001);
+    if (-VoxelGridVariedBevel(q, footprint, jointWidth, bevelWidth, jointDepth, variation, planeCell, cellU, cellV).w / total <= 0.000001)
         return float3(q, 0);
     float lo = 0, hi = 1;
     [loop]
     for (int i = 1; i <= 16; i++)
     {
         float t = i / 16.0;
-        float depression = -4.0 * VoxelGridBevelPattern(q + ray * t, footprint, jointWidth, bevelWidth, 0.25).w;
+        float depression = -VoxelGridVariedBevel(q + ray * t, footprint, jointWidth, bevelWidth, jointDepth, variation, planeCell, cellU, cellV).w / total;
         if (t >= depression) { hi = t; break; }
         lo = t;
     }
@@ -76,11 +100,18 @@ float3 VoxelGridParallax(float2 q, float2 footprint, float jointWidth, float bev
     for (int j = 0; j < 4; j++)
     {
         float t = (lo + hi) * 0.5;
-        float depression = -4.0 * VoxelGridBevelPattern(q + ray * t, footprint, jointWidth, bevelWidth, 0.25).w;
+        float depression = -VoxelGridVariedBevel(q + ray * t, footprint, jointWidth, bevelWidth, jointDepth, variation, planeCell, cellU, cellV).w / total;
         if (t >= depression) hi = t; else lo = t;
     }
     float hit = (lo + hi) * 0.5;
     return float3(q + ray * hit, hit);
+}
+
+float3 VoxelGridParallax(float2 q, float2 footprint, float jointWidth, float bevelWidth,
+    float depthInCells, float3 viewInGrid)
+{
+    return VoxelGridParallax(q, footprint, jointWidth, bevelWidth, depthInCells, viewInGrid,
+        0.25, 0.0, float3(0,0,0), float3(1,0,0), float3(0,1,0));
 }
 
 float VoxelGridParallaxWeight(float cameraDistance, float ndotv, float level)
@@ -97,6 +128,7 @@ void VoxelGridDetail_float(float3 Position, float3 Normal, float3 Tangent, float
     float AnchorMode, float DistanceStart, float DistanceStep,
     float Profile, float BevelWidth, float JointDepth,
     float PomEnabled, float PomMaxDepth,
+    float SurfaceHeightVariation,
     out float3 DetailNormalTS, out float DetailSmoothness)
 {
     DetailNormalTS = float3(0, 0, 1);
@@ -115,16 +147,22 @@ void VoxelGridDetail_float(float3 Position, float3 Normal, float3 Tangent, float
     float3 a = abs(frameNormal);
     float3 u = a.x >= a.y && a.x >= a.z ? float3(0, 1, 0) : float3(1, 0, 0);
     float3 v = a.z > a.x && a.z > a.y ? float3(0, 1, 0) : float3(0, 0, 1);
+    float3 cellU = u, cellV = v, frameMetres = framePosition;
     float2 q = float2(dot(framePosition, u), dot(framePosition, v));
     if (AnchorMode >= 0.5)
     {
         // Preserve metres under non-uniform (non-sheared) instance scaling.
         float3 worldU = mul(modelToWorld, u), worldV = mul(modelToWorld, v);
         float2 axisScale = max(float2(length(worldU), length(worldV)), 0.000001);
+        frameMetres *= float3(length(mul(modelToWorld, float3(1,0,0))),
+            length(mul(modelToWorld, float3(0,1,0))), length(mul(modelToWorld, float3(0,0,1))));
         q *= axisScale;
         u = worldU / axisScale.x; v = worldV / axisScale.y;
     }
     q /= max(CellSize, 0.001);
+    float3 cell = floor(frameMetres / max(CellSize, 0.001) - frameNormal * 0.0001);
+    float3 planeCell = cell - cellU * dot(cell, cellU) - cellV * dot(cell, cellV);
+    float variation = min(clamp(SurfaceHeightVariation, 0.0, 0.25), 0.25 - clamp(JointDepth, 0.0, 0.25));
     // Evaluate derivatives before branching. Fade unresolved cells instead of aliasing.
     float2 footprint = max(fwidth(q), 0.0001);
     float weight = saturate(Enabled);
@@ -135,15 +173,15 @@ void VoxelGridDetail_float(float3 Position, float3 Normal, float3 Tangent, float
         level = VoxelGridDistanceLevel(distance(Position, _WorldSpaceCameraPos), DistanceStart, DistanceStep, maxLevel);
     else if (Multiscale >= 0.5)
         level = clamp(log2(max(max(footprint.x, footprint.y) * clamp(TargetPixels, 4.0, 64.0), 1.0)), 0.0, maxLevel);
-    if (PomEnabled >= 0.5 && Profile >= 0.5 && JointDepth > 0 && unity_OrthoParams.w < 0.5)
+    if (PomEnabled >= 0.5 && Profile >= 0.5 && JointDepth + variation > 0 && unity_OrthoParams.w < 0.5)
     {
         float3 view = normalize(_WorldSpaceCameraPos - Position);
         float ndotv = dot(n, view);
         float fade = VoxelGridParallaxWeight(distance(Position, _WorldSpaceCameraPos), ndotv, level);
-        float depth = min(clamp(JointDepth, 0.0, 0.25) * max(CellSize, 0.001), clamp(PomMaxDepth, 0.0, 0.01));
+        float depth = min((clamp(JointDepth, 0.0, 0.25) + variation) * max(CellSize, 0.001), clamp(PomMaxDepth, 0.0, 0.01));
         if (fade > 0.0001 && depth > 0)
             q = VoxelGridParallax(q, footprint, JointWidth, BevelWidth, depth * fade / max(CellSize, 0.001),
-                float3(dot(view, u), dot(view, v), ndotv)).xy;
+                float3(dot(view, u), dot(view, v), ndotv), JointDepth, variation, planeCell, cellU, cellV).xy;
     }
     float3 pattern;
     if (Multiscale >= 0.5)
@@ -154,15 +192,18 @@ void VoxelGridDetail_float(float3 Position, float3 Normal, float3 Tangent, float
         float upper = min(lower + 1.0, maxLevel);
         float lowerScale = exp2(lower), upperScale = exp2(upper);
         float blend = smoothstep(0.0, 1.0, frac(level));
-        pattern = lerp(VoxelGridSurfacePattern(q / lowerScale, footprint / lowerScale, JointWidth, Profile, BevelWidth, JointDepth),
-            VoxelGridSurfacePattern(q / upperScale, footprint / upperScale, JointWidth, Profile, BevelWidth, JointDepth), blend);
+        // Variation belongs to fine cells only; fade it out instead of re-seeding larger grids.
+        pattern = lerp(VoxelGridSurfacePattern(q / lowerScale, footprint / lowerScale, JointWidth, Profile, BevelWidth, JointDepth,
+                lower < 0.5 ? variation : 0.0, planeCell, cellU, cellV),
+            VoxelGridSurfacePattern(q / upperScale, footprint / upperScale, JointWidth, Profile, BevelWidth, JointDepth,
+                upper < 0.5 ? variation : 0.0, planeCell, cellU, cellV), blend);
         // At the size cap, filtering still fades detail that can no longer be resolved.
     }
     else
     {
         float cameraDistance = distance(Position, _WorldSpaceCameraPos);
         weight *= 1.0 - smoothstep(max(0, FadeStart), max(FadeStart + 0.01, FadeEnd), cameraDistance);
-        pattern = VoxelGridSurfacePattern(q, footprint, JointWidth, Profile, BevelWidth, JointDepth);
+        pattern = VoxelGridSurfacePattern(q, footprint, JointWidth, Profile, BevelWidth, JointDepth, variation, planeCell, cellU, cellV);
     }
     float3 gradient = u * pattern.x + v * pattern.y;
     gradient -= n * dot(gradient, n);
@@ -171,6 +212,21 @@ void VoxelGridDetail_float(float3 Position, float3 Normal, float3 Tangent, float
         dot(detailN, normalize(Bitangent)), dot(detailN, n)));
     DetailSmoothness = saturate(BaseSmoothness - pattern.z * saturate(RoughnessStrength) * weight);
 #endif
+}
+
+// Existing POM graphs without surface variation retain a uniform height field.
+void VoxelGridDetail_float(float3 Position, float3 Normal, float3 Tangent, float3 Bitangent,
+    float Enabled, float CellSize, float JointWidth, float NormalStrength,
+    float RoughnessStrength, float FadeStart, float FadeEnd, float BaseSmoothness,
+    float Multiscale, float TargetPixels, float MaxScaleLevels,
+    float AnchorMode, float DistanceStart, float DistanceStep,
+    float Profile, float BevelWidth, float JointDepth, float PomEnabled, float PomMaxDepth,
+    out float3 DetailNormalTS, out float DetailSmoothness)
+{
+    VoxelGridDetail_float(Position, Normal, Tangent, Bitangent, Enabled, CellSize, JointWidth,
+        NormalStrength, RoughnessStrength, FadeStart, FadeEnd, BaseSmoothness,
+        Multiscale, TargetPixels, MaxScaleLevels, AnchorMode, DistanceStart, DistanceStep,
+        Profile, BevelWidth, JointDepth, PomEnabled, PomMaxDepth, 0.0, DetailNormalTS, DetailSmoothness);
 }
 
 // Bevel graphs without the experimental POM controls retain their original output.
