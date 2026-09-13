@@ -264,6 +264,14 @@ La herramienta intenta la menor unidad permitida que satisface los límites. Si 
 
 `Analyze Batch Memory` muestra las fuentes únicas y su estimación. Los fallos individuales se registran y el lote continúa con las fuentes restantes.
 
+### Tiempos de conversión
+
+La generación automática individual y por lotes escribe un resumen en Console y un informe `Logs/VoxelBridge/ConversionTiming-<fecha>-<id>.json`. Incluye estado final, tiempo total en milisegundos y tiempos acumulados por etapa: preparación, voxelización y muestreo de materiales, relleno interior, escritura de VOX/metadatos, importación, meshing, lectura/guardado de assets y limpieza. `Other` recoge coordinación y operaciones sin una etapa específica.
+
+El informe batch corresponde al lote completo, incluidas sus conversiones fallidas y la limpieza; no duplica los tiempos por reutilizar una familia. Las etapas son exclusivas: una operación anidada pausa la contabilización de su etapa padre. Se conservan informes de cancelación y fallo cuando la ejecución permite finalizar el diagnóstico; un cierre del proceso puede impedir escribirlos.
+
+Las medidas son de tiempo transcurrido, no de CPU o GPU aislados. Incluyen esperas del Editor y callbacks de progreso dentro de la conversión; excluyen la escritura del propio informe, el análisis previo ya realizado, la colocación posterior en escena y el horneado opcional de impostores. Comparar lotes equivalentes y considerar el estado de las cachés antes de decidir una optimización. La instrumentación no activa paralelismo ni cambia la geometría. Los informes son archivos locales fuera de `Assets`, sin importación ni versionado.
+
 `Resume Interrupted Batch` reutiliza familias completadas desde `Library/VoxelBridge/BatchCheckpoints` cuando la fuente, el perfil y las opciones coinciden. `Clean Up Every N Families` libera assets sin uso; `1` reduce la acumulación de memoria. El checkpoint se elimina al completar el lote.
 
 `Find and Clean Incomplete Outputs` elimina únicamente carpetas con la marca privada de construcción incompleta. Las familias terminadas y las carpetas manuales quedan fuera de esa limpieza.
@@ -325,6 +333,12 @@ Calibración de referencia para cinco niveles: curva base `0.30 / 0.18 / 0.10 / 
 La última frontera descarta el objeto si no existe un impostor posterior. Los tamaños se obtienen del `LODGroup` generado, no del nombre o categoría del modelo. Con `Normalize Scale`, las dimensiones de conversión incorporan la escala de la fuente. Cambiar la escala de una instancia después no recalibra el perfil.
 
 El perfil se aplica en conversiones nuevas y reconstrucciones que configuran el LODGroup; editarlo no actualiza las familias existentes ni sus overrides de escena. Al cambiar el número de niveles, completar ambas curvas. Los umbrales no modifican geometría, resolución voxel ni materiales y requieren revisión visual con la cámara de juego.
+
+`Family > Apply Profile LOD Transitions…` aplica el perfil vinculado a una familia de producción sin reconvertir ni reconstruir sus mallas. Para varias familias, seleccionar sus prefabs o un padre de escena y ejecutar `Voxel Bridge > Production > Apply Profile LOD Transitions` desde el menú contextual. Cada familia se procesa una sola vez, incluidos descendientes inactivos. No requiere leer sus VOX.
+
+La acción actualiza los porcentajes del prefab compartido y su manifiesto, conservando GUIDs, renderers, materiales, sombras, `Object Size`, punto de referencia y configuración de fade. Las instancias sin overrides de LOD heredan el cambio; los overrides manuales de escena se conservan. Las familias con impostor, perfiles incompatibles o el prefab abierto en Prefab Mode se rechazan sin regeneración automática.
+
+La confirmación advierte que esta operación de archivos no admite Undo. Antes de guardar, conserva prefab, manifiesto y sus `.meta` en `Logs/VoxelBridge/LODTransitionBackups/<id>`; Console indica la ubicación. Un fallo de escritura intenta restaurar ambos archivos. Para recuperar manualmente un estado, cerrar Prefab Mode y restaurar los archivos de esa copia en sus rutas originales, conservando sus `.meta`. En operaciones sobre varias familias, cancelar detiene las pendientes y conserva las actualizaciones completadas; no hay una transacción global del lote.
 
 Todos los prefabs generados utilizan `Fade Mode = None`, sin animación ni ancho de cross-fade.
 

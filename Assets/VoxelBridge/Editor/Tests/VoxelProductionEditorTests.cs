@@ -47,7 +47,7 @@ namespace LocalModels.VoxelBridge.Tests
 
         [Test]
         public void FamilyMenu_KeepsCopyRebuildAndManifestActions()
-            => Assert.That(VoxelProductionEditor.CreateFamilyMenu("", "").GetItemCount(), Is.EqualTo(4));
+            => Assert.That(VoxelProductionEditor.CreateFamilyMenu("", "").GetItemCount(), Is.EqualTo(5));
 
         [Test]
         public void CreateMenu_KeepsBothDerivationModesAndRemainingLevels()

@@ -52,6 +52,7 @@ El laboratorio dispone de vidrio voxel básico y un perfil físico de `0.03125 m
 ### 5. Representación, carga y presupuesto
 
 - Medir tiempos CPU/GPU, draws, memoria de mallas y texturas, y carga/descarga de subescenas con cámaras y plataforma objetivo representativas.
+- Recalibrar qué objetos pequeños dejan de proyectar sombras y desde qué LOD, considerando la unidad voxel base y los niveles vigentes. Comparar coste y estabilidad visual antes de adoptar los umbrales; mantener esta revisión en la fase de rendimiento.
 - Comparar LODs de malla, HLOD de malla e impostores únicamente donde procedan. Ajustar los grupos a visibilidad y streaming, no sólo a la jerarquía conceptual de la ciudad.
 - Definir exclusión visual entre originales y sustitutos, así como su residencia. El culling no descarga recursos y más niveles no garantizan menor memoria.
 - Adaptar el horneado semántico antes de evaluar impostores. Hornear atlas finales sólo para las zonas y familias aprobadas, con materiales suficientemente estables.

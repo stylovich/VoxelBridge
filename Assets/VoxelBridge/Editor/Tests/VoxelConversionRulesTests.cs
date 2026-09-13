@@ -113,6 +113,30 @@ namespace LocalModels.VoxelBridge.Tests
         private VoxelizationResult Voxelize() => MeshVoxelizer.Voxelize(root, new VoxelizationSettings
         { VoxelSize = .125f, Padding = 1, FillInterior = true, ConversionProfile = conversion });
 
+        [Test]
+        public void BatchTiming_WritesOneExclusiveReportForTwoFamilies()
+        {
+            Cube(Vector3.zero, body);
+            Cube(Vector3.right * 2, body);
+            string logs = Path.GetFullPath(Path.Combine(Application.dataPath, "../Logs/VoxelBridge"));
+            Directory.CreateDirectory(logs);
+            string[] before = Directory.GetFiles(logs, "ConversionTiming-*.json");
+            var batch = VoxelLodPipeline.GenerateAutomaticBatch(root, style, new VoxelLodBuildOptions
+            {
+                ExportFolder = folder, GenerateLod0Only = true, ConversionProfile = conversion,
+                ColorMode = VoxelColorMode.MaterialOnly, AlphaCutoff = .1f
+            }, batchOptions: new VoxelLodBatchOptions { EnableCheckpoint = false, ReusePrefabSources = false, CleanupInterval = 10 });
+            Assert.That(batch.FailedCount, Is.Zero);
+            Assert.That(batch.CreatedFamilyCount, Is.EqualTo(2));
+            var paths = Directory.GetFiles(logs, "ConversionTiming-*.json").Except(before).ToArray();
+            Assert.That(paths.Length, Is.EqualTo(1));
+            var report = JsonUtility.FromJson<VoxelConversionTiming.Report>(File.ReadAllText(paths[0]));
+            Assert.That(report.status, Is.EqualTo("completed"));
+            Assert.That(report.stages.Sum(s => s.milliseconds), Is.EqualTo(report.totalMilliseconds).Within(.001));
+            Assert.That(report.stages.Any(s => s.name == "Cleanup" && s.milliseconds > 0), Is.True);
+            Assert.That(report.stages.Any(s => s.name == "Mesh generation" && s.milliseconds > 0), Is.True);
+        }
+
         [TestCase(false, .02f, .06f)]
         [TestCase(true, .02f, .06f)]
         [TestCase(false, .06f, .02f)]

@@ -13,6 +13,7 @@ Voxel Bridge debe producir familias voxel físicamente coherentes y editables, i
 5. Preparar con VoxelCity una manzana piloto de geometría uniforme, detalle superficial separado y señalización en textura. Retomar las mediciones de rendimiento por LOD, sombras, transparencias, culling y streaming sobre esa distribución representativa.
 6. Evaluar LODs de malla adicionales y HLOD de malla antes de recurrir a impostores selectivos. Adaptar el horneado de impostores a las paletas semánticas antes de incluirlos en la comparación; no imponer un atlas por edificio.
 7. Implementar el análisis de visibilidad y presupuesto por zonas, apoyado en las mediciones anteriores.
+   Durante las pruebas de rendimiento, recalibrar la retirada de proyección de sombras por tamaño de objeto y nivel LOD con la unidad voxel base y la cantidad de niveles vigentes. Comparar coste y pérdida visual en props pequeños antes de modificar los umbrales o el primer nivel sin sombras; no deducir esa política únicamente del índice LOD.
 8. Crear y hornear únicamente los impostores aprobados por el plan de representación cuando la distribución del mapa y los materiales sean estables.
 
 La consolidación artística de las paletas puede continuar durante la validación funcional de DOTS. Las paletas y los materiales deben estabilizarse antes de producir atlas definitivos: un cambio de shader, paleta o material compartido puede requerir regenerarlos.
@@ -26,6 +27,7 @@ Voxel Bridge mantiene la responsabilidad sobre conversión, paletas, autoría, f
 - Primera referencia compartida: una manzana sencilla, seguida del prototipo de detalle del shader y Vek en textura; la generación procedural y la prueba 3×3 parten de esa referencia.
 - Importancia de detalles: evaluación con el preview y retoques de LOD existentes, sin añadir un atributo ni una herramienta específica de prioridad. La conservación automática de siluetas subvoxel no forma parte de esa garantía.
 - Transiciones geométricas: curva opcional de retención de detalle para pequeños y medianos, con retorno gradual a la curva de edificios grandes. Calibrar los porcentajes con assets representativos; el ajuste de umbrales no sustituye el control de la reducción ni implementa cross-fade.
+- Iteración y diagnóstico: reaplicación del perfil de transiciones sin reconstruir geometría e informes de tiempo por etapa para conversión individual y batch. Priorizar optimizaciones con mediciones representativas; el paralelismo y la reutilización de preparación entre LODs requieren evaluación posterior.
 
 ### Estado por bloque
 

@@ -18,6 +18,7 @@ namespace LocalModels.VoxelBridge
         public float AlphaCutoff = 0.1f;
         public VoxelConversionProfile ConversionProfile;
         public Vector3 RootScale = Vector3.one;
+        public VoxelConversionTiming Timing;
     }
 
     internal sealed class VoxelizationResult
@@ -48,6 +49,7 @@ namespace LocalModels.VoxelBridge
             VoxelizationSettings settings,
             Func<float, string, bool> cancelProgress = null)
         {
+            using var preparationTiming = settings.Timing?.Measure("Preparation and resource extraction");
             if (source == null) throw new ArgumentNullException(nameof(source));
             settings.Padding = Mathf.Clamp(settings.Padding, 0, 8);
             bool physicalSizeMode = settings.VoxelSize > 0f;
@@ -106,6 +108,7 @@ namespace LocalModels.VoxelBridge
                         triangleTotal += meshSource.Triangles[submesh].Length / 3;
 
                 int triangleDone = 0;
+                using (settings.Timing?.Measure("Voxelization and material sampling"))
                 using (var samplers = new MaterialSamplerCache(settings))
                 {
                     foreach (MeshSource meshSource in sources)
@@ -154,6 +157,7 @@ namespace LocalModels.VoxelBridge
 
                 if (settings.FillInterior)
                 {
+                    using var fillTiming = settings.Timing?.Measure("Interior fill");
                     if (grid.Occupied.LongLength >= 8_000_000)
                         GC.Collect();
                     if (cancelProgress != null && cancelProgress(0.94f, "Filling interior"))

@@ -14,7 +14,7 @@ namespace LocalModels.VoxelBridge
         private static readonly GUIContent VoxContent = new("VOX", "Abrir el VOX de este LOD en MagicaVoxel.");
         private static readonly GUIContent RebuildContent = new("Rebuild", "Reconstruir sólo la malla de este LOD desde su VOX guardado. No regenera la fuente.");
         private static readonly GUIContent MoreContent = new("⋯", "Más acciones de este LOD: fuente, bindings, informe y regeneración.");
-        private static readonly GUIContent FamilyContent = new("Family ▾", "Duplicar la familia, reconstruir todas las mallas o seleccionar el manifiesto.");
+        private static readonly GUIContent FamilyContent = new("Family ▾", "Duplicar, actualizar transiciones de LOD sin reconstruir mallas, reconstruir o seleccionar el manifiesto.");
         private static readonly GUIContent HelpContent = new("?", "Mostrar u ocultar la ayuda del flujo de producción.");
         private const string FamilyHelp = "Edit abre Surface Painter; VOX abre MagicaVoxel. Rebuild lee el VOX guardado sin regenerarlo. Create LOD crea niveles nuevos; Regenerate reemplaza un nivel y descarta sus retoques, con confirmación. Los descendientes existentes no se sobrescriben automáticamente.";
 
@@ -152,6 +152,9 @@ namespace LocalModels.VoxelBridge
             if (EditorApplication.isPlayingOrWillChangePlaymode) menu.AddDisabledItem(duplicate);
             else menu.AddItem(duplicate, false, () => Duplicate(prefabPath));
             menu.AddItem(new GUIContent("Rebuild All Meshes"), false, () => Run(() => VoxelProductionFamily.RebuildAll(manifestPath, Progress)));
+            var transitions = new GUIContent("Apply Profile LOD Transitions…", "Actualiza sólo porcentajes del prefab y manifiesto. Conserva mallas, materiales, sombras, bounds y overrides de escena.");
+            if (EditorApplication.isPlayingOrWillChangePlaymode) menu.AddDisabledItem(transitions);
+            else menu.AddItem(transitions, false, () => ApplyTransitions(new[] { manifestPath }));
             menu.AddSeparator("");
             menu.AddItem(new GUIContent("Select Manifest"), false, () => Run(() => Selection.activeObject = AssetDatabase.LoadMainAssetAtPath(manifestPath)));
             return menu;
@@ -175,6 +178,55 @@ namespace LocalModels.VoxelBridge
         {
             if (EditorUtility.DisplayDialog("Regenerate LOD", $"Se reemplazará el .vox de LOD{level} desde LOD{level - 1}. Sus ediciones manuales se perderán. Los niveles posteriores se conservan y pueden quedar pendientes de revisión. Esta operación no admite Undo.", "Replace", "Cancel"))
                 Run(() => VoxelProductionFamily.DeriveLevel(path, level, mode, true, Progress));
+        }
+
+        [MenuItem("Assets/Voxel Bridge/Production/Apply Profile LOD Transitions", false, 2124)]
+        [MenuItem("GameObject/Voxel Bridge/Production/Apply Profile LOD Transitions", false, 58)]
+        private static void ApplySelectedTransitions() => ApplyTransitions(SelectedTransitionFamilies());
+
+        [MenuItem("Assets/Voxel Bridge/Production/Apply Profile LOD Transitions", true)]
+        [MenuItem("GameObject/Voxel Bridge/Production/Apply Profile LOD Transitions", true)]
+        private static bool ValidateTransitions() => !EditorApplication.isPlayingOrWillChangePlaymode && SelectedTransitionFamilies().Count > 0;
+
+        private static HashSet<string> SelectedTransitionFamilies()
+        {
+            var paths = new HashSet<string>();
+            foreach (var selected in Selection.gameObjects)
+            foreach (var group in selected.GetComponentsInChildren<LODGroup>(true))
+            {
+                string path = VoxelProductionLink.PrefabPath(group.gameObject);
+                if (!VoxelProductionLink.HasLink(path)) continue;
+                try
+                {
+                    string manifest = AssetDatabase.GUIDToAssetPath(VoxelProductionLink.Load(path).manifestGuid);
+                    if (!string.IsNullOrEmpty(manifest)) paths.Add(manifest);
+                }
+                catch (Exception) { /* Unrelated/broken links are not eligible for this menu. */ }
+            }
+            return paths;
+        }
+
+        private static void ApplyTransitions(IEnumerable<string> manifestPaths)
+        {
+            var paths = new List<string>(manifestPaths);
+            if (!EditorUtility.DisplayDialog("Apply Profile LOD Transitions",
+                $"Se actualizarán {paths.Count} prefab(s) de familia y sus manifiestos. Afecta a todas sus instancias sin overrides propios de LOD. No cambia VOX, mallas, materiales, sombras ni transiciones manuales de escena.\n\nGuarda una copia de seguridad en Logs/VoxelBridge. Esta operación sobre archivos no admite Undo. Las familias con impostor no se modifican.", "Apply", "Cancel")) return;
+            Run(() =>
+            {
+                int updated = 0, failed = 0;
+                try
+                {
+                    for (int i = 0; i < paths.Count; i++)
+                    {
+                        if (EditorUtility.DisplayCancelableProgressBar("LOD transitions", paths[i], (float)i / paths.Count)) break;
+                        try { string backup = VoxelLodTransitionUpdater.Apply(paths[i]); updated++; Debug.Log("LOD transitions updated: " + paths[i] + "\nBackup: " + backup); }
+                        catch (Exception e) { failed++; Debug.LogWarning("LOD transition update failed: " + paths[i] + "\n" + e.Message); }
+                    }
+                }
+                finally { EditorUtility.ClearProgressBar(); }
+                Debug.Log($"LOD transitions: {updated} updated, {failed} failed, {paths.Count - updated - failed} unprocessed. Scene overrides are retained.");
+                SceneView.RepaintAll();
+            });
         }
 
         [MenuItem("Assets/Voxel Bridge/Production/Open in MagicaVoxel", false, 2120)]

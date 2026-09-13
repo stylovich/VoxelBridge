@@ -91,7 +91,7 @@ namespace LocalModels.VoxelBridge
 
         // The caller owns the incomplete family transaction and removes it if any level fails.
         internal static string BuildConvertedFamily(string manifestPath, VoxelStyleProfile profile,
-            Action<float> progress = null)
+            Action<float> progress = null, VoxelConversionTiming timing = null)
         {
             ValidateProfile(profile);
             if (!VoxelLodPipeline.TryReadManifest(manifestPath, out var manifest) || manifest.productionMeshes ||
@@ -110,7 +110,7 @@ namespace LocalModels.VoxelBridge
             {
                 int level = i;
                 progress?.Invoke((float)level / manifest.lods.Length);
-                RebuildLevel(manifestPath, level, value => progress?.Invoke((level + value) / manifest.lods.Length));
+                RebuildLevel(manifestPath, level, value => progress?.Invoke((level + value) / manifest.lods.Length), timing);
             }
             manifest = Load(manifestPath);
             var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(manifest.prefabAssetPath);
@@ -257,8 +257,9 @@ namespace LocalModels.VoxelBridge
             for (int i = 0; i < manifest.lods.Length; i++) RebuildLevel(manifestPath, i, progress);
         }
 
-        internal static void RebuildLevel(string manifestPath, int level, Action<float> progress = null)
+        internal static void RebuildLevel(string manifestPath, int level, Action<float> progress = null, VoxelConversionTiming timing = null)
         {
+            using var ioTiming = timing?.Measure("VOX read and asset/prefab I/O");
             var manifest = Load(manifestPath);
             var profile = Profile(manifest);
             if (level < 0 || level >= manifest.lods.Length) throw new ArgumentOutOfRangeException(nameof(level));
@@ -271,7 +272,9 @@ namespace LocalModels.VoxelBridge
             if (metadata.semantic.colorPaletteGuid != first.semantic.colorPaletteGuid ||
                 metadata.semantic.surfacePaletteGuid != first.semantic.surfacePaletteGuid)
                 throw new InvalidDataException("All levels must use the same global palette pair.");
-            Mesh[] generated = VoxelSemanticMesher.BuildChunks(grid, manifest.chunkCellSize, metadata.hideInternalCavities, progress, surfaces);
+            Mesh[] generated;
+            using (timing?.Measure("Mesh generation"))
+                generated = VoxelSemanticMesher.BuildChunks(grid, manifest.chunkCellSize, metadata.hideInternalCavities, progress, surfaces);
             var oldMeshes = new Dictionary<string, Mesh>();
             var backups = new Dictionary<Mesh, Mesh>();
             var created = new List<string>();
