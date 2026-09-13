@@ -37,6 +37,7 @@ El laboratorio dispone de vidrio voxel básico y un perfil físico de `0.03125 m
 ### 3. Acabado superficial y señalización
 
 - Comparar ausencia de rejilla con normal, rugosidad y AO; evaluar microbisel después. Comprobar estabilidad temporal y continuidad entre chunks, LODs y transformaciones.
+- Evaluar posteriormente [relieve voxel POM/SPOM](../../../Assets/VoxelBridge/ROADMAP.md#relieve-voxel-pomspom--evaluación-futura) como acabado cercano sutil sobre el mundo voxel, con atenuación a distancia y sin requerir ray tracing. El asset CSPOM es un candidato, no una dependencia de producción aprobada; conservar la manzana piloto como prioridad.
 - Integrar [Vek](Vek_v1/LEEME.txt) mediante rasterización controlada de SVG y un atlas compartido sobre una pantalla y una pared. Conservar JSON y SVG como fuentes; probar legibilidad, escala, desgaste y emisión.
 - Separar las imágenes del volumen voxel. No introducir un material por símbolo ni ampliar el mesher híbrido antes de evaluar esta ruta.
 
@@ -55,4 +56,4 @@ El laboratorio dispone de vidrio voxel básico y un perfil físico de `0.03125 m
 
 ## Límites de esta etapa
 
-El generador urbano, el congelado procedural, el shader de rejilla, la integración de Vek y el sistema HLOD son trabajo pendiente. No requieren implementar un volumen voxel adaptativo para toda la ciudad ni un sistema universal de capas de materiales. La suavización espacial de la preasignación PBR, el mesher híbrido y los comportamientos avanzados de vidrio permanecen sujetos a casos reales y evaluación posterior.
+El generador urbano, el congelado procedural, la integración de Vek y el sistema HLOD son trabajo pendiente. La rejilla dispone de un [prototipo estático aislado](../../../Assets/VoxelBridge/ART_DIRECTION_AND_DETAIL.md#prototipo-estático-de-rejilla), sujeto a validación artística, temporal y de rendimiento antes de integrarlo en producción. No se requiere implementar un volumen voxel adaptativo para toda la ciudad ni un sistema universal de capas de materiales. La suavización espacial de la preasignación PBR, el mesher híbrido y los comportamientos avanzados de vidrio permanecen sujetos a casos reales y evaluación posterior.

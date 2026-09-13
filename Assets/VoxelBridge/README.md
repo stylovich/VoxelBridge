@@ -35,7 +35,7 @@ El [enfoque de geometría limpia y detalle superficial](ART_DIRECTION_AND_DETAIL
 
 ## Edición visual de superficies
 
-1. Seleccionar un prefab de producción y pulsar `Edit Surfaces` en la fila del LOD correspondiente, o abrir `Tools > Voxel Bridge > Surface Painter`, arrastrar el prefab padre desde Project a `Source` y elegir un nivel en `Edit LOD`. El menú muestra los niveles existentes, no genera otros. LOD0 es el punto de partida recomendado. También se puede asignar un `.vox` con sidecar semántico v4 para editar sólo la fuente.
+1. Seleccionar un prefab de producción y pulsar `Edit` en la fila del LOD correspondiente (`Edit Surfaces` en una salida independiente), o abrir `Tools > Voxel Bridge > Surface Painter`, arrastrar el prefab padre desde Project a `Source` y elegir un nivel en `Edit LOD`. El menú muestra los niveles existentes, no genera otros. LOD0 es el punto de partida recomendado. También se puede asignar un `.vox` con sidecar semántico v4 para editar sólo la fuente.
 2. Comprobar que las LUT estén actualizadas. La previsualización utiliza mallas y materiales temporales; no modifica las instancias de la escena. Las piezas `Keep Original`, incluido el vidrio retenido, quedan fuera de esta vista.
 3. Elegir `Brush` o `Rectangle` en la barra de herramientas y marcar voxels con clic izquierdo o arrastre. `Replace` sustituye la selección, `Add` acumula celdas y `Subtract` las quita; mantener `Shift` al iniciar el gesto activa sustracción temporal. `Size` controla el diámetro de pantalla entre 1 y 128 píxeles de interfaz. `Alt` + arrastre o botón derecho rota la vista; botón central o `Alt+Shift` + arrastre izquierdo desplaza la cámara. La rueda permite acercarse a escala de celda. `Frame All` encuadra el volumen y `Frame Selection` centra la órbita en la selección.
 4. Elegir `Surface` y pulsar `Apply Surface` para conservar ColorID, o elegir `Color` y pulsar `Apply Color` para conservar SurfaceID. La asignación afecta al voxel completo, no sólo a la cara señalada. Ambas operaciones conservan ocupación, escala y pivote.
@@ -98,6 +98,12 @@ La superficie recomendada `044 · Glass` utiliza `Render Class = Glass (Transpar
 
 Glass utiliza la geometría fuente sin descartarla mediante `Alpha Cutoff`; la opacidad procede de la paleta. No reproduce recortes o variaciones de alpha de una textura. Para conservar esos efectos, utilizar `Keep Original`. Las superficies no transparentes mantienen el recorte por alpha.
 
+Si una misma celda intersecta geometría opaca y vidrio, la conversión conserva la muestra opaca válida para evitar conexiones artificiales a través de marcos o paredes. Una muestra descartada por `Alpha Cutoff` no bloquea el vidrio. Entre muestras de la misma clase se mantiene la más cercana al centro de la celda. Esta política puede engrosar bordes o eliminar vidrio subvoxel; aumentar la resolución o utilizar `Keep Original` cuando sea necesario conservar ese detalle.
+
+Durante la conversión, `Fill Interior` permite atravesar las superficies de clase Glass al identificar los espacios conectados con el exterior. Las ventanas conservan sus voxels y los huecos visibles a través de ellas permanecen vacíos; las piezas opacas cerradas mantienen su relleno. La decisión depende de la clase de superficie, no del valor de opacidad. No abre cabinas selladas completamente por voxels opacos ni recupera huecos que la resolución haya eliminado.
+
+Para eliminar un relleno incorrecto ya guardado, reconvertir desde el modelo fuente con las reglas de vidrio correspondientes. `Rebuild` reconstruye el volumen existente y no elimina ese relleno; pintar Glass sobre una fuente rellena tampoco lo elimina.
+
 `Opacity` y smoothness se editan en la paleta y se transportan mediante su LUT. Cambiar `Render Class` requiere reconstruir las mallas afectadas; los descendientes pintados siguen requiriendo regeneración explícita para heredar cambios de IDs. El vidrio añade un segundo material compartido por pareja de paletas sólo donde existe geometría transparente. No incluye refracción, sombras transparentes, absorción por espesor ni ordenación por triángulo. Capas transparentes solapadas, interiores y detalles finos reducidos requieren revisión artística.
 
 ### Vistas de diagnóstico y aislamiento
@@ -119,7 +125,7 @@ El aislamiento utiliza una rejilla temporal con los mismos índices que la fuent
 
 ### Guardado y límites
 
-`Save & Rebuild` requiere vincular un prefab de producción mediante `Edit Surfaces` o arrastrándolo a `Source` y eligiendo su LOD. Cargar un `.vox` directamente deja la sesión sin prefab vinculado y deshabilita ese botón; `Source Actions > Save Source Only` permite guardar la fuente sin reconstruir. La ausencia de cambios pendientes no bloquea la reconstrucción de una fuente vinculada.
+`Save & Rebuild` requiere vincular un prefab de producción mediante `Edit`/`Edit Surfaces` o arrastrándolo a `Source` y eligiendo su LOD. Cargar un `.vox` directamente deja la sesión sin prefab vinculado y deshabilita ese botón; `Source Actions > Save Source Only` permite guardar la fuente sin reconstruir. La ausencia de cambios pendientes no bloquea la reconstrucción de una fuente vinculada.
 
 Cerrar el menú `Edit LOD` sin elegir conserva la sesión actual. Elegir otra fuente con cambios pendientes solicita guardar, descartar o cancelar. Vincular un prefab a la misma fuente conserva el borrador, la selección y el historial. Los niveles con fuentes ausentes permanecen deshabilitados; los prefabs sin vínculo de producción o con vínculos copiados se rechazan sin sustituir la sesión. Los assets se resuelven por GUID, no por nombres de archivo.
 
@@ -180,6 +186,18 @@ Un error o cancelación elimina solamente la nueva carpeta incompleta. Las fuent
 
 Cada LOD automático se voxeliza desde la malla fuente. Con multiplicadores `1, 2, 4`, las celdas utilizan `base`, `base × 2` y `base × 4`. Todas las rejillas comparten la alineación física.
 
+Para volver a calcular la ocupación desde los triángulos originales, realizar una nueva conversión. `Rebuild` utiliza los voxels guardados: no recupera geometría omitida durante la conversión ni vuelve a muestrear materiales. Conservar una copia de los retoques antes de reemplazar una familia.
+
+### Escala y variantes de origen
+
+`Normalize Scale`, activado por defecto en la ventana, incorpora la escala mundial de la fuente a la geometría antes del análisis de memoria y la voxelización. Los prefabs y las instancias colocadas utilizan escala `(1,1,1)`, conservando posición, orientación y dimensiones mundiales dentro de la precisión de voxelización. El tamaño de celda del perfil representa metros efectivos, no una medida multiplicada después por el Transform.
+
+La colocación conserva un padre sin escala cuando existe; si la jerarquía aplica escala, utiliza el primer ancestro compatible o la raíz de la escena. No aplica snapping de posición en este modo. Se admiten escalas positivas uniformes o no uniformes sin cizallamiento; las reflexiones, escalas nulas y jerarquías con cizallamiento requieren aplicar los transforms en la fuente antes de convertir. El resultado no mantiene la dependencia de una escala animada del padre.
+
+En lotes, una instancia cuya escala mundial difiera de la del prefab fuente utiliza una familia independiente. `Use Source Prefab` sigue descartando los overrides visuales, pero la escala incorporada corresponde a la instancia. Las piezas `Keep Original` reciben la misma transformación que los voxels. El manifiesto registra `normalizedScale` y `bakedRootScale`; las familias antiguas conservan su contrato anterior y requieren una conversión nueva para normalizarse. `Rebuild` no incorpora la escala de sus instancias.
+
+`Ignore Inactive (Single)` excluye hijos desactivados de la conversión individual y está activado por defecto. Los lotes conservan su opción `Ignore Inactive Objects`. Para personajes modulares, seleccionar una jerarquía que contenga sólo la variante deseada y los huesos necesarios. Las mallas animadas se capturan como geometría estática en su pose actual; la conversión no exporta rig ni animaciones.
+
 ### Ejes de origen
 
 Configurar `Source Axes` en el `Conversion Profile` antes de convertir:
@@ -207,7 +225,7 @@ Crear `Assets > Create > Voxel Bridge > Conversion Profile` y asignarlo en `Conv
 
 Las reglas de componentes aplicadas a instancias de prefabs se consideran overrides. Para utilizarlas sin modificar el prefab fuente, seleccionar `Modified Instances > Convert Instance Separately` en lotes. La opción de utilizar el prefab original descarta esos overrides de forma intencional.
 
-Los `.vox` generados con perfil contienen vinculaciones semánticas. La carpeta de la familia contiene sus fuentes, manifiesto, mallas de chunks y un único prefab LOD final, sin otro prefab de previsualización. El Inspector del prefab ofrece `Open in MagicaVoxel`, `Semantic Bindings` y `Rebuild` para cada nivel. Sin perfil, la conversión conserva el flujo RGB y permite reglas de componentes `Ignore` y `Keep Original`, pero no SurfaceID explícitos.
+Los `.vox` generados con perfil contienen vinculaciones semánticas. La carpeta de la familia contiene sus fuentes, manifiesto, mallas de chunks y un único prefab LOD final, sin otro prefab de previsualización. El Inspector del prefab ofrece `VOX` para abrir MagicaVoxel, `Rebuild` y `⋯ > Semantic Bindings` para cada nivel. Sin perfil, la conversión conserva el flujo RGB y permite reglas de componentes `Ignore` y `Keep Original`, pero no SurfaceID explícitos.
 
 Las ventanas requieren un objeto o submesh identificable. Excluirlas antes del relleno permite conservar el interior si la resolución mantiene una abertura real. La geometría retenida se almacena como `RetainedGeometry.prefab` y meshes en la carpeta de la familia; el sidecar y el manifiesto conservan su GUID. Cada LOD utiliza esa geometría sin simplificar y participa en su transición y descarte. No se copian scripts, colisiones ni animaciones; un renderer skinned se conserva en su pose horneada. Reconvertir la fuente para actualizar la selección de piezas retenidas.
 
@@ -241,7 +259,7 @@ La herramienta intenta la menor unidad permitida que satisface los límites. Si 
 - `Ignore Inactive Objects` excluye objetos desactivados y geometría desactivada dentro de cada fuente.
 - `Reuse Source Prefab` comparte una conversión entre instancias equivalentes del mismo prefab. Las variantes se consideran fuentes distintas.
 - `Modified Instances` permite utilizar el prefab original, convertir la jerarquía modificada como fuente independiente o ignorarla. Ninguna opción modifica el prefab fuente.
-- Los cambios de transform del root se recuperan durante la colocación y no provocan por sí solos otra voxelización.
+- Con `Normalize Scale`, la escala mundial forma parte de la conversión y puede separar familias reutilizadas. Sin esta opción, los transforms del root se recuperan durante la colocación y no provocan por sí solos otra voxelización.
 - El plan visible distingue conversiones, reutilizaciones y omisiones antes de comenzar.
 
 `Analyze Batch Memory` muestra las fuentes únicas y su estimación. Los fallos individuales se registran y el lote continúa con las fuentes restantes.
@@ -263,6 +281,10 @@ Cada familia se almacena en `Assets/VoxelBridgeExports/<Model>_VoxelLOD/` e incl
 
 El archivo `.vox` sigue siendo editable aunque Unity muestre el icono de GameObject generado por Voxel Importer.
 
+El Inspector de una familia semántica muestra una fila por LOD con su tamaño físico y las acciones `Edit` (Surface Painter), `VOX` (MagicaVoxel) y `Rebuild`. El menú `⋯` de cada fila contiene `Select Source VOX`, `Semantic Bindings`, el informe de conversión y, para los descendientes, `Regenerate > Duplicate Previous…` y `Regenerate > Reduce Previous…`. La regeneración conserva su confirmación de pérdida de retoques.
+
+`Family ▾` agrupa `Duplicate Editable Family`, `Rebuild All Meshes` y `Select Manifest`. `Create LOD N ▾` ofrece duplicar, reducir o generar los niveles restantes cuando el perfil lo permite. `?` despliega la ayuda; el encabezado permite plegar la lista. Los avisos de origen cambiado y malla pendiente se agrupan por nivel y permanecen visibles con el panel plegado. El estado de presentación se conserva por familia durante la sesión del Editor, sin modificar los prefabs.
+
 `Edit Family LODs` abre la lista de niveles desde el prefab, un `.vox`, el manifiesto o un GameObject de la familia. Cada nivel permite seleccionar su archivo, abrirlo en MagicaVoxel y utilizarlo como padre del siguiente LOD. El menú contextual `Edit This LOD in MagicaVoxel` abre directamente el nivel seleccionado en la jerarquía.
 
 El modo manual ofrece dos operaciones:
@@ -274,7 +296,7 @@ En un volumen semántico, la reducción prioriza el par `ColorID + SurfaceID` co
 
 Cada voxel reducido conserva un único par existente del bloque fuente. `Default` sigue siendo una superficie válida y los emisivos no reciben prioridad incondicional: una región pequeña o dos acabados que comparten una celda gruesa pueden requerir retoques. La ocupación, la alineación y el tamaño de la rejilla no dependen de esta selección de acabados; conservar más límites semánticos puede aumentar el número de triángulos frente a la mayoría por volumen. La ruta RGB conserva su promedio de color.
 
-La regla se aplica al crear niveles por reducción o al confirmar `Regenerate: Reduce`. `Rebuild` sólo reconstruye las mallas del VOX guardado, sin transferir nuevamente acabados desde el padre. Los LODs existentes no se regeneran automáticamente al actualizar el reductor; conservar una copia antes de reemplazar retoques manuales.
+La regla se aplica al crear niveles por reducción o al confirmar `⋯ > Regenerate > Reduce Previous…`. `Rebuild` sólo reconstruye las mallas del VOX guardado, sin transferir nuevamente acabados desde el padre. Los LODs existentes no se regeneran automáticamente al actualizar el reductor; conservar una copia antes de reemplazar retoques manuales.
 
 `Rebuild Prefab from Manifest` reconstruye la familia y resincroniza sus imports. Conserva la ruta registrada y el GUID del prefab, incluso si se ha reubicado. Un perfil o manifiesto requerido que falta produce un error; la herramienta no inventa transiciones ni sustituye la familia silenciosamente.
 

@@ -37,7 +37,7 @@ Voxel Bridge mantiene la responsabilidad sobre conversión, paletas, autoría, f
 | Autoría visual de superficies | Disponible: selección espacial y semántica, edición independiente de ColorID/SurfaceID, diagnóstico, aislamiento, comparación temporal de acabados y reducción al siguiente LOD, Undo/Redo y guardado recuperable. Pendiente: validación artística, rejilla local de reducción y certificación del intercambio externo de RGB duplicados. |
 | Intercambio de RGB duplicados | Pendiente de certificar en MagicaVoxel; la escritura y lectura controladas por Voxel Bridge conservan los pares. |
 | Preasignación PBR | Disponible y opcional para HDRP/Lit Standard: candidatos por perfil, muestreo de constantes o Mask Map UV0, distancia y separación mínimas, fallback e informe por LOD. Pendientes: validación artística, calidad espacial de la clasificación y ampliación de shaders/configuraciones según casos reales. |
-| Geometría limpia y detalle separado | Próximo prototipo visual sobre la manzana piloto: regiones uniformes, rejilla de escala física fija y anuncios sobre quads separados. Implementación y mediciones pendientes. |
+| Geometría limpia y detalle separado | Prototipo aislado de rejilla estática con normales, rugosidad y atenuación sobre pared y acera. Pendientes: validación artística y temporal, anclaje dinámico, anuncios sobre quads y mediciones. |
 | Meshing híbrido | Fase posterior: evaluar caras coplanares con texturas de ColorID/SurfaceID para modelos cuyo detalle por voxel deba conservarse, después de evaluar la autoría con detalle superficial separado. |
 | Impostores semánticos | Horneado bloqueado hasta adaptar la captura a las LUT y los canales de IDs. La ruta RGB existente no demuestra compatibilidad semántica. |
 | Rendimiento, HLOD y presupuesto | Fase diferida hasta disponer de una distribución representativa. Evaluar LODs adicionales y HLOD de malla antes de impostores selectivos, midiendo memoria y renderizado. |
@@ -48,7 +48,7 @@ Voxel Bridge mantiene la responsabilidad sobre conversión, paletas, autoría, f
 
 `Surface Painter` es una extensión de Editor para asignar colores y superficies sobre una fuente semántica existente. No sustituye a MagicaVoxel para modelado ni a `Semantic Bindings` para asignaciones de slots completos. El [procedimiento de uso](README.md#edición-visual-de-superficies) detalla las operaciones disponibles y sus límites. No requiere paquetes nuevos ni cambios en el shader de producción.
 
-- Entrada desde el Inspector del prefab de producción mediante `Edit Surfaces`, o arrastrando el prefab padre desde Project al campo `Source` y eligiendo un nivel en `Edit LOD`. Ambas entradas conservan el vínculo de reconstrucción. LOD0 es la entrada recomendada; seleccionar otro nivel requiere una elección explícita.
+- Entrada desde el Inspector del prefab de producción mediante `Edit` en una fila de LOD (`Edit Surfaces` en una salida independiente), o arrastrando el prefab padre desde Project al campo `Source` y eligiendo un nivel en `Edit LOD`. Ambas entradas conservan el vínculo de reconstrucción. LOD0 es la entrada recomendada; seleccionar otro nivel requiere una elección explícita.
 - Una sola fuente por sesión, identificada por GUID y fijada aunque cambie la selección de la escena. Los prefabs combinados se editan sobre su propia fuente, no sobre los modelos utilizados para construirlos.
 - Vista aislada del volumen con órbita, desplazamiento, zoom hasta escala de celda, encuadre del volumen o selección, pincel de tamaño ajustable y rectángulo. Selección visible con reemplazo, adición y sustracción; cálculo por tandas, vista provisional y cancelación sin alterar la selección anterior.
 - Selector de `SurfaceID` con ID, nombre y propiedades PBR de referencia. `Apply Surface` modifica únicamente la superficie de las celdas seleccionadas; no edita la definición global, el ColorID, la ocupación, la escala ni el pivote.
@@ -129,7 +129,9 @@ La representación HDR con bloom y una comparación visual antes/después pueden
 
 ## Vidrio voxel básico
 
-Disponible: preset Glass, opacidad en la paleta, shader HDRP transparente, separación de submeshes y conservación de caras opacas visibles a través del cristal. La asignación utiliza las reglas existentes por GameObject o material, o el Surface Painter. `Keep Original` permanece como alternativa independiente; no requiere el shader voxel. Los usos y límites se describen en [Vidrio voxel básico](README.md#vidrio-voxel-básico).
+Disponible: preset Glass, opacidad en la paleta, shader HDRP transparente, separación de submeshes y conservación de caras opacas visibles a través del cristal. El relleno de conversión respeta los espacios conectados al exterior a través de vidrio, sin eliminar las ventanas ni el relleno de piezas opacas cerradas. La asignación utiliza las reglas existentes por GameObject o material, o el Surface Painter. `Keep Original` permanece como alternativa independiente; no requiere el shader voxel. Los usos y límites se describen en [Vidrio voxel básico](README.md#vidrio-voxel-básico).
+
+Las celdas de conversión compartidas por vidrio y geometría opaca válida priorizan el opaco para conservar barreras. Los bordes transparentes subvoxel requieren revisión de resolución o uso de `Keep Original`; no se incorpora una segunda superficie por celda.
 
 Pendientes para la revisión de shaders: refracción, absorción por espesor, sombras transparentes, capas solapadas y estrategias de ordenación. Ampliar las comprobaciones en subescenas y plataformas objetivo antes de certificar esos casos; no extrapolar el render en Editor a un presupuesto de producción. La rejilla local del preview de reducción permanece diferida.
 
@@ -317,6 +319,26 @@ Priorizar como decisión de autoría zonas planas con ColorID y SurfaceID unifor
 Separar anuncios e imágenes complejas de sus marcos, paredes y soportes: utilizar un quad con textura convencional para el gráfico y geometría voxel simplificada para la estructura. Mantener materiales compartidos cuando sea viable, sin imponer un material por cartel. Esta propuesta no convierte automáticamente modelos existentes ni modifica la identidad semántica del VOX.
 
 El [plan de geometría y detalle](ART_DIRECTION_AND_DETAIL.md) define el alcance, los recursos editables y los criterios de comparación. Prototipar esta alternativa después de la validación de autoría y MagicaVoxel, antes de ampliar el mesher híbrido. No considerar demostrado un beneficio de rendimiento hasta medir el coste conjunto de geometría, shaders, texturas y draws.
+
+## Normalización de escala en la conversión
+
+La conversión nueva dispone de `Normalize Scale`: escala mundial incorporada antes de voxelizar, análisis de memoria coherente y colocación a escala unitaria. Las familias existentes no se migran automáticamente. La conversión individual permite excluir variantes inactivas; los personajes se capturan como mallas estáticas, sin exportación de animación. Consultar [escala y variantes de origen](README.md#escala-y-variantes-de-origen).
+
+## Relieve voxel POM/SPOM — evaluación futura
+
+Evaluar POM y recorte de silueta como acabado cercano opcional sobre la geometría voxel existente, no como sustituto del volumen, las colisiones o los LODs. Mantener la rejilla física de `0.03125 m`, el anclaje mundial para arquitectura estática y el anclaje local para objetos dinámicos. Utilizar juntas estrechas, alturas pequeñas y regiones de descanso visual; atenuar el relieve a distancia sin agrandar las celdas. La plataforma de referencia del juego utiliza rasterización, sin requerir ray tracing.
+
+El asset candidato `Assets/Frostzone/CSPOM` incluye documentación, subgrafos separados de POM y silueta, un modo curvo opcional y un ejemplo plano. La elección entre reutilizar sus subgrafos, adaptarlos o desarrollar una implementación propia permanece abierta; la compatibilidad de producción y el rendimiento requieren pruebas.
+
+Condiciones de integración:
+
+- Preservar ColorID/SurfaceID, LUT y materiales compartidos. Proporcionar coordenadas de relieve independientes: UV0 contiene ColorID en las mallas semánticas, no UV convencionales.
+- Configurar y verificar DOTS Instancing en Entities Graphics; el Shader Graph del candidato lo tiene desactivado.
+- Distinguir reducción de pasos de muestreo de desvanecimiento de altura. Incorporar una salida económica a distancia, no sólo una reducción de calidad.
+- Evaluar el recorte de silueta por separado: sus límites UV no deben abrir juntas entre caras o chunks.
+- Comparar una pared opaca sin relieve, con normales, con POM y con SPOM. Comprobar ángulos rasantes, sombras rasterizadas, profundidad, estabilidad temporal y transiciones de LOD; medir tiempo GPU y memoria. Mantener vidrio y emisivos fuera del primer ensayo.
+
+El ahorro geométrico por almacenar atributos en texturas pertenece al meshing híbrido; POM/SPOM añade coste de sombreado y no demuestra por sí mismo una optimización. Este ensayo no bloquea la preparación de la manzana piloto ni implica regenerar assets existentes.
 
 ## Meshing híbrido con texturas de IDs — fase posterior
 

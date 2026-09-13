@@ -2,7 +2,7 @@
 
 ## Estado y objetivo
 
-Enfoque de diseño para validar el acabado visual sobre una manzana piloto antes de ampliar las optimizaciones. El detalle procedural del shader y la gestión específica de anuncios descritos aquí no están implementados ni cuentan con mediciones de rendimiento. No requieren sustituir el flujo de autoría actual. La dirección del mundo y sus prioridades se describen en la [hoja de ruta de VoxelCity](../../Docs/WorldDesign/VoxelCity/ROADMAP.md).
+Enfoque de diseño para validar el acabado visual sobre una manzana piloto antes de ampliar las optimizaciones. Existe un prototipo aislado de rejilla superficial estática; la gestión específica de anuncios y las mediciones de rendimiento permanecen pendientes. No requiere sustituir el flujo de autoría actual. La dirección del mundo y sus prioridades se describen en la [hoja de ruta de VoxelCity](../../Docs/WorldDesign/VoxelCity/ROADMAP.md).
 
 Priorizar modelos con zonas amplias de ColorID y SurfaceID uniformes, reservando la geometría voxel para volumen, silueta, huecos y relieves intencionales. El detalle puramente superficial puede proceder del shader o de una imagen separada, en lugar de fragmentar las caras del modelo mediante pintura por voxel.
 
@@ -31,6 +31,33 @@ Esta distribución es una decisión de autoría, no una conversión automática 
 Para VoxelCity, la unidad objetivo del perfil es `0.03125 m`; no imponerla a otras bibliotecas ni reinterpretar los metadatos de modelos existentes. Preparar el perfil y regenerar explícitamente los modelos de la prueba urbana.
 
 Comenzar con una rejilla opcional de intensidad ajustable, comparando normal, rugosidad y AO con una referencia sin detalle. Evaluar el microbisel y la variación superficial después de comprobar continuidad y estabilidad temporal. Comparar ruido calculado con una textura pequeña compartida cuando se incorpore desgaste. Evitar un sistema general de capas sin una necesidad demostrada.
+
+## Prototipo estático de rejilla
+
+`Shaders/VoxelGridPrototype.shadergraph` conserva las LUT de color y superficie del shader opaco y añade `Shaders/VoxelGridDetail.hlsl`. El patrón utiliza posición mundial absoluta y proyección sobre el plano principal de la cara, sin reutilizar UV0 o UV3. Modifica normales y smoothness; no desplaza geometría, profundidad, color, emisión ni colisiones. No incluye POM/SPOM.
+
+Para probarlo, duplicar un material semántico opaco, asignarle el shader `Voxel Bridge/Prototypes/VoxelGridPrototype` y conservar sus referencias a las LUT. Aplicar la copia sólo a las instancias de comparación y a sus LODs, sin modificar el material compartido de producción. Los materiales y escenas de experimentación son recursos locales excluidos del repositorio.
+
+| Control del material | Uso |
+|---|---|
+| Grid Enabled | `0`: referencia sin detalle; `1`: rejilla activa. |
+| Grid CellSize | Tamaño físico en metros; utilizar `0.03125` para la prueba urbana. |
+| Grid JointWidth | Anchura total de la junta como fracción de celda; valor inicial `0.12`. |
+| Grid NormalStrength | Intensidad del cambio de normal; `0` desactiva este componente. |
+| Grid RoughnessStrength | Reducción de smoothness en juntas; no cambia SurfaceID. Una superficie con smoothness cero no puede hacerse más rugosa. |
+| Grid FadeStart / FadeEnd | Distancias en metros para atenuar el efecto. El filtrado por tamaño en pantalla puede ocultarlo antes para evitar aliasing. |
+
+Comparar con la misma cámara e iluminación. Para retirar la prueba, reasignar a los renderers afectados el material opaco original de su prefab; no revertir otros overrides de la instancia. Los prefabs, VOX y materiales de producción permanecen independientes del prototipo.
+
+Alcance: arquitectura estática alineada a los ejes mundiales. Los chunks y LODs comparten fase mundial; no se garantiza correspondencia de juntas con los bordes de modelos colocados fuera de esa rejilla. El anclaje local de objetos dinámicos, las superficies arbitrariamente rotadas, la validación completa de subescenas y el presupuesto GPU quedan pendientes. El shader conserva DOTS Instancing, pero compilar esa variante no sustituye una prueba de Entities Graphics. No utilizar este prototipo como shader de ray tracing.
+
+## Experimento de escala geométrica
+
+El script independiente `Assets/Editor/HierarchyLodPreviewWindow.cs` abre `Tools > LocalModels > Preview LOD de jerarquía`. Asignar un GO padre de escena y utilizar un tamaño físico objetivo, por ejemplo `0.0625 m` o `0.125 m`, o elegir un índice LOD manual. La elección física lee el manifiesto de cada familia y multiplica su tamaño de celda por la escala mundial uniforme del LODGroup; omite grupos sin nivel coincidente, sin metadatos o con escala no uniforme. Los grupos desactivados permanecen intactos.
+
+La previsualización fija un nivel existente a cualquier distancia mediante `ForceLOD`. `Volver a LOD automático`, cerrar la ventana, recompilar o entrar en Play restaura la selección automática. No modifica LODs, renderers, prefabs ni archivos de la familia. No combinar con otro control de `ForceLOD`; la restauración vuelve a automático, no a una selección forzada por otra herramienta.
+
+Este ensayo permite valorar una geometría más gruesa sin reconversión; no valida transiciones ni equivale necesariamente a generar una familia nueva. La rejilla del shader es independiente. Con base `0.03125 m`, LOD1 mide `0.0625 m` en el asset y `0.125 m` en una instancia escalada ×2; a escala ×1 ese tamaño corresponde a LOD2. La base geométrica candidata de `0.0625 m` y una rejilla visual multiescala requieren comparación artística; el prototipo actual mantiene una rejilla física fija con atenuación.
 
 ## Anuncios separados de su estructura
 
