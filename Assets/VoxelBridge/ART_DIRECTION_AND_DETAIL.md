@@ -42,7 +42,7 @@ Para controlar el crecimiento por distancia, seleccionar `Grid Mode = Distance` 
 
 Este modo separa la escala artística del filtrado: suelo y pared con iguales parámetros y distancia seleccionan el mismo nivel, independientemente de su orientación, resolución o campo de visión. Las derivadas conservan el filtrado de frecuencias no resolubles; a ángulos rasantes puede atenuarse la rejilla sin aumentar su tamaño. No garantiza visibilidad constante ni elimina todo parpadeo. `TargetPixels` y `FadeStart / FadeEnd` no intervienen en `Distance`. Los materiales existentes conservan su modo; no se migran automáticamente.
 
-La integración conserva LUT, ColorID, SurfaceID, emisión y ajustes de instancing. No afecta al vidrio, a `Keep Original`, a materiales RGB ni a las transiciones de geometría. Normales y rugosidad constituyen el alcance de esta etapa; no incluye bisel geométrico, desplazamiento, AO de juntas ni POM/SPOM.
+La integración conserva LUT, ColorID, SurfaceID, emisión y ajustes de instancing. No afecta al vidrio, a `Keep Original`, a materiales RGB ni a las transiciones de geometría. Incluye normales, rugosidad y un ensayo opcional de POM cercano; no incluye bisel geométrico, desplazamiento de vértices, AO de juntas ni recorte SPOM.
 
 ### Perfil de juntas y biseles
 
@@ -53,6 +53,16 @@ La integración conserva LUT, ColorID, SurfaceID, emisión y ajustes de instanci
 Profundidad cero anula la contribución del perfil. La anchura del bisel se limita internamente al intervalo `0.005–0.2` y la profundidad a `0–0.25`. `NormalStrength` modula las normales sin modificar la máscara de rugosidad. La parte central de la cara y el fondo de la junta permanecen planos; aumentar la profundidad inclina más el bisel, sin hundir vértices.
 
 El perfil conserva los modos de escala y el filtrado existentes; las franjas sin detalle a ras de suelo y la estabilidad temporal requieren evaluación artística posterior. `Grid Profile = Lines`, predeterminado, conserva el aspecto anterior para comparar. La selección por SurfaceID y los hundimientos aleatorios de celdas son fases posteriores; esta configuración pertenece al material opaco compartido.
+
+### POM procedural cercano — experimental
+
+Activar `Grid POM` con `Grid Profile = Beveled` permite comparar el perfil de normales con Parallax Occlusion Mapping. El trazado utiliza la altura procedural del bisel, con hasta 16 pasos de búsqueda y cuatro de refinamiento; no requiere textura de alturas ni UV adicionales. Los canales de ColorID/SurfaceID y las LUT permanecen intactos. El shader no depende del asset CSPOM ni incorpora su código.
+
+`Grid POM MaxDepth` limita el desplazamiento en metros: valor inicial `0.003`, intervalo `0–0.01`. Es un límite, no un multiplicador. La profundidad efectiva es el menor valor entre `CellSize × JointDepth` y ese límite. Para una comparación cercana más marcada, utilizar temporalmente `JointDepth = 0.08` con `POM MaxDepth = 0.003`, sobre una pared opaca uniforme. Restaurar una intensidad adecuada después de evaluar el movimiento.
+
+El POM requiere cámara perspectiva. Se atenúa entre 2 y 8 m, a ángulos casi rasantes y durante la primera transición de escala visual; queda desactivado desde el primer nivel completo de celdas dobles. Con `DistanceStart = 0` y `DistanceStep = 4`, esto ocurre a 4 m. El recorrido lateral está limitado a `0.2` celdas. Estas restricciones mantienen el ensayo en el detalle cercano y evitan que los bloques distantes generen un relieve creciente.
+
+La salida desplaza el muestreo del perfil de normales y rugosidad, no el buffer de profundidad. No modifica siluetas ni colisiones y no aporta la profundidad del relieve a las sombras o al AO de pantalla; tampoco desplaza el color de una cara hacia la identidad de otra. No certifica juntas entre regiones de atributos diferentes. Evaluar primero paredes y suelos uniformes no emisivos; vidrio, offsets de profundidad, recorte SPOM y selección por SurfaceID permanecen fuera de este ensayo. El filtrado no garantiza ausencia de parpadeo. La evaluación temporal completa, el coste GPU y Entities Graphics en runtime permanecen pendientes.
 
 ### Prototipo de comparación
 
@@ -66,6 +76,7 @@ Para probarlo, duplicar un material semántico opaco, asignarle el shader `Voxel
 |---|---|
 | Grid Enabled | `0`: referencia sin detalle; `1`: rejilla activa. |
 | Grid Profile | `Lines`: perfil original. `Beveled`: junta plana y bisel suave con esquinas redondeadas, disponible en producción. |
+| Grid POM / POM MaxDepth | Ensayo de POM cercano, desactivado por defecto; límite de desplazamiento en metros. Requiere `Beveled` y perspectiva. |
 | Grid Anchor | `World`: origen y ejes mundiales. `Family Local`: origen y ejes compartidos por los renderers de la familia; sigue su posición y rotación. Predeterminado en producción: `Family Local`; en el prototipo: `World`. |
 | Grid CellSize | Tamaño físico fijo o mínimo en metros. Punto inicial de comparación: `0.0625`. |
 | Grid Mode | `Fixed`: tamaño constante con atenuación; `Multiscale`: crecimiento binario por tamaño proyectado; `Distance`: crecimiento binario por distancia, disponible en producción. Ninguno modifica el LOD geométrico. Predeterminado en producción: `Multiscale`; en el prototipo: `Fixed`. |

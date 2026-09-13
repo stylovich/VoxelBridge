@@ -59,6 +59,12 @@
         },
         {
             "m_Id": "d0a818b1e27b5d73293de2b33e6f133f"
+        },
+        {
+            "m_Id": "a6ecf0f3ab541c65c8ee730ba0e5d1ba"
+        },
+        {
+            "m_Id": "f238497909fdc0800f86f93e2861fe98"
         }
     ],
     "m_Keywords": [],
@@ -185,6 +191,12 @@
         },
         {
             "m_Id": "80b8c6dae37f3bfc683ca4804647b04f"
+        },
+        {
+            "m_Id": "bd1dd75a570e5fec2b6afde04929f2c5"
+        },
+        {
+            "m_Id": "080ec8cab347014b07197c2c13374f37"
         }
     ],
     "m_GroupDatas": [],
@@ -636,6 +648,34 @@
                     "m_Id": "0ef3d79c357e47e39e7678611a3bb965"
                 },
                 "m_SlotId": 22
+            }
+        },
+        {
+            "m_OutputSlot": {
+                "m_Node": {
+                    "m_Id": "bd1dd75a570e5fec2b6afde04929f2c5"
+                },
+                "m_SlotId": 0
+            },
+            "m_InputSlot": {
+                "m_Node": {
+                    "m_Id": "0ef3d79c357e47e39e7678611a3bb965"
+                },
+                "m_SlotId": 23
+            }
+        },
+        {
+            "m_OutputSlot": {
+                "m_Node": {
+                    "m_Id": "080ec8cab347014b07197c2c13374f37"
+                },
+                "m_SlotId": 0
+            },
+            "m_InputSlot": {
+                "m_Node": {
+                    "m_Id": "0ef3d79c357e47e39e7678611a3bb965"
+                },
+                "m_SlotId": 24
             }
         }
     ],
@@ -2216,6 +2256,12 @@
         },
         {
             "m_Id": "15aa60ce2bdbbac55bb9560a86b6776a"
+        },
+        {
+            "m_Id": "728eeaa87671bd945b835376eb34b797"
+        },
+        {
+            "m_Id": "da93ad443b8b68739b6fa7d985f3d74b"
         }
     ],
     "synonyms": [
@@ -3815,6 +3861,12 @@
             "m_Id": "9119f55b966e1dcdab2638f4d86d2292"
         },
         {
+            "m_Id": "a6ecf0f3ab541c65c8ee730ba0e5d1ba"
+        },
+        {
+            "m_Id": "f238497909fdc0800f86f93e2861fe98"
+        },
+        {
             "m_Id": "9cc34ef779434a5eba2a54afbef0c9da"
         },
         {
@@ -4417,6 +4469,232 @@
     "m_StageCapability": 3,
     "m_Value": 0.025,
     "m_DefaultValue": 0.025,
+    "m_Labels": [],
+    "m_LiteralMode": false
+}
+
+{
+    "m_SGVersion": 1,
+    "m_Type": "UnityEditor.ShaderGraph.Internal.Vector1ShaderProperty",
+    "m_ObjectId": "a6ecf0f3ab541c65c8ee730ba0e5d1ba",
+    "m_Guid": {
+        "m_GuidSerialized": "adb115b0-1836-a25c-ec37-30e45eaf9cf1"
+    },
+    "promotedFromAssetID": "",
+    "promotedFromCategoryName": "",
+    "promotedOrdering": -1,
+    "m_Name": "Grid POM",
+    "m_DefaultRefNameVersion": 1,
+    "m_RefNameGeneratedByDisplayName": "Grid POM",
+    "m_DefaultReferenceName": "_GridPomEnabled",
+    "m_OverrideReferenceName": "_GridPomEnabled",
+    "m_GeneratePropertyBlock": true,
+    "m_UseCustomSlotLabel": false,
+    "m_CustomSlotLabel": "",
+    "m_DismissedVersion": 0,
+    "m_Precision": 0,
+    "overrideHLSLDeclaration": false,
+    "hlslDeclarationOverride": 0,
+    "m_Hidden": false,
+    "m_PerRendererData": false,
+    "m_customAttributes": [],
+    "m_Value": 0,
+    "m_FloatType": 3,
+    "m_LiteralFloatMode": false,
+    "m_RangeValues": {
+        "x": 0,
+        "y": 1
+    },
+    "m_SliderType": 0,
+    "m_SliderPower": 3,
+    "m_EnumType": 0,
+    "m_CSharpEnumString": "",
+    "m_EnumNames": [
+        "Off",
+        "On"
+    ],
+    "m_EnumValues": [
+        0,
+        1
+    ]
+}
+
+{
+    "m_SGVersion": 0,
+    "m_Type": "UnityEditor.ShaderGraph.Vector1MaterialSlot",
+    "m_ObjectId": "728eeaa87671bd945b835376eb34b797",
+    "m_Id": 23,
+    "m_DisplayName": "PomEnabled",
+    "m_SlotType": 0,
+    "m_Hidden": false,
+    "m_ShaderOutputName": "PomEnabled",
+    "m_StageCapability": 2,
+    "m_Value": 0,
+    "m_DefaultValue": 0,
+    "m_Labels": [],
+    "m_LiteralMode": false
+}
+
+{
+    "m_SGVersion": 0,
+    "m_Type": "UnityEditor.ShaderGraph.PropertyNode",
+    "m_ObjectId": "bd1dd75a570e5fec2b6afde04929f2c5",
+    "m_Group": {
+        "m_Id": ""
+    },
+    "m_Name": "Property",
+    "m_DrawState": {
+        "m_Expanded": true,
+        "m_Position": {
+            "serializedVersion": "2",
+            "x": 80,
+            "y": 400,
+            "width": 151.99993896484375,
+            "height": 33.999969482421875
+        }
+    },
+    "m_Slots": [
+        {
+            "m_Id": "cd4b4fca9c49bc26fdc7ca9c38a05dfc"
+        }
+    ],
+    "synonyms": [],
+    "m_Precision": 0,
+    "m_PreviewExpanded": true,
+    "m_DismissedVersion": 0,
+    "m_PreviewMode": 0,
+    "m_CustomColors": {
+        "m_SerializableColors": []
+    },
+    "m_Property": {
+        "m_Id": "a6ecf0f3ab541c65c8ee730ba0e5d1ba"
+    }
+}
+
+{
+    "m_SGVersion": 0,
+    "m_Type": "UnityEditor.ShaderGraph.Vector1MaterialSlot",
+    "m_ObjectId": "cd4b4fca9c49bc26fdc7ca9c38a05dfc",
+    "m_Id": 0,
+    "m_DisplayName": "Grid FadeStart",
+    "m_SlotType": 1,
+    "m_Hidden": false,
+    "m_ShaderOutputName": "Out",
+    "m_StageCapability": 3,
+    "m_Value": 0,
+    "m_DefaultValue": 0,
+    "m_Labels": [],
+    "m_LiteralMode": false
+}
+
+{
+    "m_SGVersion": 1,
+    "m_Type": "UnityEditor.ShaderGraph.Internal.Vector1ShaderProperty",
+    "m_ObjectId": "f238497909fdc0800f86f93e2861fe98",
+    "m_Guid": {
+        "m_GuidSerialized": "0f37e6b1-863b-a2db-5a51-5a75882aea7f"
+    },
+    "promotedFromAssetID": "",
+    "promotedFromCategoryName": "",
+    "promotedOrdering": -1,
+    "m_Name": "Grid POM MaxDepth",
+    "m_DefaultRefNameVersion": 1,
+    "m_RefNameGeneratedByDisplayName": "Grid POM MaxDepth",
+    "m_DefaultReferenceName": "_GridPomMaxDepth",
+    "m_OverrideReferenceName": "_GridPomMaxDepth",
+    "m_GeneratePropertyBlock": true,
+    "m_UseCustomSlotLabel": false,
+    "m_CustomSlotLabel": "",
+    "m_DismissedVersion": 0,
+    "m_Precision": 0,
+    "overrideHLSLDeclaration": false,
+    "hlslDeclarationOverride": 0,
+    "m_Hidden": false,
+    "m_PerRendererData": false,
+    "m_customAttributes": [],
+    "m_Value": 0.003,
+    "m_FloatType": 1,
+    "m_LiteralFloatMode": false,
+    "m_RangeValues": {
+        "x": 0,
+        "y": 0.01
+    },
+    "m_SliderType": 0,
+    "m_SliderPower": 3,
+    "m_EnumType": 0,
+    "m_CSharpEnumString": "",
+    "m_EnumNames": [
+        "Default"
+    ],
+    "m_EnumValues": [
+        0
+    ]
+}
+
+{
+    "m_SGVersion": 0,
+    "m_Type": "UnityEditor.ShaderGraph.Vector1MaterialSlot",
+    "m_ObjectId": "da93ad443b8b68739b6fa7d985f3d74b",
+    "m_Id": 24,
+    "m_DisplayName": "PomMaxDepth",
+    "m_SlotType": 0,
+    "m_Hidden": false,
+    "m_ShaderOutputName": "PomMaxDepth",
+    "m_StageCapability": 2,
+    "m_Value": 0.003,
+    "m_DefaultValue": 0.003,
+    "m_Labels": [],
+    "m_LiteralMode": false
+}
+
+{
+    "m_SGVersion": 0,
+    "m_Type": "UnityEditor.ShaderGraph.PropertyNode",
+    "m_ObjectId": "080ec8cab347014b07197c2c13374f37",
+    "m_Group": {
+        "m_Id": ""
+    },
+    "m_Name": "Property",
+    "m_DrawState": {
+        "m_Expanded": true,
+        "m_Position": {
+            "serializedVersion": "2",
+            "x": 80,
+            "y": 440,
+            "width": 151.99993896484375,
+            "height": 33.999969482421875
+        }
+    },
+    "m_Slots": [
+        {
+            "m_Id": "c6f662abaf679c115c4ef64a4a5a920c"
+        }
+    ],
+    "synonyms": [],
+    "m_Precision": 0,
+    "m_PreviewExpanded": true,
+    "m_DismissedVersion": 0,
+    "m_PreviewMode": 0,
+    "m_CustomColors": {
+        "m_SerializableColors": []
+    },
+    "m_Property": {
+        "m_Id": "f238497909fdc0800f86f93e2861fe98"
+    }
+}
+
+{
+    "m_SGVersion": 0,
+    "m_Type": "UnityEditor.ShaderGraph.Vector1MaterialSlot",
+    "m_ObjectId": "c6f662abaf679c115c4ef64a4a5a920c",
+    "m_Id": 0,
+    "m_DisplayName": "Grid FadeStart",
+    "m_SlotType": 1,
+    "m_Hidden": false,
+    "m_ShaderOutputName": "Out",
+    "m_StageCapability": 3,
+    "m_Value": 0.003,
+    "m_DefaultValue": 0.003,
     "m_Labels": [],
     "m_LiteralMode": false
 }

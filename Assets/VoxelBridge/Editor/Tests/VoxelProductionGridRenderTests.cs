@@ -11,7 +11,8 @@ namespace LocalModels.VoxelBridge.Tests
     {
         // Isolated HDRP preview: no Test2 reload or persistent material changes.
         internal static Texture2D Render(string shaderPath, bool enabled, bool zeroStrength = false, float gridMode = 1,
-            float profile = 0, float depth = .025f, float bevelWidth = .06f, int geometry = 0, float orbit = 0)
+            float profile = 0, float depth = .025f, float bevelWidth = .06f, int geometry = 0, float orbit = 0,
+            float pom = 0, float pomMaxDepth = .003f)
         {
             var shader = AssetDatabase.LoadAssetAtPath<Shader>(shaderPath);
             Assert.That(shader, Is.Not.Null);
@@ -40,6 +41,7 @@ namespace LocalModels.VoxelBridge.Tests
                     {
                         material.SetFloat("_GridProfile", profile); material.SetFloat("_GridJointDepth", depth);
                         material.SetFloat("_GridBevelWidth", bevelWidth);
+                        material.SetFloat("_GridPomEnabled", pom); material.SetFloat("_GridPomMaxDepth", pomMaxDepth);
                         if (profile > .5f)
                         {
                             material.SetFloat("_GridJointWidth", .04f);
@@ -155,6 +157,22 @@ namespace LocalModels.VoxelBridge.Tests
             {
                 if (flat) Object.DestroyImmediate(flat); if (bevel) Object.DestroyImmediate(bevel);
             }
+        }
+
+        [TestCase(1)]
+        [TestCase(2)]
+        public void Production_PomChangesObliqueShadingButPreservesSilhouette(int geometry)
+        {
+            Texture2D off = null, on = null;
+            try
+            {
+                off = Render(VoxelProductionExporter.ShaderPath, true, gridMode: 0, profile: 1, geometry: geometry, orbit: 45, depth: .08f);
+                on = Render(VoxelProductionExporter.ShaderPath, true, gridMode: 0, profile: 1, geometry: geometry, orbit: 45, depth: .08f, pom: 1);
+                var a = off.GetPixels(); var b = on.GetPixels();
+                Assert.That(a.Zip(b, (x, y) => Vector4.Distance(x, y)).Count(d => d > .01f), Is.GreaterThan(30));
+                CollectionAssert.AreEqual(a.Select(p => p.a).ToArray(), b.Select(p => p.a).ToArray());
+            }
+            finally { if (off) Object.DestroyImmediate(off); if (on) Object.DestroyImmediate(on); }
         }
     }
 }

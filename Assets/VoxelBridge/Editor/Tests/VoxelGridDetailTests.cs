@@ -11,7 +11,8 @@ namespace LocalModels.VoxelBridge.Tests
             float multiscale = 0, float targetPixels = 12, float maxLevels = 4,
             float anchor = 0, Matrix4x4? objectToWorld = null, float? spanY = null,
             float distanceStart = 12, float distanceStep = 20, bool levelOnly = false,
-            float profile = 0, float bevelWidth = .06f, float jointDepth = .025f, bool patternOnly = false)
+            float profile = 0, float bevelWidth = .06f, float jointDepth = .025f, bool patternOnly = false,
+            float pom = 0, float pomMaxDepth = .003f, bool pomTrace = false, Vector3? view = null)
         {
             var shader = AssetDatabase.LoadAssetAtPath<Shader>("Assets/VoxelBridge/Editor/Tests/VoxelGridDetailProbe.shader");
             Assert.That(shader, Is.Not.Null);
@@ -20,10 +21,12 @@ namespace LocalModels.VoxelBridge.Tests
             var rt = RenderTexture.GetTemporary(64, 64, 0, RenderTextureFormat.ARGBFloat, RenderTextureReadWrite.Linear);
             var previous = RenderTexture.active;
             var camera = Shader.GetGlobalVector("_WorldSpaceCameraPos");
+            var ortho = Shader.GetGlobalVector("unity_OrthoParams");
             Texture2D readable = null;
             try
             {
                 Shader.SetGlobalVector("_WorldSpaceCameraPos", Vector4.zero);
+                Shader.SetGlobalVector("unity_OrthoParams", Vector4.zero);
                 material.SetFloat("_TestEnabled", enabled); material.SetFloat("_TestDistance", distance);
                 material.SetFloat("_TestOffset", offset); material.SetFloat("_TestSpan", span);
                 material.SetFloat("_TestSpanY", spanY ?? span);
@@ -34,6 +37,8 @@ namespace LocalModels.VoxelBridge.Tests
                 material.SetFloat("_TestLevelOnly", levelOnly ? 1 : 0);
                 material.SetFloat("_TestProfile", profile); material.SetFloat("_TestBevelWidth", bevelWidth);
                 material.SetFloat("_TestJointDepth", jointDepth); material.SetFloat("_TestPatternOnly", patternOnly ? 1 : 0);
+                material.SetFloat("_TestPom", pom); material.SetFloat("_TestPomMaxDepth", pomMaxDepth);
+                material.SetFloat("_TestPomTrace", pomTrace ? 1 : 0); material.SetVector("_TestView", view ?? Vector3.forward);
                 material.SetMatrix("_TestObjectToWorld", objectToWorld ?? Matrix4x4.identity);
                 material.SetMatrix("_TestWorldToObject", (objectToWorld ?? Matrix4x4.identity).inverse);
                 Graphics.Blit(Texture2D.whiteTexture, rt, material);
@@ -45,6 +50,7 @@ namespace LocalModels.VoxelBridge.Tests
             finally
             {
                 Shader.SetGlobalVector("_WorldSpaceCameraPos", camera);
+                Shader.SetGlobalVector("unity_OrthoParams", ortho);
                 RenderTexture.active = previous;
                 RenderTexture.ReleaseTemporary(rt);
                 Object.DestroyImmediate(material);
@@ -291,6 +297,8 @@ namespace LocalModels.VoxelBridge.Tests
                 Assert.That(material.GetFloat("_GridProfile"), Is.Zero);
                 Assert.That(material.GetFloat("_GridBevelWidth"), Is.EqualTo(.06f));
                 Assert.That(material.GetFloat("_GridJointDepth"), Is.EqualTo(.025f));
+                Assert.That(material.GetFloat("_GridPomEnabled"), Is.Zero);
+                Assert.That(material.GetFloat("_GridPomMaxDepth"), Is.EqualTo(.003f));
                 Assert.That(material.HasProperty("_PaletteColor"), Is.True);
                 Assert.That(material.HasProperty("_PaletteSurface"), Is.True);
                 Assert.That(material.HasProperty("_EmissionIntensity"), Is.True);
@@ -366,6 +374,50 @@ namespace LocalModels.VoxelBridge.Tests
                 Assert.That(previous.Zip(current, (a, b) => Vector4.Distance(a, b)).Max(), Is.LessThan(.003f));
                 previous = current;
             }
+        }
+
+        [Test]
+        public void Pom_FrontViewHasDepthWithoutLateralShiftAndFaceStaysFlat()
+        {
+            var pixels = Render(span: 1, pomTrace: true);
+            foreach (var p in pixels)
+            {
+                Assert.That(p.r, Is.Zero.Within(.00001f)); Assert.That(p.g, Is.Zero.Within(.00001f));
+                Assert.That(p.b, Is.InRange(0f, 1f));
+            }
+            Assert.That(pixels[32 + 32 * 64].b, Is.Zero);
+            Assert.That(pixels[32 * 64].b, Is.GreaterThan(.99f));
+        }
+
+        [Test]
+        public void Pom_ObliqueRayMovesIntoJointAndReversesWithView()
+        {
+            var left = Render(span: 1, pomTrace: true, view: new Vector3(1, 0, 1));
+            var right = Render(span: 1, pomTrace: true, view: new Vector3(-1, 0, 1));
+            Assert.That(left.Any(p => p.r < -.005f), Is.True);
+            Assert.That(right.Any(p => p.r > .005f), Is.True);
+            Assert.That(left.All(p => p.r <= .00001f && Mathf.Abs(p.g) < .00001f), Is.True);
+            for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++)
+                Assert.That(left[x + y * 64].r, Is.EqualTo(-right[63 - x + y * 64].r).Within(.0001f));
+        }
+
+        [Test]
+        public void Pom_RayShiftIsBoundedAndDegenerateCasesStayFinite()
+        {
+            var pixels = Render(span: 1, pomTrace: true, jointDepth: .25f, view: new Vector3(1, 0, .13f));
+            Assert.That(pixels.All(p => float.IsFinite(p.r) && Mathf.Abs(p.r) <= .2001f), Is.True);
+            foreach (var p in Render(span: 1, pomTrace: true, jointDepth: 0)) Assert.That(p.b, Is.Zero);
+            foreach (var p in Render(span: 1, pomTrace: true, view: Vector3.right)) Assert.That(p.b, Is.Zero);
+        }
+
+        [TestCase(0f, 1f, .003f)]
+        [TestCase(1f, 1f, 0f)]
+        [TestCase(1f, 10f, .003f)]
+        public void Pom_DisabledCappedOrDistantPreservesBevel(float enabled, float distance, float cap)
+        {
+            var a = Render(profile: 1, distance: distance, multiscale: 2);
+            var b = Render(profile: 1, distance: distance, multiscale: 2, pom: enabled, pomMaxDepth: cap);
+            for (int i = 0; i < a.Length; i++) Assert.That(Vector4.Distance(a[i], b[i]), Is.LessThan(.001f));
         }
     }
 }

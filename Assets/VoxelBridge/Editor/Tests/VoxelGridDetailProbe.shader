@@ -7,7 +7,9 @@ Shader "Hidden/Voxel Bridge/Grid Detail Probe"
         _TestDistanceStart("Distance Start", Float) = 12 _TestDistanceStep("Distance Step", Float) = 20
         _TestLevelOnly("Level Only", Float) = 0
         _TestProfile("Profile", Float) = 0 _TestBevelWidth("Bevel", Float) = .06
-        _TestJointDepth("Depth", Float) = .025 _TestPatternOnly("Pattern Only", Float) = 0 }
+        _TestJointDepth("Depth", Float) = .025 _TestPatternOnly("Pattern Only", Float) = 0
+        _TestPom("POM", Float) = 0 _TestPomMaxDepth("POM cap", Float) = .003
+        _TestPomTrace("Trace", Float) = 0 _TestView("View", Vector) = (0,0,1,0) }
     SubShader
     {
         Pass
@@ -28,9 +30,18 @@ Shader "Hidden/Voxel Bridge/Grid Detail Probe"
             float _TestAnchor;
             float _TestDistanceStart, _TestDistanceStep, _TestLevelOnly;
             float _TestProfile, _TestBevelWidth, _TestJointDepth, _TestPatternOnly;
+            float _TestPom, _TestPomMaxDepth, _TestPomTrace;
+            float4 _TestView;
             float4 frag(v2f_img i) : SV_Target
             {
                 float3 n; float s;
+                if (_TestPomTrace > .5)
+                {
+                    float2 q = i.uv * float2(_TestSpan, _TestSpanY) + _TestOffset;
+                    float3 hit = VoxelGridParallax(q, max(fwidth(q), .0001), .04, _TestBevelWidth,
+                        _TestJointDepth, normalize(_TestView.xyz));
+                    return float4(hit.xy - q, hit.z, 1);
+                }
                 if (_TestLevelOnly > .5)
                     return VoxelGridDistanceLevel(_TestDistance, _TestDistanceStart, _TestDistanceStep, _TestMaxScaleLevels);
                 if (_TestPatternOnly > .5)
@@ -46,7 +57,8 @@ Shader "Hidden/Voxel Bridge/Grid Detail Probe"
                 VoxelGridDetail_float(p, normal, tangent, bitangent,
                     _TestEnabled, .03125, .2, .2, .2, 2, 8, .6,
                     _TestMultiscale, _TestTargetPixels, _TestMaxScaleLevels, _TestAnchor,
-                    _TestDistanceStart, _TestDistanceStep, _TestProfile, _TestBevelWidth, _TestJointDepth, n, s);
+                    _TestDistanceStart, _TestDistanceStep, _TestProfile, _TestBevelWidth, _TestJointDepth,
+                    _TestPom, _TestPomMaxDepth, n, s);
                 return float4(n * .5 + .5, s);
             }
             ENDHLSL
