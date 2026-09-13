@@ -148,7 +148,8 @@ namespace LocalModels.VoxelBridge
             batchOptions ??= new VoxelLodBatchOptions();
             string sources = string.Join("|", plans.Select(plan =>
                 $"{plan.Source.GetInstanceID()}:{plan.ConversionSource?.GetInstanceID() ?? 0}:" +
-                $"{plan.ReuseKey?.GetInstanceID() ?? 0}:{plan.Ignored}:{VoxelConversionProfile.RuleFingerprint(plan.ConversionSource)}"));
+                $"{plan.ReuseKey?.GetInstanceID() ?? 0}:{plan.Ignored}:{VoxelConversionProfile.RuleFingerprint(plan.ConversionSource)}:" +
+                (lodOptions?.NormalizeScale == true ? plan.Source.transform.localToWorldMatrix.ToString("R") : "")));
             string profileValues = profile == null
                 ? "none"
                 : $"{profile.GetInstanceID()}:{profile.BaseVoxelSize:R}:{profile.Padding}:" +
@@ -159,7 +160,7 @@ namespace LocalModels.VoxelBridge
             string options = lodOptions == null
                 ? "none"
                 : $"{lodOptions.ColorMode}:{lodOptions.AlphaCutoff:R}:{lodOptions.ExportFolder}:" +
-                  $"{includeInactiveObjects}:{lodOptions.GenerateLod0Only}:{VoxelConversionProfile.Fingerprint(lodOptions.ConversionProfile)}";
+                  $"{includeInactiveObjects}:{lodOptions.NormalizeScale}:{lodOptions.GenerateLod0Only}:{VoxelConversionProfile.Fingerprint(lodOptions.ConversionProfile)}";
             return Hash128.Compute(
                 $"{sources}#{profileValues}#{options}#{batchOptions.MaximumEstimatedMemoryBytes}:" +
                 $"{batchOptions.SkipSourcesOverMemoryBudget}:{batchOptions.AdaptInitialVoxelSize}:" +
@@ -184,7 +185,7 @@ namespace LocalModels.VoxelBridge
         {
             return Estimate(
                 plan.ReuseKey, plan.ConversionSource, plan.Source.name,
-                profile, lodOptions, batchOptions);
+                profile, lodOptions.ForScaleSource(plan.Source), batchOptions);
         }
 
         private static VoxelLodBatchSourceEstimate Estimate(
@@ -198,7 +199,7 @@ namespace LocalModels.VoxelBridge
             {
                 bool includeInactiveObjects = !batchOptions.IgnoreInactiveObjects;
                 bounds = MeshVoxelizer.GetSourceBounds(
-                    conversionSource, includeInactiveObjects, lodOptions.ConversionProfile);
+                    conversionSource, includeInactiveObjects, lodOptions.ConversionProfile, lodOptions.ResolveScale(conversionSource));
                 sourceOverhead = EstimateSourceOverhead(
                     conversionSource, lodOptions.ColorMode, includeInactiveObjects, lodOptions.ConversionProfile);
             }

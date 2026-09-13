@@ -117,6 +117,8 @@ namespace LocalModels.VoxelBridge
     [Serializable]
     internal sealed class VoxelLodSetManifest
     {
+        public bool normalizedScale;
+        public Vector3 bakedRootScale = Vector3.one;
         public VoxelSourceAxes sourceAxes;
         public string retainedGeometryGuid;
         public int formatVersion = 4;

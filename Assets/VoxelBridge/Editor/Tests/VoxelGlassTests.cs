@@ -83,6 +83,80 @@ namespace LocalModels.VoxelBridge.Tests
             finally { Object.DestroyImmediate(mesh); }
         }
 
+        [TestCase(0f, 1)]
+        [TestCase(.25f, 1)]
+        [TestCase(1f, 1)]
+        [TestCase(.25f, 0)]
+        public void FillInterior_GlassWindowPreservesCavityAndSampledCells(float opacity, int padding)
+        {
+            // Use a non-default ID so the traversal must consult the palette's render class.
+            const int glassId = 200;
+            surfaces.MutableEntries.Add(new VoxelSurfaceDefinition(glassId, "Window", VoxelSurfaceRenderClass.Transparent, 0, .9f, 0, 1, opacity));
+            var grid = HollowBox(padding, semantic: true);
+            int window = grid.Index(padding + 2, padding + 2, padding);
+            grid.SemanticIds[window] = VoxelSemanticEncoding.Pack(54, glassId);
+            var occupied = (bool[])grid.Occupied.Clone();
+            var pairs = (ushort[])grid.SemanticIds.Clone();
+            MeshVoxelizer.FillInterior(grid, surfaces);
+            CollectionAssert.AreEqual(occupied, grid.Occupied, "No air may be filled behind a glass window, including at the grid boundary.");
+            CollectionAssert.AreEqual(pairs, grid.SemanticIds);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void FillInterior_OpaqueShellStillFillsInRgbAndSemanticModes(bool semantic)
+        {
+            var grid = HollowBox(1, semantic);
+            // A palette must not turn RGB data into semantic data or change legacy filling.
+            MeshVoxelizer.FillInterior(grid, surfaces);
+            Assert.That(grid.CountOccupied(), Is.EqualTo(125));
+            for (int z = 0; z < grid.Size.z; z++)
+            for (int y = 0; y < grid.Size.y; y++)
+            for (int x = 0; x < grid.Size.x; x++)
+            {
+                int i = grid.Index(x, y, z);
+                bool inside = x >= 1 && x <= 5 && y >= 1 && y <= 5 && z >= 1 && z <= 5;
+                Assert.That(grid.Occupied[i], Is.EqualTo(inside));
+                if (!inside) continue;
+                if (semantic) Assert.That(grid.SemanticIds[i], Is.EqualTo(Opaque));
+                else Assert.That(grid.Colors[i], Is.EqualTo(new Color32(31, 63, 127, 255)));
+            }
+        }
+
+        [Test]
+        public void FillInterior_TraversesThickGlassWithoutCreatingGlassVolume()
+        {
+            var grid = new VoxelGrid(Vector3Int.one * 9, Vector3.zero, .03125f, true);
+            for (int z = 1; z <= 7; z++)
+            for (int y = 1; y <= 7; y++)
+            for (int x = 1; x <= 7; x++)
+            {
+                if (x >= 3 && x <= 5 && y >= 3 && y <= 5 && z >= 3 && z <= 5) continue;
+                int i = grid.Index(x, y, z); grid.Occupied[i] = true; grid.SemanticIds[i] = Glass;
+            }
+            var occupied = (bool[])grid.Occupied.Clone();
+            var pairs = (ushort[])grid.SemanticIds.Clone();
+            MeshVoxelizer.FillInterior(grid, surfaces);
+            CollectionAssert.AreEqual(occupied, grid.Occupied);
+            CollectionAssert.AreEqual(pairs, grid.SemanticIds);
+        }
+
+        private static VoxelGrid HollowBox(int padding, bool semantic)
+        {
+            var grid = new VoxelGrid(Vector3Int.one * (5 + padding * 2), new Vector3(-2, 3, 5), .03125f, semantic);
+            for (int z = 0; z < 5; z++)
+            for (int y = 0; y < 5; y++)
+            for (int x = 0; x < 5; x++)
+            {
+                if (x > 0 && x < 4 && y > 0 && y < 4 && z > 0 && z < 4) continue;
+                int i = grid.Index(x + padding, y + padding, z + padding);
+                grid.Occupied[i] = true;
+                if (semantic) grid.SemanticIds[i] = Opaque;
+                else grid.Colors[i] = new Color32(31, 63, 127, 255);
+            }
+            return grid;
+        }
+
         [Test]
         public void ChunkBoundary_KeepsTheSameVisibleInterfaces()
         {

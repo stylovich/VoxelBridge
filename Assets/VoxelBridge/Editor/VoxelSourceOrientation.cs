@@ -48,5 +48,12 @@ namespace LocalModels.VoxelBridge
             Validate(manifest.sourceAxes);
             return manifest.sourceAxes;
         }
+
+        internal static bool ReadNormalizedScale(string manifestPath)
+        {
+            if (!VoxelLodPipeline.TryReadManifest(manifestPath, out var manifest))
+                throw new InvalidDataException("A valid family manifest is required for scene placement.");
+            return manifest.normalizedScale;
+        }
     }
 }

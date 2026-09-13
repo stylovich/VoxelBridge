@@ -18,6 +18,8 @@ namespace LocalModels.VoxelBridge
 
         private Object source;
         [SerializeField] private bool generateLod0Only = true;
+        [SerializeField] private bool normalizeScale = true;
+        [SerializeField] private bool individualIgnoreInactiveObjects = true;
         [SerializeField] private bool individualGenerateImpostor;
         [SerializeField] private bool individualPlaceInScene;
         [SerializeField] private bool individualDisableOriginalObject = true;
@@ -283,6 +285,10 @@ namespace LocalModels.VoxelBridge
             }
 
             DrawColorSettings();
+            normalizeScale = EditorGUILayout.Toggle(new GUIContent("Normalize Scale",
+                "Incorpora la escala mundial a la geometría. Produce instancias a escala 1 sin cambiar su tamaño visible; las variantes escaladas pueden requerir familias separadas."), normalizeScale);
+            individualIgnoreInactiveObjects = EditorGUILayout.Toggle(new GUIContent("Ignore Inactive (Single)",
+                "Omite variantes desactivadas en la conversión individual. El lote utiliza su propia opción Ignore Inactive Objects."), individualIgnoreInactiveObjects);
             generateLod0Only = EditorGUILayout.Popup(new GUIContent("Generate Levels",
                 "LOD0 Only permite editar y asignar IDs antes de derivar los demás niveles. Se aplica a la conversión individual y por lotes; no cambia Maximum Allowed Base."),
                 generateLod0Only ? 0 : 1, new[] { "LOD0 Only", "All Profile Levels" }) == 0;
@@ -294,7 +300,7 @@ namespace LocalModels.VoxelBridge
             using (new EditorGUI.DisabledScope(!canPlaceIndividual))
                 individualPlaceInScene = EditorGUILayout.Toggle(
                     new GUIContent("Place Result in Scene",
-                        "Instancia el prefab voxel junto al GameObject fuente y conserva su Transform, layer, tag y flags Static."),
+                        "Coloca el prefab voxel conservando su tamaño visible, layer, tag y flags Static. Normalize Scale incorpora la escala en geometría y elige un padre sin escala."),
                     individualPlaceInScene);
             if (individualPlaceInScene && canPlaceIndividual)
             {
@@ -1102,7 +1108,9 @@ namespace LocalModels.VoxelBridge
             AlphaCutoff = alphaCutoff,
             GenerateLod0Only = generateLod0Only,
             ConversionProfile = conversionProfile,
-            ExportFolder = exportFolder
+            ExportFolder = exportFolder,
+            NormalizeScale = normalizeScale,
+            IncludeInactiveObjects = !individualIgnoreInactiveObjects
         };
 
         private VoxelLodBuildOptions CreateBatchLodOptions()
@@ -1132,13 +1140,14 @@ namespace LocalModels.VoxelBridge
             AdaptInitialVoxelSize = individualAdaptInitialVoxelSize,
             MaximumInitialLodIndex = individualMaximumInitialLodIndex,
             MaximumImportedVoxelCount = individualMaximumImportedVoxelCount,
-            IgnoreInactiveObjects = false,
+            IgnoreInactiveObjects = individualIgnoreInactiveObjects,
             EnableCheckpoint = false,
             ResumeInterruptedBatch = false
         };
 
         private VoxelLodBatchOptions CreateBatchOptions() => new()
         {
+            NormalizeScale = normalizeScale,
             ReusePrefabSources = batchReusePrefabSources,
             ModifiedPrefabHandling = batchModifiedPrefabHandling,
             MaximumEstimatedMemoryBytes = Mathf.Max(256, batchMemoryBudgetMb) *

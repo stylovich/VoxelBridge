@@ -92,7 +92,7 @@ namespace LocalModels.VoxelBridge
             VoxelLodBatchSourcePlan[] plans, VoxelStyleProfile profile,
             VoxelLodBuildOptions lodOptions, VoxelLodBatchOptions batchOptions)
         {
-            var builder = new StringBuilder("VoxelLodBatch:v4");
+            var builder = new StringBuilder("VoxelLodBatch:v5");
             builder.Append('|').Append(profile != null ? GetStableObjectKey(profile) : "profile:null");
             if (profile != null)
             {
@@ -110,6 +110,7 @@ namespace LocalModels.VoxelBridge
                     .Append(',').Append(lodOptions.SingleColor.a);
                 builder.Append('|').Append(lodOptions.AlphaCutoff.ToString("R"));
                 builder.Append('|').Append(lodOptions.GenerateLod0Only);
+                builder.Append('|').Append(lodOptions.NormalizeScale);
                 builder.Append('|').Append(VoxelConversionProfile.Fingerprint(lodOptions.ConversionProfile));
                 builder.Append('|').Append(batchOptions == null
                     ? lodOptions.IncludeInactiveObjects
@@ -131,6 +132,8 @@ namespace LocalModels.VoxelBridge
                 builder.Append('|').Append(GetStableObjectKey(plan.ReuseKey));
                 builder.Append(':').Append(GetSourceFingerprint(plan.ConversionSource));
                 builder.Append(':').Append(plan.Ignored);
+                if (lodOptions?.NormalizeScale == true)
+                    builder.Append(':').Append(plan.Source.transform.localToWorldMatrix.ToString("R"));
             }
             return Hash128.Compute(builder.ToString()).ToString();
         }

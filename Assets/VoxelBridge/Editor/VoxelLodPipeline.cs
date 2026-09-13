@@ -18,6 +18,18 @@ namespace LocalModels.VoxelBridge
         public bool IncludeInactiveObjects = true;
         public bool GenerateLod0Only;
         public VoxelConversionProfile ConversionProfile;
+        public bool NormalizeScale;
+        public Object ScaleSource;
+
+        internal Vector3 ResolveScale(Object source) => NormalizeScale
+            ? VoxelScaleNormalization.SourceScale(ScaleSource != null ? ScaleSource : source) : Vector3.one;
+
+        internal VoxelLodBuildOptions ForScaleSource(Object source)
+        {
+            var copy = (VoxelLodBuildOptions)MemberwiseClone();
+            copy.ScaleSource = source;
+            return copy;
+        }
     }
 
     internal readonly struct VoxelLodBuildResult
@@ -46,6 +58,7 @@ namespace LocalModels.VoxelBridge
         public const int DefaultMaximumImportedVoxelCount = 4_000_000;
 
         public bool ReusePrefabSources = true;
+        public bool NormalizeScale;
         public VoxelPrefabOverrideHandling ModifiedPrefabHandling =
             VoxelPrefabOverrideHandling.UsePrefabSource;
         public long MaximumEstimatedMemoryBytes = 1024L * 1024L * 1024L;
@@ -200,6 +213,7 @@ namespace LocalModels.VoxelBridge
 
             batchOptions ??= new VoxelLodBatchOptions();
             VoxelLodBuildOptions effectiveOptions = CreateBatchBuildOptions(options, batchOptions);
+            batchOptions.NormalizeScale = effectiveOptions.NormalizeScale;
             VoxelLodBatchSourcePlan[] plans = GetAutomaticBatchPlans(parent, batchOptions);
             if (plans.Length == 0)
                 throw new InvalidOperationException(
@@ -283,7 +297,7 @@ namespace LocalModels.VoxelBridge
                 try
                 {
                     VoxelLodBuildResult build = GenerateAutomatic(
-                        plan.ConversionSource, profile, effectiveOptions, (progress, message) =>
+                        plan.ConversionSource, profile, effectiveOptions.ForScaleSource(plan.Source), (progress, message) =>
                             cancelProgress != null && cancelProgress(
                                 progressBase + progress / plans.Length,
                                 $"Model {sourceIndex + 1} of {plans.Length} · {current.name}: {message}"),
@@ -346,6 +360,7 @@ namespace LocalModels.VoxelBridge
                 ExportFolder = source.ExportFolder,
                 GenerateLod0Only = source.GenerateLod0Only,
                 ConversionProfile = source.ConversionProfile,
+                NormalizeScale = source.NormalizeScale,
                 IncludeInactiveObjects = !batchOptions.IgnoreInactiveObjects
             };
         }
@@ -380,6 +395,17 @@ namespace LocalModels.VoxelBridge
             Object reuseKey = batchOptions.ReusePrefabSources && conversionSource == prefabSource
                 ? prefabSource
                 : source;
+            // A scaled instance cannot reuse a unit-scale source family after baking world scale.
+            // Keep unsupported transforms in their own plan so preflight can report the error.
+            if (batchOptions.NormalizeScale && reuseKey == prefabSource)
+            {
+                try
+                {
+                    if (VoxelScaleNormalization.SourceScale(source) != VoxelScaleNormalization.SourceScale(prefabSource))
+                        reuseKey = source;
+                }
+                catch (InvalidOperationException) { reuseKey = source; }
+            }
             return new VoxelLodBatchSourcePlan(
                 source, conversionSource, reuseKey, hasOverrides, false);
         }
@@ -469,6 +495,7 @@ namespace LocalModels.VoxelBridge
             if (maximumInitialVoxelMultiplier == 0)
                 maximumInitialVoxelMultiplier = initialVoxelMultiplier;
             options.ConversionProfile?.ValidateForExport();
+            Vector3 bakedRootScale = options.ResolveScale(source);
             if (options.ConversionProfile != null)
                 VoxelProductionExporter.ValidatePalettes(options.ConversionProfile.colorMapping.ColorPalette,
                     options.ConversionProfile.surfacePalette);
@@ -519,7 +546,7 @@ namespace LocalModels.VoxelBridge
                 string manifestAssetPath = $"{familyFolder}/{safeName}.voxset.json";
                 string profilePath = AssetDatabase.GetAssetPath(profile);
                 string retainedGuid = MeshVoxelizer.ExportRetainedGeometry(source, options.IncludeInactiveObjects,
-                    options.ConversionProfile, familyFolder);
+                    options.ConversionProfile, familyFolder, bakedRootScale);
                 var entries = new List<VoxelLodEntry>();
                 var voxPaths = new List<string>();
 
@@ -565,6 +592,8 @@ namespace LocalModels.VoxelBridge
 
                 var manifest = new VoxelLodSetManifest
                 {
+                    normalizedScale = options.NormalizeScale,
+                    bakedRootScale = bakedRootScale,
                     sourceAxes = options.ConversionProfile?.sourceAxes ?? VoxelSourceAxes.PreserveLocalAxes,
                     familyId = familyId,
                     sourceName = source.name,
@@ -621,7 +650,8 @@ namespace LocalModels.VoxelBridge
                 ColorMode = options.ColorMode,
                 SingleColor = options.SingleColor,
                 AlphaCutoff = options.AlphaCutoff,
-                ConversionProfile = options.ConversionProfile
+                ConversionProfile = options.ConversionProfile,
+                RootScale = options.ResolveScale(source)
             };
             return MeshVoxelizer.Voxelize(source, settings, (progress, message) =>
                 cancelProgress != null && cancelProgress(

@@ -17,6 +17,7 @@ namespace LocalModels.VoxelBridge
         public Color32 SingleColor = new Color32(180, 180, 180, 255);
         public float AlphaCutoff = 0.1f;
         public VoxelConversionProfile ConversionProfile;
+        public Vector3 RootScale = Vector3.one;
     }
 
     internal sealed class VoxelizationResult
@@ -59,7 +60,8 @@ namespace LocalModels.VoxelBridge
             var mapper = settings.ConversionProfile != null ? new VoxelConversionColorMapper(settings.ConversionProfile) : null;
             var surfaceMatcher = settings.ConversionProfile != null && settings.ConversionProfile.assignSurfacesFromPbr
                 ? new VoxelSurfaceMatcher(settings.ConversionProfile.surfaceMapping) : null;
-            List<MeshSource> sources = ExtractMeshes(source, settings.IncludeInactiveObjects, settings.ConversionProfile);
+            List<MeshSource> sources = ExtractMeshes(source, settings.IncludeInactiveObjects, settings.ConversionProfile,
+                rootScale: settings.RootScale);
             if (sources.Count == 0)
                 throw new InvalidOperationException("No triangle submeshes remain to voxelize after applying conversion rules.");
 
@@ -156,7 +158,7 @@ namespace LocalModels.VoxelBridge
                         GC.Collect();
                     if (cancelProgress != null && cancelProgress(0.94f, "Filling interior"))
                         throw new OperationCanceledException("Voxelization cancelled.");
-                    FillInterior(grid);
+                    FillInterior(grid, settings.ConversionProfile?.surfacePalette);
                     occupiedVoxelCount = grid.CountOccupied();
                 }
 
@@ -180,11 +182,12 @@ namespace LocalModels.VoxelBridge
         }
 
         internal static Bounds GetSourceBounds(
-            UnityEngine.Object source, bool includeInactiveObjects = true, VoxelConversionProfile profile = null)
+            UnityEngine.Object source, bool includeInactiveObjects = true, VoxelConversionProfile profile = null,
+            Vector3? rootScale = null)
         {
             if (source == null) throw new ArgumentNullException(nameof(source));
             profile?.Validate();
-            List<MeshSource> sources = ExtractMeshes(source, includeInactiveObjects, profile);
+            List<MeshSource> sources = ExtractMeshes(source, includeInactiveObjects, profile, rootScale: rootScale);
             try
             {
                 if (sources.Count == 0)
@@ -201,7 +204,7 @@ namespace LocalModels.VoxelBridge
 
         private static List<MeshSource> ExtractMeshes(
             UnityEngine.Object source, bool includeInactiveObjects, VoxelConversionProfile profile = null,
-            VoxelConversionAction action = VoxelConversionAction.Voxelize)
+            VoxelConversionAction action = VoxelConversionAction.Voxelize, Vector3? rootScale = null)
         {
             var result = new List<MeshSource>();
             if (source is Mesh mesh)
@@ -227,7 +230,7 @@ namespace LocalModels.VoxelBridge
 
             try
             {
-                Matrix4x4 toRoot = workingRoot.transform.worldToLocalMatrix;
+                Matrix4x4 toRoot = Matrix4x4.Scale(rootScale ?? Vector3.one) * workingRoot.transform.worldToLocalMatrix;
                 foreach (MeshFilter filter in workingRoot.GetComponentsInChildren<MeshFilter>(true))
                 {
                     if (filter.sharedMesh == null ||
@@ -256,7 +259,9 @@ namespace LocalModels.VoxelBridge
                     var baked = new Mesh { name = renderer.sharedMesh.name + "_VoxelBake" };
                     try
                     {
-                        renderer.BakeMesh(baked);
+                        // Match the renderer-local mesh expected by localToWorldMatrix. The default
+                        // bake path double-applies imported renderer scales on Synty skinned assets.
+                        renderer.BakeMesh(baked, true);
                         MeshSource item = CreateMeshSource(baked, toRoot * renderer.transform.localToWorldMatrix,
                             materials, true, workingRoot.transform, renderer.transform, profile, action);
                         if (item != null) result.Add(item);
@@ -335,9 +340,9 @@ namespace LocalModels.VoxelBridge
         }
 
         internal static string ExportRetainedGeometry(UnityEngine.Object source, bool includeInactiveObjects,
-            VoxelConversionProfile profile, string familyFolder)
+            VoxelConversionProfile profile, string familyFolder, Vector3? rootScale = null)
         {
-            List<MeshSource> sources = ExtractMeshes(source, includeInactiveObjects, profile, VoxelConversionAction.KeepOriginal);
+            List<MeshSource> sources = ExtractMeshes(source, includeInactiveObjects, profile, VoxelConversionAction.KeepOriginal, rootScale);
             GameObject root = null;
             try
             {
@@ -407,12 +412,9 @@ namespace LocalModels.VoxelBridge
         {
             Vector3 min = Vector3.Min(a, Vector3.Min(b, c));
             Vector3 max = Vector3.Max(a, Vector3.Max(b, c));
-            int minX = LowerCell(min.x, max.x, grid.Origin.x, grid.VoxelSize, grid.Size.x);
-            int minY = LowerCell(min.y, max.y, grid.Origin.y, grid.VoxelSize, grid.Size.y);
-            int minZ = LowerCell(min.z, max.z, grid.Origin.z, grid.VoxelSize, grid.Size.z);
-            int maxX = UpperCell(min.x, max.x, grid.Origin.x, grid.VoxelSize, grid.Size.x);
-            int maxY = UpperCell(min.y, max.y, grid.Origin.y, grid.VoxelSize, grid.Size.y);
-            int maxZ = UpperCell(min.z, max.z, grid.Origin.z, grid.VoxelSize, grid.Size.z);
+            CellRange(min.x, max.x, grid.Origin.x, grid.VoxelSize, grid.Size.x, out int minX, out int maxX);
+            CellRange(min.y, max.y, grid.Origin.y, grid.VoxelSize, grid.Size.y, out int minY, out int maxY);
+            CellRange(min.z, max.z, grid.Origin.z, grid.VoxelSize, grid.Size.z, out int minZ, out int maxZ);
             Vector3 half = Vector3.one * (grid.VoxelSize * 0.5001f);
 
             for (int z = minZ; z <= maxZ; z++)
@@ -424,7 +426,11 @@ namespace LocalModels.VoxelBridge
                 Vector3 closest = ClosestPoint(a, b, c, center, out Vector3 barycentric);
                 float distance = (closest - center).sqrMagnitude;
                 int index = grid.Index(x, y, z);
-                if (distance >= bestDistances[index]) continue;
+                bool existingGlass = mapper != null && grid.Occupied[index] &&
+                    mapper.IsGlass(VoxelSemanticEncoding.SurfaceId(grid.SemanticIds[index]));
+                // An opaque sample can replace glass even when farther from the cell center.
+                // RGB and cells already owned by opaque geometry keep the distance fast path.
+                if (distance >= bestDistances[index] && !existingGlass) continue;
                 Vector2 uv = uv0 * barycentric.x + uv1 * barycentric.y + uv2 * barycentric.z;
                 Color32 color = sampler.Sample(uv);
                 bool belowCutoff = color.a / 255f < alphaCutoff;
@@ -457,7 +463,12 @@ namespace LocalModels.VoxelBridge
                         }
                     }
                     // Glass opacity belongs to the semantic palette, not to geometric alpha clipping.
-                    if (belowCutoff && !mapper.IsGlass(resolvedSurface)) continue;
+                    bool incomingGlass = mapper.IsGlass(resolvedSurface);
+                    if (belowCutoff && !incomingGlass) continue;
+                    // One semantic pair per cell: preserve opaque barriers at mixed window/frame
+                    // intersections. Within the same render class, retain the nearest sample.
+                    if (incomingGlass && grid.Occupied[index] &&
+                        (!existingGlass || distance >= bestDistances[index])) continue;
                     grid.SemanticIds[index] = mapper.Map(color, resolvedSurface);
                     if (decisions != null) decisions[index] = decision;
                 }
@@ -471,24 +482,21 @@ namespace LocalModels.VoxelBridge
             }
         }
 
-        private static int LowerCell(float triangleMin, float triangleMax, float origin, float voxelSize, int gridSize)
+        private static void CellRange(float triangleMin, float triangleMax, float origin, float voxelSize,
+            int gridSize, out int lower, out int upper)
         {
-            float raw = (triangleMin - origin) / voxelSize;
+            float rawMin = (triangleMin - origin) / voxelSize;
+            float rawMax = (triangleMax - origin) / voxelSize;
             bool flat = triangleMax - triangleMin <= voxelSize * 1e-6f;
             float gridCenter = origin + gridSize * voxelSize * 0.5f;
-            if (flat && triangleMin > gridCenter) raw -= 1e-5f;
-            return Mathf.Clamp(Mathf.FloorToInt(raw), 0, gridSize - 1);
-        }
-
-        private static int UpperCell(float triangleMin, float triangleMax, float origin, float voxelSize, int gridSize)
-        {
             // A non-flat upper bound is half-open. For a flat boundary face, move only faces
             // on the positive half inward; negative faces already fall into the interior cell.
-            float raw = (triangleMax - origin) / voxelSize;
-            bool flat = triangleMax - triangleMin <= voxelSize * 1e-6f;
-            float gridCenter = origin + gridSize * voxelSize * 0.5f;
-            if (!flat || triangleMax > gridCenter) raw -= 1e-5f;
-            return Mathf.Clamp(Mathf.FloorToInt(raw), 0, gridSize - 1);
+            if (flat && triangleMin > gridCenter) rawMin -= 1e-5f;
+            if (!flat || triangleMax > gridCenter) rawMax -= 1e-5f;
+            lower = Mathf.Clamp(Mathf.FloorToInt(rawMin), 0, gridSize - 1);
+            // The boundary bias must not erase an interval thinner than that bias.
+            // Keep its lower candidate cell; the triangle/box test still decides coverage.
+            upper = Mathf.Clamp(Mathf.FloorToInt(rawMax), lower, gridSize - 1);
         }
 
         internal static bool TriangleIntersectsBox(Vector3 a, Vector3 b, Vector3 c, Vector3 center, Vector3 half)
@@ -558,14 +566,17 @@ namespace LocalModels.VoxelBridge
             return a + ab * vFace + ac * wFace;
         }
 
-        private static void FillInterior(VoxelGrid grid)
+        internal static void FillInterior(VoxelGrid grid, VoxelSurfacePalette surfacePalette = null)
         {
+            // Glass remains occupied geometry, but does not seal spaces visible through it.
+            // Match the mesher's render-class policy, independently of the current opacity.
+            bool[] glass = grid.IsSemantic ? VoxelSemanticMesher.GlassIds(surfacePalette) : null;
             var outside = new bool[grid.Occupied.Length];
             var queue = new Queue<int>();
-            void EnqueueEmpty(int x, int y, int z)
+            void EnqueueExterior(int x, int y, int z)
             {
                 int index = grid.Index(x, y, z);
-                if (grid.Occupied[index] || outside[index]) return;
+                if (outside[index] || (grid.Occupied[index] && !VoxelSemanticMesher.IsGlass(grid, index, glass))) return;
                 outside[index] = true;
                 queue.Enqueue(index);
             }
@@ -573,17 +584,17 @@ namespace LocalModels.VoxelBridge
             for (int x = 0; x < grid.Size.x; x++)
             for (int y = 0; y < grid.Size.y; y++)
             {
-                EnqueueEmpty(x, y, 0); EnqueueEmpty(x, y, grid.Size.z - 1);
+                EnqueueExterior(x, y, 0); EnqueueExterior(x, y, grid.Size.z - 1);
             }
             for (int x = 0; x < grid.Size.x; x++)
             for (int z = 0; z < grid.Size.z; z++)
             {
-                EnqueueEmpty(x, 0, z); EnqueueEmpty(x, grid.Size.y - 1, z);
+                EnqueueExterior(x, 0, z); EnqueueExterior(x, grid.Size.y - 1, z);
             }
             for (int y = 0; y < grid.Size.y; y++)
             for (int z = 0; z < grid.Size.z; z++)
             {
-                EnqueueEmpty(0, y, z); EnqueueEmpty(grid.Size.x - 1, y, z);
+                EnqueueExterior(0, y, z); EnqueueExterior(grid.Size.x - 1, y, z);
             }
 
             int[] dx = { -1, 1, 0, 0, 0, 0 };
@@ -597,7 +608,7 @@ namespace LocalModels.VoxelBridge
                 {
                     int nx = x + dx[n], ny = y + dy[n], nz = z + dz[n];
                     if (nx < 0 || ny < 0 || nz < 0 || nx >= grid.Size.x || ny >= grid.Size.y || nz >= grid.Size.z) continue;
-                    EnqueueEmpty(nx, ny, nz);
+                    EnqueueExterior(nx, ny, nz);
                 }
             }
 

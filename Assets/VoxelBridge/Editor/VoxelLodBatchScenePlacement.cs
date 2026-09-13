@@ -55,6 +55,7 @@ namespace LocalModels.VoxelBridge
                     $"The converted prefab for '{sourceObject.name}' was not found.");
 
             VoxelSourceAxes axes = VoxelSourceOrientation.ReadPlacementAxes(build.ManifestAssetPath);
+            bool normalized = VoxelSourceOrientation.ReadNormalizedScale(build.ManifestAssetPath);
             var instance = PrefabUtility.InstantiatePrefab(prefab, sourceObject.scene) as GameObject;
             if (instance == null)
                 throw new InvalidOperationException(
@@ -64,10 +65,14 @@ namespace LocalModels.VoxelBridge
             {
                 Transform sourceTransform = sourceObject.transform;
                 Transform instanceTransform = instance.transform;
-                instanceTransform.SetParent(sourceTransform.parent, false);
+                instanceTransform.SetParent(normalized ? VoxelScaleNormalization.UnscaledParent(sourceTransform.parent) : sourceTransform.parent, false);
                 instanceTransform.SetSiblingIndex(sourceTransform.GetSiblingIndex() + 1);
-                VoxelSourceOrientation.CopyPlacement(sourceTransform, instanceTransform, axes);
-                SnapWorldPosition(instanceTransform, sourceTransform.position, profile);
+                if (normalized) VoxelScaleNormalization.Place(sourceTransform, instanceTransform, axes);
+                else
+                {
+                    VoxelSourceOrientation.CopyPlacement(sourceTransform, instanceTransform, axes);
+                    SnapWorldPosition(instanceTransform, sourceTransform.position, profile);
+                }
                 instance.name = GameObjectUtility.GetUniqueNameForSibling(
                     sourceTransform.parent, sourceObject.name + "_Voxel");
                 instance.tag = sourceObject.tag;
@@ -114,19 +119,28 @@ namespace LocalModels.VoxelBridge
 
             var sourceAxes = successful.ToDictionary(item => item,
                 item => VoxelSourceOrientation.ReadPlacementAxes(item.BuildResult.ManifestAssetPath));
+            bool normalized = VoxelSourceOrientation.ReadNormalizedScale(successful[0].BuildResult.ManifestAssetPath);
+            if (successful.Any(item => VoxelSourceOrientation.ReadNormalizedScale(item.BuildResult.ManifestAssetPath) != normalized))
+                throw new InvalidOperationException("Cannot place a batch mixing normalized and legacy scale contracts. Convert the batch with consistent options.");
+            Transform outputParent = normalized ? VoxelScaleNormalization.UnscaledParent(sourceParent.transform.parent) : sourceParent.transform.parent;
 
             Undo.IncrementCurrentGroup();
             int undoGroup = Undo.GetCurrentGroup();
             Undo.SetCurrentGroupName("Place voxel batch in scene");
 
             string rootName = GameObjectUtility.GetUniqueNameForSibling(
-                sourceParent.transform.parent, sourceParent.name + "_Voxel");
+                outputParent, sourceParent.name + "_Voxel");
             var voxelRoot = new GameObject(rootName);
             Undo.RegisterCreatedObjectUndo(voxelRoot, "Create voxel root");
-            voxelRoot.transform.SetParent(sourceParent.transform.parent, false);
+            UnityEngine.SceneManagement.SceneManager.MoveGameObjectToScene(voxelRoot, sourceParent.scene);
+            voxelRoot.transform.SetParent(outputParent, false);
             voxelRoot.transform.SetSiblingIndex(sourceParent.transform.GetSiblingIndex() + 1);
-            CopyLocalTransform(sourceParent.transform, voxelRoot.transform);
-            SnapWorldPosition(voxelRoot.transform, sourceParent.transform.position, profile);
+            if (normalized) VoxelScaleNormalization.Place(sourceParent.transform, voxelRoot.transform, VoxelSourceAxes.PreserveLocalAxes);
+            else
+            {
+                CopyLocalTransform(sourceParent.transform, voxelRoot.transform);
+                SnapWorldPosition(voxelRoot.transform, sourceParent.transform.position, profile);
+            }
             voxelRoot.layer = sourceParent.layer;
             voxelRoot.tag = sourceParent.tag;
             GameObjectUtility.SetStaticEditorFlags(
@@ -147,8 +161,12 @@ namespace LocalModels.VoxelBridge
                         $"The converted prefab for '{item.Source.name}' could not be instantiated.");
                 Undo.RegisterCreatedObjectUndo(instance, "Place voxel model");
                 instance.name = item.Source.name;
-                VoxelSourceOrientation.CopyPlacement(item.Source.transform, instance.transform, sourceAxes[item]);
-                SnapWorldPosition(instance.transform, item.Source.transform.position, profile);
+                if (normalized) VoxelScaleNormalization.Place(item.Source.transform, instance.transform, sourceAxes[item]);
+                else
+                {
+                    VoxelSourceOrientation.CopyPlacement(item.Source.transform, instance.transform, sourceAxes[item]);
+                    SnapWorldPosition(instance.transform, item.Source.transform.position, profile);
+                }
                 SetLayerAndStaticFlagsRecursively(
                     instance, item.Source.layer,
                     GameObjectUtility.GetStaticEditorFlags(item.Source));

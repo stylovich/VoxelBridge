@@ -83,8 +83,140 @@ namespace LocalModels.VoxelBridge.Tests
             data.ApplyModifiedPropertiesWithoutUndo();
         }
 
+        [Test]
+        public void NormalizeScale_PreservesRetainedGeometryAcrossDerivedLods()
+        {
+            root.transform.localScale = Vector3.one * 2;
+            Cube(Vector3.zero, body);
+            var retained = Cube(new Vector3(1.5f, 0, 0), glass);
+            SetRule(retained, VoxelConversionAction.KeepOriginal);
+            var build = VoxelLodPipeline.GenerateAutomatic(root, style, new VoxelLodBuildOptions
+            {
+                ExportFolder = folder, GenerateLod0Only = true, NormalizeScale = true,
+                ConversionProfile = conversion, ColorMode = VoxelColorMode.MaterialOnly, AlphaCutoff = .1f
+            });
+            var manifest = VoxelProductionFamily.Load(build.ManifestAssetPath);
+            Assert.That(manifest.normalizedScale, Is.True);
+            var kept = AssetDatabase.LoadAssetAtPath<GameObject>(AssetDatabase.GUIDToAssetPath(manifest.retainedGeometryGuid));
+            var mesh = kept.GetComponentInChildren<MeshFilter>().sharedMesh;
+            Assert.That(mesh.bounds.center.x, Is.EqualTo(3).Within(.0001));
+            Assert.That(mesh.bounds.size.x, Is.EqualTo(2).Within(.0001));
+            VoxelProductionFamily.DeriveLevel(build.ManifestAssetPath, 1, VoxelLodGenerationMode.ReduceParent);
+            manifest = VoxelProductionFamily.Load(build.ManifestAssetPath);
+            Assert.That(manifest.normalizedScale, Is.True);
+            Assert.That(manifest.bakedRootScale, Is.EqualTo(Vector3.one * 2));
+            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(build.PrefabAssetPath);
+            Assert.That(prefab.transform.Find("LOD1").GetComponentsInChildren<MeshFilter>()
+                .Any(f => f.sharedMesh == mesh), Is.True);
+        }
+
         private VoxelizationResult Voxelize() => MeshVoxelizer.Voxelize(root, new VoxelizationSettings
         { VoxelSize = .125f, Padding = 1, FillInterior = true, ConversionProfile = conversion });
+
+        [TestCase(false, .02f, .06f)]
+        [TestCase(true, .02f, .06f)]
+        [TestCase(false, .06f, .02f)]
+        [TestCase(true, .06f, .02f)]
+        [TestCase(false, .04f, .04f)]
+        [TestCase(true, .04f, .04f)]
+        public void MixedVoxel_OpaqueWinsRegardlessOfOrderAndDistance(bool glassFirst, float opaqueZ, float glassZ)
+        {
+            Assert.That(SampleOverlappingPlanes(glassFirst, opaqueZ, glassZ, 7, 44), Is.EqualTo(7));
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void MixedVoxel_AlphaClippedOpaqueDoesNotDisplaceGlass(bool glassFirst)
+        {
+            body.SetColor("_BaseColor", new Color(1, 1, 1, .01f));
+            Assert.That(SampleOverlappingPlanes(glassFirst, .06f, .02f, 7, 44), Is.EqualTo(44));
+        }
+
+        [TestCase(false, 0, 7)]
+        [TestCase(true, 0, 7)]
+        [TestCase(false, 44, 200)]
+        [TestCase(true, 44, 200)]
+        public void MixedVoxel_SameRenderClassKeepsNearestSurface(bool reverseOrder, int farSurface, int nearSurface)
+        {
+            if (nearSurface == 200)
+                conversion.surfacePalette.MutableEntries.Add(new VoxelSurfaceDefinition(200, "Other Glass",
+                    VoxelSurfaceRenderClass.Transparent, 0, .8f, 0, 1, .4f));
+            Assert.That(SampleOverlappingPlanes(reverseOrder, .02f, .06f, farSurface, nearSurface), Is.EqualTo(nearSurface));
+        }
+
+        private int SampleOverlappingPlanes(bool secondFirst, float firstZ, float secondZ, int firstSurface, int secondSurface)
+        {
+            var firstMesh = new Mesh { name = "First plane" };
+            var secondMesh = new Mesh { name = "Second plane" };
+            GameObject Plane(Mesh mesh, float z, Material material, int surface)
+            {
+                mesh.vertices = new[] { new Vector3(0, 0, z), new Vector3(1, 0, z), new Vector3(1, 1, z), new Vector3(0, 1, z) };
+                mesh.triangles = new[] { 0, 1, 2, 0, 2, 3 }; mesh.RecalculateBounds();
+                var go = new GameObject(mesh.name);
+                SceneManager.MoveGameObjectToScene(go, scene); go.transform.SetParent(root.transform, false);
+                go.AddComponent<MeshFilter>().sharedMesh = mesh;
+                go.AddComponent<MeshRenderer>().sharedMaterial = material;
+                SetRule(go, VoxelConversionAction.Voxelize, surface);
+                return go;
+            }
+            GameObject first = null, second = null;
+            try
+            {
+                first = Plane(firstMesh, firstZ, body, firstSurface);
+                second = Plane(secondMesh, secondZ, glass, secondSurface);
+                if (secondFirst) second.transform.SetAsFirstSibling();
+                var grid = MeshVoxelizer.Voxelize(root, new VoxelizationSettings { VoxelSize = .125f, Padding = 1,
+                    FillInterior = false, ConversionProfile = conversion, ColorMode = VoxelColorMode.MaterialOnly, AlphaCutoff = .1f }).Grid;
+                var cell = Vector3Int.FloorToInt((Vector3.one * .0625f - grid.Origin) / grid.VoxelSize);
+                int index = grid.Index(cell.x, cell.y, cell.z);
+                Assert.That(grid.Occupied[index], Is.True);
+                return VoxelSemanticEncoding.SurfaceId(grid.SemanticIds[index]);
+            }
+            finally
+            {
+                if (first != null) Object.DestroyImmediate(first);
+                if (second != null) Object.DestroyImmediate(second);
+                Object.DestroyImmediate(firstMesh); Object.DestroyImmediate(secondMesh);
+            }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void GlassCabin_PreservesAirWhileFillingTheOpaqueSeat(bool byObject)
+        {
+            void Wall(Vector3 position, Vector3 scale, Material material)
+                => Cube(position, material).transform.localScale = scale;
+            Wall(new Vector3(-2, 0, 0), new Vector3(.25f, 4.25f, 4.25f), body);
+            Wall(new Vector3(2, 0, 0), new Vector3(.25f, 4.25f, 4.25f), body);
+            Wall(new Vector3(0, -2, 0), new Vector3(4.25f, .25f, 4.25f), body);
+            Wall(new Vector3(0, 2, 0), new Vector3(4.25f, .25f, 4.25f), body);
+            Wall(new Vector3(0, 0, 2), new Vector3(4.25f, 4.25f, .25f), body);
+            var window = Cube(new Vector3(0, 0, -2), glass);
+            window.transform.localScale = new Vector3(4.25f, 4.25f, .25f);
+            Cube(new Vector3(0, -1, 0), body);
+            if (byObject) SetRule(window, VoxelConversionAction.Voxelize, 44);
+            else conversion.materialRules.Add(new VoxelMaterialConversionRule
+                { material = glass, action = VoxelConversionAction.Voxelize, surfaceId = 44 });
+
+            var raw = MeshVoxelizer.Voxelize(root, new VoxelizationSettings
+                { VoxelSize = .125f, Padding = 1, FillInterior = false, ConversionProfile = conversion }).Grid;
+            var filled = Voxelize().Grid;
+            int At(Vector3 point) { var cell = Vector3Int.FloorToInt((point - filled.Origin) / filled.VoxelSize); return filled.Index(cell.x, cell.y, cell.z); }
+            int cabin = At(new Vector3(0, 1, 0)), seat = At(new Vector3(0, -1, 0));
+            Assert.That(raw.Occupied[cabin], Is.False);
+            Assert.That(raw.Occupied[seat], Is.False, "The source seat is a closed mesh shell before filling.");
+            Assert.That(filled.Occupied[cabin], Is.False, "Glass must not seal the visible cabin for interior filling.");
+            Assert.That(filled.Occupied[seat], Is.True, "Closed opaque parts still need solid interiors.");
+            Assert.That(VoxelSemanticEncoding.SurfaceId(filled.SemanticIds[seat]), Is.EqualTo(0));
+            for (int i = 0; i < raw.Occupied.Length; i++)
+                if (raw.Occupied[i])
+                {
+                    Assert.That(filled.Occupied[i], Is.True);
+                    Assert.That(filled.SemanticIds[i], Is.EqualTo(raw.SemanticIds[i]), "Filling must preserve sampled faces, including glass.");
+                }
+            Assert.That(Enumerable.Range(0, filled.Occupied.Length).Any(i => filled.Occupied[i] &&
+                VoxelSemanticEncoding.SurfaceId(filled.SemanticIds[i]) == 44), Is.True);
+        }
 
         [TestCase(false)]
         [TestCase(true)]
