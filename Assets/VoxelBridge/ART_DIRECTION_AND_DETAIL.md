@@ -2,7 +2,7 @@
 
 ## Estado y objetivo
 
-Enfoque de diseño para validar el acabado visual sobre una manzana piloto antes de ampliar las optimizaciones. Existe un prototipo aislado de rejilla superficial estática; la gestión específica de anuncios y las mediciones de rendimiento permanecen pendientes. No requiere sustituir el flujo de autoría actual. La dirección del mundo y sus prioridades se describen en la [hoja de ruta de VoxelCity](../../Docs/WorldDesign/VoxelCity/ROADMAP.md).
+Enfoque de diseño para validar el acabado visual sobre una manzana piloto antes de ampliar las optimizaciones. Existe un prototipo aislado de rejilla superficial con anclaje mundial o de familia; la gestión específica de anuncios y las mediciones de rendimiento permanecen pendientes. No requiere sustituir el flujo de autoría actual. La dirección del mundo y sus prioridades se describen en la [hoja de ruta de VoxelCity](../../Docs/WorldDesign/VoxelCity/ROADMAP.md).
 
 Priorizar modelos con zonas amplias de ColorID y SurfaceID uniformes, reservando la geometría voxel para volumen, silueta, huecos y relieves intencionales. El detalle puramente superficial puede proceder del shader o de una imagen separada, en lugar de fragmentar las caras del modelo mediante pintura por voxel.
 
@@ -23,7 +23,7 @@ Esta distribución es una decisión de autoría, no una conversión automática 
 
 - Separar la unidad geométrica de la escala visual. El modo fijo conserva un tamaño físico; el modo multiescala mezcla rejillas binarias alineadas según su tamaño proyectado, sin depender del índice LOD geométrico.
 - Definir un origen común para la familia, independiente del origen de cada chunk. Mantener la continuidad entre chunks y LODs.
-- Anclar el patrón al modelo en vehículos y otros objetos dinámicos para evitar que se deslice al moverlos o rotarlos. La arquitectura estática alineada puede compartir una rejilla mundial con origen y orientación compatibles. Definir y verificar el tratamiento de escalas uniformes y no uniformes antes de afirmar que conserva su tamaño físico.
+- Anclar el patrón al modelo en vehículos y otros objetos dinámicos para evitar que se deslice al moverlos o rotarlos. La arquitectura estática alineada puede compartir una rejilla mundial con origen y orientación compatibles. El prototipo compensa la escala de los ejes para conservar el tamaño físico; no admite reflexión ni cizallamiento.
 - Cuantizar el detalle a la rejilla cuando corresponda al estilo visual. Atenuar o filtrar las frecuencias finas a distancia para evitar aliasing y parpadeo; el muestreo puntual por sí solo no resuelve este problema.
 - Considerar una semilla por instancia sólo si aporta variedad útil y puede transportarse sin romper el uso de materiales compartidos ni la compatibilidad con Entities Graphics.
 - Mantener ColorID y SurfaceID como identidad de autoría. Definir los límites cromáticos de la variación visual; el ruido no debe crear nuevos IDs ni reinterpretar las superficies.
@@ -34,15 +34,16 @@ Comenzar con una rejilla opcional de intensidad ajustable, comparando normal, ru
 
 ## Prototipo estático de rejilla
 
-`Shaders/VoxelGridPrototype.shadergraph` conserva las LUT de color y superficie del shader opaco y añade `Shaders/VoxelGridDetail.hlsl`. El patrón utiliza posición mundial absoluta y proyección sobre el plano principal de la cara, sin reutilizar UV0 o UV3. Modifica normales y smoothness; no desplaza geometría, profundidad, color, emisión ni colisiones. No incluye POM/SPOM.
+`Shaders/VoxelGridPrototype.shadergraph` conserva las LUT de color y superficie del shader opaco y añade `Shaders/VoxelGridDetail.hlsl`. El patrón proyecta sobre el plano principal de la cara en el espacio elegido mediante `Grid Anchor`, sin reutilizar UV0 o UV3. Modifica normales y smoothness; no desplaza geometría, profundidad, color, emisión ni colisiones. No incluye POM/SPOM.
 
-`Grid Mode` permite comparar `Fixed` y `Multiscale`. El segundo mezcla dos rejillas consecutivas de tamaños `CellSize × 2^n`, alineadas a un mismo origen mundial. La escala se selecciona mediante derivadas de pantalla, por lo que responde a distancia, resolución, campo de visión y oblicuidad. No estira continuamente las celdas ni modifica las transiciones del LODGroup. Durante la mezcla pueden percibirse ambas rejillas: evaluar su lectura artística en movimiento.
+`Grid Mode` permite comparar `Fixed` y `Multiscale`. El segundo mezcla dos rejillas consecutivas de tamaños `CellSize × 2^n`, alineadas al mismo origen del anclaje elegido. La escala se selecciona mediante derivadas de pantalla, por lo que responde a distancia, resolución, campo de visión y oblicuidad. No estira continuamente las celdas ni modifica las transiciones del LODGroup. Durante la mezcla pueden percibirse ambas rejillas: evaluar su lectura artística en movimiento.
 
 Para probarlo, duplicar un material semántico opaco, asignarle el shader `Voxel Bridge/Prototypes/VoxelGridPrototype` y conservar sus referencias a las LUT. Aplicar la copia sólo a las instancias de comparación y a sus LODs, sin modificar el material compartido de producción. Los materiales y escenas de experimentación son recursos locales excluidos del repositorio.
 
 | Control del material | Uso |
 |---|---|
 | Grid Enabled | `0`: referencia sin detalle; `1`: rejilla activa. |
+| Grid Anchor | `World`: origen y ejes mundiales, valor predeterminado. `Family Local`: origen y ejes compartidos por los renderers de la familia; sigue su posición y rotación. |
 | Grid CellSize | Tamaño físico fijo o mínimo en metros. Punto inicial de comparación: `0.0625`. |
 | Grid Mode | `Fixed`: tamaño constante con atenuación; `Multiscale`: crecimiento visual binario independiente de la geometría. Los materiales existentes conservan `Fixed` por defecto. |
 | Grid TargetPixels | Objetivo aproximado de tamaño en pantalla para multiescala, entre 4 y 64 píxeles. Aumentarlo produce bloques visuales mayores; punto inicial: `12`. |
@@ -54,7 +55,22 @@ Para probarlo, duplicar un material semántico opaco, asignarle el shader `Voxel
 
 Comparar con la misma cámara e iluminación. Para retirar la prueba, reasignar a los renderers afectados el material opaco original de su prefab; no revertir otros overrides de la instancia. Los prefabs, VOX y materiales de producción permanecen independientes del prototipo.
 
-Alcance: arquitectura estática alineada a los ejes mundiales. Los chunks y LODs comparten fase mundial; no se garantiza correspondencia de juntas con los bordes de modelos colocados fuera de esa rejilla. El anclaje local de objetos dinámicos, las superficies arbitrariamente rotadas, la validación completa de subescenas y el presupuesto GPU quedan pendientes. El shader conserva DOTS Instancing, pero compilar esa variante no sustituye una prueba de Entities Graphics. No utilizar este prototipo como shader de ray tracing.
+### Contrato de anclaje
+
+- `World`: adecuado para arquitectura estática alineada a los ejes mundiales. Comparte fase entre familias, pero no ajusta sus posiciones ni garantiza coincidencia con bordes fuera de la rejilla.
+- `Family Local`: utiliza el espacio local del renderer. Requiere que todos los chunks y LODs conserven el mismo sistema de coordenadas de la raíz de familia, como en las mallas de producción generadas por Voxel Bridge. Un pivote arbitrario o un chunk recentrado no cumple ese contrato. La escala positiva, uniforme o no uniforme, se compensa por eje para expresar `CellSize` en metros; no convierte voxels geométricos estirados en cubos.
+- Ejecutar `Validate Family Local Grid` desde el menú contextual del componente `LODGroup`. Comprueba transformaciones relativas y rechaza `Batching Static`, lotes estáticos activos, reflexiones y cizallamiento. No modifica objetos ni certifica la unidad o fase de los vértices de la malla.
+- Mantener `Batching Static` desactivado en los renderers con anclaje local: el batching estático clásico puede sustituir su sistema de coordenadas. Esto es independiente de DOTS Instancing.
+
+El origen de la malla y su unidad física deben ser compatibles con la rejilla. El anclaje local evita el deslizamiento al trasladar o rotar la familia, pero no alinea módulos independientes entre sí. Tampoco garantiza que una celda visual multiescala coincida con cada borde geométrico fino: una celda grande agrupa deliberadamente varios voxels.
+
+La validación completa de subescenas, Entities Graphics, movimiento y presupuesto GPU permanece pendiente. El shader conserva DOTS Instancing, pero compilar esa variante no sustituye una prueba de Entities Graphics. No utilizar este prototipo como shader de ray tracing.
+
+### Colocación de arquitectura estática
+
+La regla de diseño propuesta requiere origen de colocación común, escala normalizada a uno y orientaciones compatibles con los ejes de la rejilla —rotaciones en múltiplos de 90°—, incluyendo las transformaciones heredadas. Comprobar la fase de los vértices, no sólo la posición del pivote.
+
+El snapping a `0.0625 m` no garantiza por sí solo coincidencia entre rejillas locales de `0.25 m` o mayores. Utilizar `World` cuando sea necesaria una fase visual común entre módulos, o acordar una fase de colocación compatible con la escala más gruesa. La validación automática de estas reglas pertenece a una etapa posterior; el prototipo no mueve ni corrige objetos de escena.
 
 ## Experimento de escala geométrica
 

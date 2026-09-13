@@ -13,6 +13,7 @@ El proyecto de laboratorio permite regenerar los modelos de prueba antes de migr
 | Escala | Unidad urbana objetivo de `0.03125 m`, con resoluciones geométricas en múltiplos binarios. Un asset grande puede comenzar con una resolución más gruesa. |
 | Rejilla visual | Comparación entre tamaño fijo y multiescala binaria alineada, independiente del LOD geométrico. Conservar la lectura de bloques a distancia mediante mezcla gradual y filtrado; no estirar continuamente la cuadrícula. |
 | Anclaje | Rejilla propia para objetos dinámicos; origen mundial compatible para arquitectura estática alineada. Continuidad entre chunks de una familia. |
+| Colocación estática | Regla propuesta: origen común, escala normalizada a uno, orientación en múltiplos de 90° y snapping compatible con la unidad y fase de la malla. La validación automática permanece pendiente; el snapping fino no garantiza alineación entre rejillas locales más gruesas. |
 | Manzanas | Unidades de diseño compuestas por módulos y familias; no equivalen necesariamente a una única malla, rejilla voxel, familia combinada o unidad de streaming. |
 | Autoría procedural | Semillas jerárquicas, identidades estables y propiedad de capas. Conservar receta y versión; respetar contenido congelado y retocado. |
 | Detalles importantes | Utilizar el preview del siguiente LOD y los retoques explícitos disponibles. No añadir etiquetas de importancia ni prometer conservación automática de detalles subvoxel. |
@@ -37,6 +38,7 @@ El laboratorio dispone de vidrio voxel básico y un perfil físico de `0.03125 m
 ### 3. Acabado superficial y señalización
 
 - Comparar ausencia de rejilla con normal, rugosidad y AO; evaluar microbisel después. Comprobar estabilidad temporal y continuidad entre chunks, LODs y transformaciones.
+- Comparar `World` para módulos estáticos con `Family Local` para props y vehículos. Validar el marco compartido de sus renderers y mantener el batching estático clásico desactivado en el modo local. Evaluar la regla de colocación antes de automatizar su validación; no corregir posiciones de forma implícita.
 - Evaluar posteriormente [relieve voxel POM/SPOM](../../../Assets/VoxelBridge/ROADMAP.md#relieve-voxel-pomspom--evaluación-futura) como acabado cercano sutil sobre el mundo voxel, con atenuación a distancia y sin requerir ray tracing. El asset CSPOM es un candidato, no una dependencia de producción aprobada; conservar la manzana piloto como prioridad.
 - Integrar [Vek](Vek_v1/LEEME.txt) mediante rasterización controlada de SVG y un atlas compartido sobre una pantalla y una pared. Conservar JSON y SVG como fuentes; probar legibilidad, escala, desgaste y emisión.
 - Separar las imágenes del volumen voxel. No introducir un material por símbolo ni ampliar el mesher híbrido antes de evaluar esta ruta.

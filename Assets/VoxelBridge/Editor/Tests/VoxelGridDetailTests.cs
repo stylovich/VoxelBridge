@@ -8,7 +8,8 @@ namespace LocalModels.VoxelBridge.Tests
     public class VoxelGridDetailTests
     {
         private static Color[] Render(float enabled = 1, float distance = 1, float offset = 0, float span = .25f,
-            float multiscale = 0, float targetPixels = 12, float maxLevels = 4)
+            float multiscale = 0, float targetPixels = 12, float maxLevels = 4,
+            float anchor = 0, Matrix4x4? objectToWorld = null, float? spanY = null)
         {
             var shader = AssetDatabase.LoadAssetAtPath<Shader>("Assets/VoxelBridge/Editor/Tests/VoxelGridDetailProbe.shader");
             Assert.That(shader, Is.Not.Null);
@@ -23,8 +24,12 @@ namespace LocalModels.VoxelBridge.Tests
                 Shader.SetGlobalVector("_WorldSpaceCameraPos", Vector4.zero);
                 material.SetFloat("_TestEnabled", enabled); material.SetFloat("_TestDistance", distance);
                 material.SetFloat("_TestOffset", offset); material.SetFloat("_TestSpan", span);
+                material.SetFloat("_TestSpanY", spanY ?? span);
                 material.SetFloat("_TestMultiscale", multiscale); material.SetFloat("_TestTargetPixels", targetPixels);
                 material.SetFloat("_TestMaxScaleLevels", maxLevels);
+                material.SetFloat("_TestAnchor", anchor);
+                material.SetMatrix("_TestObjectToWorld", objectToWorld ?? Matrix4x4.identity);
+                material.SetMatrix("_TestWorldToObject", (objectToWorld ?? Matrix4x4.identity).inverse);
                 Graphics.Blit(Texture2D.whiteTexture, rt, material);
                 RenderTexture.active = rt;
                 readable = new Texture2D(64, 64, TextureFormat.RGBAFloat, false, true);
@@ -116,6 +121,62 @@ namespace LocalModels.VoxelBridge.Tests
         {
             foreach (var c in Render(enabled: enabled, span: span, multiscale: 1, maxLevels: maxLevels))
                 Assert.That(Vector4.Distance(c, new Color(.5f, .5f, 1, .6f)), Is.LessThan(.001f));
+        }
+
+        [TestCase(0f)]
+        [TestCase(37f)]
+        [TestCase(90f)]
+        public void FamilyAnchor_FollowsTranslationAndRotation(float angle)
+        {
+            var a = Render(anchor: 1, multiscale: 1);
+            var transform = Matrix4x4.TRS(new Vector3(8.017f, 3.009f, -2.12f), Quaternion.Euler(angle, angle, angle), Vector3.one);
+            var b = Render(anchor: 1, multiscale: 1, objectToWorld: transform);
+            for (int i = 0; i < a.Length; i++) Assert.That(Vector4.Distance(a[i], b[i]), Is.LessThan(.002f));
+        }
+
+        [Test]
+        public void FamilyAnchor_KeepsPhysicalCellSizeUnderScaling()
+        {
+            var a = Render(anchor: 1, multiscale: 1);
+            var b = Render(anchor: 1, multiscale: 1, span: .125f, objectToWorld: Matrix4x4.Scale(Vector3.one * 2));
+            for (int i = 0; i < a.Length; i++) Assert.That(Vector4.Distance(a[i], b[i]), Is.LessThan(.001f));
+        }
+
+        [Test]
+        public void FamilyAnchor_KeepsPhysicalCellSizeUnderNonuniformScaleAndRotation()
+        {
+            var a = Render(anchor: 1, multiscale: 1);
+            var transform = Matrix4x4.TRS(new Vector3(3.017f, 2, 4), Quaternion.Euler(23, 32, 17), new Vector3(2, 3, 1));
+            var b = Render(anchor: 1, multiscale: 1, span: .125f, spanY: .25f / 3, objectToWorld: transform);
+            for (int i = 0; i < a.Length; i++) Assert.That(Vector4.Distance(a[i], b[i]), Is.LessThan(.002f));
+        }
+
+        [Test]
+        public void WorldAnchor_DoesNotFollowTranslatedObject()
+        {
+            var a = Render(multiscale: 1);
+            var b = Render(multiscale: 1, objectToWorld: Matrix4x4.Translate(new Vector3(.017f, 0, 0)));
+            Assert.That(a.Zip(b, (x, y) => Vector4.Distance(x, y)).Max(), Is.GreaterThan(.02f));
+        }
+
+        [Test]
+        public void FamilyAnchorValidation_RejectsMovedChunksAndStaticBatching()
+        {
+            var root = new GameObject("Family frame test");
+            try
+            {
+                var group = root.AddComponent<LODGroup>();
+                var chunk = new GameObject("Chunk"); chunk.transform.SetParent(root.transform, false);
+                var renderer = chunk.AddComponent<MeshRenderer>();
+                group.SetLODs(new[] { new LOD(.5f, new Renderer[] { renderer }) });
+                Assert.That(VoxelGridAnchorValidation.Validate(group), Is.Null);
+                chunk.transform.localPosition = Vector3.right;
+                Assert.That(VoxelGridAnchorValidation.Validate(group), Does.Contain("coordenadas"));
+                chunk.transform.localPosition = Vector3.zero;
+                GameObjectUtility.SetStaticEditorFlags(chunk, StaticEditorFlags.BatchingStatic);
+                Assert.That(VoxelGridAnchorValidation.Validate(group), Does.Contain("Batching Static"));
+            }
+            finally { Object.DestroyImmediate(root); }
         }
 
         [TestCase("Forward", false)]

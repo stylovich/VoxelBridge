@@ -15,22 +15,41 @@ float3 VoxelGridPattern(float2 q, float2 footprint, float width)
     return float3(slope, 1.0 - profile.x * profile.y) * filtered;
 }
 
-// Static, axis-aligned prototype. UV0/UV3 remain semantic IDs. Geometric LOD is independent.
+// Family-local requires all renderers to retain the shared family frame (no static batching).
+// UV0/UV3 remain semantic IDs. Geometric LOD is independent.
 void VoxelGridDetail_float(float3 Position, float3 Normal, float3 Tangent, float3 Bitangent,
     float Enabled, float CellSize, float JointWidth, float NormalStrength,
     float RoughnessStrength, float FadeStart, float FadeEnd, float BaseSmoothness,
     float Multiscale, float TargetPixels, float MaxScaleLevels,
+    float AnchorMode,
     out float3 DetailNormalTS, out float DetailSmoothness)
 {
     DetailNormalTS = float3(0, 0, 1);
     DetailSmoothness = BaseSmoothness;
 #if !defined(SHADERGRAPH_PREVIEW) && !defined(SHADER_STAGE_RAY_TRACING)
-    Position = GetAbsolutePositionWS(Position);
     float3 n = normalize(Normal);
-    float3 a = abs(n);
+    float3 frameNormal = n;
+    float3 framePosition = GetAbsolutePositionWS(Position);
+    float3x3 modelToWorld = (float3x3)GetObjectToWorldMatrix();
+    if (AnchorMode >= 0.5)
+    {
+        framePosition = TransformWorldToObject(Position);
+        frameNormal = normalize(mul(n, modelToWorld));
+    }
+    Position = GetAbsolutePositionWS(Position);
+    float3 a = abs(frameNormal);
     float3 u = a.x >= a.y && a.x >= a.z ? float3(0, 1, 0) : float3(1, 0, 0);
     float3 v = a.z > a.x && a.z > a.y ? float3(0, 1, 0) : float3(0, 0, 1);
-    float2 q = float2(dot(Position, u), dot(Position, v)) / max(CellSize, 0.001);
+    float2 q = float2(dot(framePosition, u), dot(framePosition, v));
+    if (AnchorMode >= 0.5)
+    {
+        // Preserve metres under non-uniform (non-sheared) instance scaling.
+        float3 worldU = mul(modelToWorld, u), worldV = mul(modelToWorld, v);
+        float2 axisScale = max(float2(length(worldU), length(worldV)), 0.000001);
+        q *= axisScale;
+        u = worldU / axisScale.x; v = worldV / axisScale.y;
+    }
+    q /= max(CellSize, 0.001);
     // Evaluate derivatives before branching. Fade unresolved cells instead of aliasing.
     float2 footprint = max(fwidth(q), 0.0001);
     float weight = saturate(Enabled);
