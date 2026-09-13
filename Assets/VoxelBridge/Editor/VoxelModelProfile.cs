@@ -54,6 +54,16 @@ namespace LocalModels.VoxelBridge
         [InspectorName("Large Model Maximum Scale")]
         [SerializeField, Min(0.01f)] private float lodLargeModelMaximumTransitionScale = 2.5f;
 
+        [Header("Small / Medium Model Detail")]
+        [Tooltip("Curva opcional de transiciones a Reference Model Size para conservar detalle en modelos pequeños y medianos. Vacía conserva el comportamiento anterior. Sólo se aplica en modo adaptativo; requiere un valor por LOD, decreciente y no mayor que su transición base.")]
+        [SerializeField] private float[] lodDetailScreenHeights = Array.Empty<float>();
+        [Tooltip("Tamaño hasta el que se utiliza íntegramente la curva de detalle. Entre este tamaño y Detail Blend End Size se recupera gradualmente la curva base.")]
+        [InspectorName("Detail Full Size")]
+        [SerializeField, Min(0.01f)] private float lodDetailFullSize = 7f;
+        [Tooltip("Tamaño a partir del que se conserva exactamente la curva adaptativa base de los edificios grandes. No modifica las mallas ni activa cross-fade.")]
+        [InspectorName("Detail Blend End Size")]
+        [SerializeField, Min(0.01f)] private float lodDetailBlendEndSize = 20f;
+
         [Header("Shadow Optimization")]
         [Tooltip("Desactiva la proyección de sombras en los LOD más lejanos de modelos pequeños. El tamaño se evalúa en el espacio local del prefab, antes de aplicar la escala de cada instancia.")]
         [InspectorName("Reduce Shadows by Size")]
@@ -115,12 +125,32 @@ namespace LocalModels.VoxelBridge
 
         public float GetLodScreenHeight(int index, float modelSize)
         {
-            return GetLodScreenHeightForScale(index, GetLodTransitionScale(modelSize));
+            float baseHeight = GetLodScreenHeight(index);
+            float scale = GetLodTransitionScale(modelSize);
+            if (!UsesDetailLodTransitions || !IsFinitePositive(modelSize) || modelSize >= lodDetailBlendEndSize)
+                return GetLodScreenHeightForScale(index, scale);
+
+            // Both curves are ordered. The same weight and cap across levels preserve that order.
+            float blend = Mathf.SmoothStep(0f, 1f,
+                Mathf.InverseLerp(lodDetailFullSize, lodDetailBlendEndSize, modelSize));
+            scale = Mathf.Min(scale, 0.99f / GetLodScreenHeight(0));
+            return Mathf.Clamp(Mathf.Lerp(lodDetailScreenHeights[index], baseHeight, blend) * scale,
+                0.0001f, 0.99f);
         }
+
+        private bool UsesDetailLodTransitions => UsesAdaptiveLodTransitions &&
+            lodDetailScreenHeights != null && lodDetailScreenHeights.Length > 0;
 
         public float GetMinimumLodScreenHeight(int index)
         {
+            GetLodScreenHeight(index); // Preserve the public index validation in both modes.
             float scale = UsesAdaptiveLodTransitions ? lodMinimumTransitionScale : 1f;
+            if (UsesDetailLodTransitions)
+            {
+                // Conservative lower bound for impostor/preflight validation, including the shared cap.
+                scale = Mathf.Min(scale, 0.99f / GetLodScreenHeight(0));
+                return Mathf.Clamp(lodDetailScreenHeights[index] * scale, 0.0001f, 0.99f);
+            }
             return GetLodScreenHeightForScale(index, scale);
         }
 
@@ -217,6 +247,27 @@ namespace LocalModels.VoxelBridge
             {
                 error = "Shadow optimization requires positive thresholds. The penultimate LOD threshold cannot exceed the final LOD threshold.";
                 return false;
+            }
+
+            if (lodDetailScreenHeights != null && lodDetailScreenHeights.Length > 0)
+            {
+                if (lodDetailScreenHeights.Length < LodCount || !IsFinitePositive(lodDetailFullSize) ||
+                    !IsFinitePositive(lodDetailBlendEndSize) || lodDetailBlendEndSize <= lodDetailFullSize)
+                {
+                    error = "LOD detail retention requires a transition per level and positive, increasing blend sizes.";
+                    return false;
+                }
+                float previousDetail = 1.01f;
+                for (int i = 0; i < LodCount; i++)
+                {
+                    float height = lodDetailScreenHeights[i];
+                    if (!IsFinitePositive(height) || height > 1f || height >= previousDetail || height > GetLodScreenHeight(i))
+                    {
+                        error = "LOD detail transitions must be finite, positive, strictly decreasing and no greater than the base transitions.";
+                        return false;
+                    }
+                    previousDetail = height;
+                }
             }
 
             int previous = 0;

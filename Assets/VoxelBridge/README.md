@@ -308,6 +308,24 @@ Las conversiones con `Conversion Profile` generan la familia semántica de produ
 
 Para modelos mayores que `Large Model Threshold`, el refuerzo adicional adelanta los niveles de menor resolución. Un porcentaje mayor cambia al siguiente LOD a menos distancia. Con un impostor final, los rangos intermedios se amplían de forma controlada; en estructuras grandes, una curva voxel `75 / 45 / 25` puede producir fronteras `75 / 55 / 35` antes del impostor.
 
+`Small / Medium Model Detail` permite conservar los niveles detallados durante más distancia sin cambiar la curva de los edificios grandes:
+
+- `Lod Detail Screen Heights`: curva alternativa a `Reference Model Size`, con un valor por LOD, positivo, decreciente y no mayor que el correspondiente valor base. Una lista vacía desactiva este ajuste; `Fixed Screen Height` lo ignora.
+- `Detail Full Size`: tamaño hasta el que se utiliza la curva alternativa completa.
+- `Detail Blend End Size`: tamaño a partir del que se recupera exactamente la curva base. Entre ambos tamaños se mezclan suavemente las curvas antes de aplicar el factor adaptativo existente. Esta mezcla es por tamaño del asset, no un fade durante el cambio de LOD.
+
+Calibración de referencia para cinco niveles: curva base `0.30 / 0.18 / 0.10 / 0.04 / 0.02`, curva de detalle `0.175 / 0.0875 / 0.04375 / 0.024 / 0.0145`, referencia `4 m`, fuerza `0.5`, límites generales `0.35–2`, refuerzo grande desde `6 m` con fuerza `0.25` y máximo `2.5`, detalle completo hasta `7 m` y retorno a la curva base en `20 m`.
+
+| Object Size | Salida de LOD0 / LOD1 / LOD2 / LOD3 / LOD4, en % de pantalla |
+|---|---|
+| 2 m | 12.37 / 6.19 / 3.09 / 1.70 / 1.03 |
+| 7 m | 24.06 / 12.03 / 6.01 / 3.30 / 1.99 |
+| 20 m o más | 75 / 45 / 25 / 10 / 5, con esta configuración |
+
+La última frontera descarta el objeto si no existe un impostor posterior. Los tamaños se obtienen del `LODGroup` generado, no del nombre o categoría del modelo. Con `Normalize Scale`, las dimensiones de conversión incorporan la escala de la fuente. Cambiar la escala de una instancia después no recalibra el perfil.
+
+El perfil se aplica en conversiones nuevas y reconstrucciones que configuran el LODGroup; editarlo no actualiza las familias existentes ni sus overrides de escena. Al cambiar el número de niveles, completar ambas curvas. Los umbrales no modifican geometría, resolución voxel ni materiales y requieren revisión visual con la cámara de juego.
+
 Todos los prefabs generados utilizan `Fade Mode = None`, sin animación ni ancho de cross-fade.
 
 `Reduce Shadows by Size` utiliza el tamaño local del prefab:

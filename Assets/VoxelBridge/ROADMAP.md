@@ -25,6 +25,7 @@ Voxel Bridge mantiene la responsabilidad sobre conversión, paletas, autoría, f
 - Rejilla visual: comparar el modo fijo con crecimiento multiescala binario para conservar la lectura de bloques a distancia, independientemente del LOD geométrico. El prototipo ofrece anclaje mundial y local de familia con un marco común entre renderers; la validación de colocación estática y la integración de producción permanecen pendientes.
 - Primera referencia compartida: una manzana sencilla, seguida del prototipo de detalle del shader y Vek en textura; la generación procedural y la prueba 3×3 parten de esa referencia.
 - Importancia de detalles: evaluación con el preview y retoques de LOD existentes, sin añadir un atributo ni una herramienta específica de prioridad. La conservación automática de siluetas subvoxel no forma parte de esa garantía.
+- Transiciones geométricas: curva opcional de retención de detalle para pequeños y medianos, con retorno gradual a la curva de edificios grandes. Calibrar los porcentajes con assets representativos; el ajuste de umbrales no sustituye el control de la reducción ni implementa cross-fade.
 
 ### Estado por bloque
 
