@@ -11,7 +11,7 @@ El proyecto de laboratorio permite regenerar los modelos de prueba antes de migr
 | Área | Criterio |
 |---|---|
 | Escala | Unidad urbana objetivo de `0.03125 m`, con resoluciones geométricas en múltiplos binarios. Un asset grande puede comenzar con una resolución más gruesa. |
-| Rejilla visual | Escala física fija, independiente del LOD activo. Filtrar y atenuar el detalle fino a distancia; no agrandar las juntas durante una transición. |
+| Rejilla visual | Comparación entre tamaño fijo y multiescala binaria alineada, independiente del LOD geométrico. Conservar la lectura de bloques a distancia mediante mezcla gradual y filtrado; no estirar continuamente la cuadrícula. |
 | Anclaje | Rejilla propia para objetos dinámicos; origen mundial compatible para arquitectura estática alineada. Continuidad entre chunks de una familia. |
 | Manzanas | Unidades de diseño compuestas por módulos y familias; no equivalen necesariamente a una única malla, rejilla voxel, familia combinada o unidad de streaming. |
 | Autoría procedural | Semillas jerárquicas, identidades estables y propiedad de capas. Conservar receta y versión; respetar contenido congelado y retocado. |

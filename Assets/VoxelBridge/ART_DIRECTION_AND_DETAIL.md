@@ -21,14 +21,14 @@ Esta distribución es una decisión de autoría, no una conversión automática 
 
 ## Rejilla del detalle del shader
 
-- Utilizar la unidad voxel mínima del perfil como referencia física, no el tamaño efectivo de cada LOD. El patrón no debe cambiar de escala al cambiar de nivel.
+- Separar la unidad geométrica de la escala visual. El modo fijo conserva un tamaño físico; el modo multiescala mezcla rejillas binarias alineadas según su tamaño proyectado, sin depender del índice LOD geométrico.
 - Definir un origen común para la familia, independiente del origen de cada chunk. Mantener la continuidad entre chunks y LODs.
 - Anclar el patrón al modelo en vehículos y otros objetos dinámicos para evitar que se deslice al moverlos o rotarlos. La arquitectura estática alineada puede compartir una rejilla mundial con origen y orientación compatibles. Definir y verificar el tratamiento de escalas uniformes y no uniformes antes de afirmar que conserva su tamaño físico.
 - Cuantizar el detalle a la rejilla cuando corresponda al estilo visual. Atenuar o filtrar las frecuencias finas a distancia para evitar aliasing y parpadeo; el muestreo puntual por sí solo no resuelve este problema.
 - Considerar una semilla por instancia sólo si aporta variedad útil y puede transportarse sin romper el uso de materiales compartidos ni la compatibilidad con Entities Graphics.
 - Mantener ColorID y SurfaceID como identidad de autoría. Definir los límites cromáticos de la variación visual; el ruido no debe crear nuevos IDs ni reinterpretar las superficies.
 
-Para VoxelCity, la unidad objetivo del perfil es `0.03125 m`; no imponerla a otras bibliotecas ni reinterpretar los metadatos de modelos existentes. Preparar el perfil y regenerar explícitamente los modelos de la prueba urbana.
+Para VoxelCity, comparar la base geométrica candidata de `0.0625 m` con las familias existentes de `0.03125 m`; no imponerla a otras bibliotecas ni reinterpretar sus metadatos. Cambiar el tamaño de la rejilla visual no requiere reconversión ni modifica la geometría.
 
 Comenzar con una rejilla opcional de intensidad ajustable, comparando normal, rugosidad y AO con una referencia sin detalle. Evaluar el microbisel y la variación superficial después de comprobar continuidad y estabilidad temporal. Comparar ruido calculado con una textura pequeña compartida cuando se incorpore desgaste. Evitar un sistema general de capas sin una necesidad demostrada.
 
@@ -36,16 +36,21 @@ Comenzar con una rejilla opcional de intensidad ajustable, comparando normal, ru
 
 `Shaders/VoxelGridPrototype.shadergraph` conserva las LUT de color y superficie del shader opaco y añade `Shaders/VoxelGridDetail.hlsl`. El patrón utiliza posición mundial absoluta y proyección sobre el plano principal de la cara, sin reutilizar UV0 o UV3. Modifica normales y smoothness; no desplaza geometría, profundidad, color, emisión ni colisiones. No incluye POM/SPOM.
 
+`Grid Mode` permite comparar `Fixed` y `Multiscale`. El segundo mezcla dos rejillas consecutivas de tamaños `CellSize × 2^n`, alineadas a un mismo origen mundial. La escala se selecciona mediante derivadas de pantalla, por lo que responde a distancia, resolución, campo de visión y oblicuidad. No estira continuamente las celdas ni modifica las transiciones del LODGroup. Durante la mezcla pueden percibirse ambas rejillas: evaluar su lectura artística en movimiento.
+
 Para probarlo, duplicar un material semántico opaco, asignarle el shader `Voxel Bridge/Prototypes/VoxelGridPrototype` y conservar sus referencias a las LUT. Aplicar la copia sólo a las instancias de comparación y a sus LODs, sin modificar el material compartido de producción. Los materiales y escenas de experimentación son recursos locales excluidos del repositorio.
 
 | Control del material | Uso |
 |---|---|
 | Grid Enabled | `0`: referencia sin detalle; `1`: rejilla activa. |
-| Grid CellSize | Tamaño físico en metros; utilizar `0.03125` para la prueba urbana. |
+| Grid CellSize | Tamaño físico fijo o mínimo en metros. Punto inicial de comparación: `0.0625`. |
+| Grid Mode | `Fixed`: tamaño constante con atenuación; `Multiscale`: crecimiento visual binario independiente de la geometría. Los materiales existentes conservan `Fixed` por defecto. |
+| Grid TargetPixels | Objetivo aproximado de tamaño en pantalla para multiescala, entre 4 y 64 píxeles. Aumentarlo produce bloques visuales mayores; punto inicial: `12`. |
+| Grid MaxScaleLevels | Máximo exponente binario, limitado a 0–8. Con base `0.0625` y valor `4`, el máximo es `1 m`. |
 | Grid JointWidth | Anchura total de la junta como fracción de celda; valor inicial `0.12`. |
 | Grid NormalStrength | Intensidad del cambio de normal; `0` desactiva este componente. |
 | Grid RoughnessStrength | Reducción de smoothness en juntas; no cambia SurfaceID. Una superficie con smoothness cero no puede hacerse más rugosa. |
-| Grid FadeStart / FadeEnd | Distancias en metros para atenuar el efecto. El filtrado por tamaño en pantalla puede ocultarlo antes para evitar aliasing. |
+| Grid FadeStart / FadeEnd | Sólo en modo fijo: distancias en metros para atenuar el efecto. Multiescala las ignora y conserva el filtrado de detalle no resoluble, incluso al alcanzar el tamaño máximo. |
 
 Comparar con la misma cámara e iluminación. Para retirar la prueba, reasignar a los renderers afectados el material opaco original de su prefab; no revertir otros overrides de la instancia. Los prefabs, VOX y materiales de producción permanecen independientes del prototipo.
 
@@ -57,7 +62,7 @@ El script independiente `Assets/Editor/HierarchyLodPreviewWindow.cs` abre `Tools
 
 La previsualización fija un nivel existente a cualquier distancia mediante `ForceLOD`. `Volver a LOD automático`, cerrar la ventana, recompilar o entrar en Play restaura la selección automática. No modifica LODs, renderers, prefabs ni archivos de la familia. No combinar con otro control de `ForceLOD`; la restauración vuelve a automático, no a una selección forzada por otra herramienta.
 
-Este ensayo permite valorar una geometría más gruesa sin reconversión; no valida transiciones ni equivale necesariamente a generar una familia nueva. La rejilla del shader es independiente. Con base `0.03125 m`, LOD1 mide `0.0625 m` en el asset y `0.125 m` en una instancia escalada ×2; a escala ×1 ese tamaño corresponde a LOD2. La base geométrica candidata de `0.0625 m` y una rejilla visual multiescala requieren comparación artística; el prototipo actual mantiene una rejilla física fija con atenuación.
+Este ensayo permite valorar una geometría más gruesa sin reconversión; no valida transiciones ni equivale necesariamente a generar una familia nueva. La rejilla del shader es independiente. Con base `0.03125 m`, LOD1 mide `0.0625 m` en el asset y `0.125 m` en una instancia escalada ×2; a escala ×1 ese tamaño corresponde a LOD2. La base geométrica candidata de `0.0625 m` y el modo visual multiescala requieren comparación artística; el prototipo conserva el modo fijo como referencia.
 
 ## Anuncios separados de su estructura
 

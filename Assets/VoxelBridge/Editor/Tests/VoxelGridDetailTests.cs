@@ -7,7 +7,8 @@ namespace LocalModels.VoxelBridge.Tests
 {
     public class VoxelGridDetailTests
     {
-        private static Color[] Render(float enabled = 1, float distance = 1, float offset = 0, float span = .25f)
+        private static Color[] Render(float enabled = 1, float distance = 1, float offset = 0, float span = .25f,
+            float multiscale = 0, float targetPixels = 12, float maxLevels = 4)
         {
             var shader = AssetDatabase.LoadAssetAtPath<Shader>("Assets/VoxelBridge/Editor/Tests/VoxelGridDetailProbe.shader");
             Assert.That(shader, Is.Not.Null);
@@ -22,6 +23,8 @@ namespace LocalModels.VoxelBridge.Tests
                 Shader.SetGlobalVector("_WorldSpaceCameraPos", Vector4.zero);
                 material.SetFloat("_TestEnabled", enabled); material.SetFloat("_TestDistance", distance);
                 material.SetFloat("_TestOffset", offset); material.SetFloat("_TestSpan", span);
+                material.SetFloat("_TestMultiscale", multiscale); material.SetFloat("_TestTargetPixels", targetPixels);
+                material.SetFloat("_TestMaxScaleLevels", maxLevels);
                 Graphics.Blit(Texture2D.whiteTexture, rt, material);
                 RenderTexture.active = rt;
                 readable = new Texture2D(64, 64, TextureFormat.RGBAFloat, false, true);
@@ -67,6 +70,52 @@ namespace LocalModels.VoxelBridge.Tests
             var a = Render(); var b = Render(offset: .03125f);
             for (int i = 0; i < a.Length; i++)
                 Assert.That(Vector4.Distance(a[i], b[i]), Is.LessThan(.001f));
+        }
+
+        [Test]
+        public void Multiscale_KeepsDistantGridWhereFixedIsInvisible()
+        {
+            Assert.That(Render(distance: 30, span: 2).All(c => Mathf.Abs(c.a - .6f) < .001f), Is.True);
+            var pixels = Render(distance: 30, span: 2, multiscale: 1);
+            Assert.That(pixels.Any(c => c.a < .59f), Is.True);
+            Assert.That(pixels.Any(c => Mathf.Abs(c.r - .5f) > .01f), Is.True);
+        }
+
+        [Test]
+        public void Multiscale_ApproachesFixedWhenFineGridIsResolved()
+        {
+            var a = Render(span: .125f);
+            var b = Render(span: .125f, multiscale: 1);
+            for (int i = 0; i < a.Length; i++) Assert.That(Vector4.Distance(a[i], b[i]), Is.LessThan(.001f));
+        }
+
+        [TestCase(1f)]
+        [TestCase(2f)]
+        [TestCase(4f)]
+        public void Multiscale_HasContinuousBinaryTransitions(float octave)
+        {
+            // Base footprint is .125 cells/pixel. Changing target size crosses an exact octave
+            // without changing the sampled positions, isolating continuity of the blend.
+            var a = Render(multiscale: 1, targetPixels: 8 * octave * .9999f);
+            var b = Render(multiscale: 1, targetPixels: 8 * octave * 1.0001f);
+            for (int i = 0; i < a.Length; i++) Assert.That(Vector4.Distance(a[i], b[i]), Is.LessThan(.002f));
+        }
+
+        [Test]
+        public void Multiscale_CoarsestCellTranslationPreservesPhase()
+        {
+            var a = Render(span: 2, multiscale: 1);
+            var b = Render(span: 2, multiscale: 1, offset: .5f);
+            for (int i = 0; i < a.Length; i++) Assert.That(Vector4.Distance(a[i], b[i]), Is.LessThan(.001f));
+        }
+
+        [TestCase(0, 2, 4)]
+        [TestCase(1, 64, 4)]
+        [TestCase(1, 2, 0)]
+        public void Multiscale_DisabledOrBeyondCapRemainsFlat(float enabled, float span, float maxLevels)
+        {
+            foreach (var c in Render(enabled: enabled, span: span, multiscale: 1, maxLevels: maxLevels))
+                Assert.That(Vector4.Distance(c, new Color(.5f, .5f, 1, .6f)), Is.LessThan(.001f));
         }
 
         [TestCase("Forward", false)]
