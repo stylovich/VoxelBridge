@@ -22,6 +22,16 @@
 !/Assets/VoxelBridge.meta
 !/Assets/VoxelBridge/
 !/Assets/VoxelBridge/**
+!/Assets/Editor.meta
+!/Assets/Editor/
+!/Assets/Editor/RemoveHierarchyColliders.cs
+!/Assets/Editor/RemoveHierarchyColliders.cs.meta
+!/Assets/Editor/HierarchyLodPreviewWindow.cs
+!/Assets/Editor/HierarchyLodPreviewWindow.cs.meta
+
+# Local visual experiments; keep the reusable prototype shader and tests above.
+/Assets/VoxelBridge/Prototypes/
+/Assets/VoxelBridge/Prototypes.meta
 
 # Record the editor version used to validate the module without carrying the
 # rest of the project-specific settings into another project.
