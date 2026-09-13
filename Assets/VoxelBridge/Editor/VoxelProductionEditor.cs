@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 
@@ -9,13 +10,20 @@ namespace LocalModels.VoxelBridge
     {
         static VoxelProductionEditor() => UnityEditor.Editor.finishedDefaultHeaderGUI += DrawHeader;
 
+        private static readonly GUIContent EditContent = new("Edit", "Editar colores y superficies de este LOD en Surface Painter.");
+        private static readonly GUIContent VoxContent = new("VOX", "Abrir el VOX de este LOD en MagicaVoxel.");
+        private static readonly GUIContent RebuildContent = new("Rebuild", "Reconstruir sólo la malla de este LOD desde su VOX guardado. No regenera la fuente.");
+        private static readonly GUIContent MoreContent = new("⋯", "Más acciones de este LOD: fuente, bindings, informe y regeneración.");
+        private static readonly GUIContent FamilyContent = new("Family ▾", "Duplicar la familia, reconstruir todas las mallas o seleccionar el manifiesto.");
+        private static readonly GUIContent HelpContent = new("?", "Mostrar u ocultar la ayuda del flujo de producción.");
+        private const string FamilyHelp = "Edit abre Surface Painter; VOX abre MagicaVoxel. Rebuild lee el VOX guardado sin regenerarlo. Create LOD crea niveles nuevos; Regenerate reemplaza un nivel y descarta sus retoques, con confirmación. Los descendientes existentes no se sobrescriben automáticamente.";
+
         private static void DrawHeader(UnityEditor.Editor editor)
         {
             if (editor.targets.Length != 1 || !(editor.target is GameObject)) return;
             string path = VoxelProductionLink.PrefabPath(editor.target);
             if (!VoxelProductionLink.HasLink(path)) return;
             EditorGUILayout.Space(4);
-            EditorGUILayout.LabelField("Voxel Bridge Production", EditorStyles.boldLabel);
             try
             {
                 var link = VoxelProductionLink.Load(path);
@@ -26,6 +34,7 @@ namespace LocalModels.VoxelBridge
                 }
             }
             catch (Exception exception) { EditorGUILayout.HelpBox(exception.Message, MessageType.Error); return; }
+            EditorGUILayout.LabelField("Voxel Bridge Production", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox("Editar el .vox fuente y guardar en MagicaVoxel. Rebuild actualiza la misma malla y todas sus instancias, sin cambiar sus transforms. La reconstrucción es manual.", MessageType.None);
             using (new EditorGUILayout.HorizontalScope())
             {
@@ -52,58 +61,114 @@ namespace LocalModels.VoxelBridge
         private static void DrawFamily(string manifestPath)
         {
             var manifest = VoxelProductionFamily.Load(manifestPath);
-            using (new EditorGUI.DisabledScope(EditorApplication.isPlayingOrWillChangePlaymode))
-                if (GUILayout.Button(new GUIContent("Duplicate Editable Family", "Crear una copia independiente de los VOX, bindings, mallas y prefab guardados. Comparte paletas, perfiles y materiales. No incluye borradores ni overrides de escena.")))
-                    Duplicate(manifest.prefabAssetPath);
-            EditorGUILayout.HelpBox("Rebuild actualiza sólo las mallas desde los .vox guardados. Duplicate Previous y Reduce Previous crean el nivel siguiente. Regenerate reemplaza explícitamente un .vox desde su padre; los niveles posteriores nunca se sobrescriben automáticamente. Los avisos de origen cambiado se propagan a los descendientes.", MessageType.None);
+            string stateKey = "VoxelBridge.ProductionInspector." + AssetDatabase.AssetPathToGUID(manifestPath);
+            bool expanded = SessionState.GetBool(stateKey, true);
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                GUILayout.Space(12);
+                bool nextExpanded = EditorGUILayout.Foldout(expanded, $"Voxel Bridge · {manifest.lods.Length} LODs", true);
+                if (nextExpanded != expanded) SessionState.SetBool(stateKey, expanded = nextExpanded);
+                Rect helpRect = GUILayoutUtility.GetRect(HelpContent, EditorStyles.miniButton, GUILayout.Width(22));
+                if (GUI.Button(helpRect, HelpContent, EditorStyles.miniButton))
+                    SessionState.SetBool(stateKey + ".Help", !SessionState.GetBool(stateKey + ".Help", false));
+                Rect menuRect = GUILayoutUtility.GetRect(FamilyContent, EditorStyles.miniButton, GUILayout.Width(65));
+                if (GUI.Button(menuRect, FamilyContent, EditorStyles.miniButton))
+                    CreateFamilyMenu(manifestPath, manifest.prefabAssetPath).DropDown(menuRect);
+            }
+            if (expanded && SessionState.GetBool(stateKey + ".Help", false))
+                EditorGUILayout.HelpBox(FamilyHelp, MessageType.None);
+
+            var staleLevels = new List<int>();
+            var changedLevels = new List<int>();
             foreach (var entry in manifest.lods)
             {
-                using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+                int level = entry.lodIndex;
+                string source = VoxelProductionFamily.SourcePath(entry);
+                if (VoxelProductionFamily.IsDerivedStale(manifest, level)) staleLevels.Add(level);
+                if (entry.builtSourceHash != VoxelProductionFamily.SourceHash(entry)) changedLevels.Add(level);
+                if (!expanded) continue;
+                using (new EditorGUILayout.HorizontalScope())
                 {
-                    EditorGUILayout.LabelField($"LOD {entry.lodIndex} · {manifest.baseVoxelSize * entry.multiplier:0.###} m", EditorStyles.boldLabel);
-                    string source = VoxelProductionFamily.SourcePath(entry);
-                    bool stale = VoxelProductionFamily.IsDerivedStale(manifest, entry.lodIndex);
-                    bool meshChanged = entry.builtSourceHash != VoxelProductionFamily.SourceHash(entry);
-                    if (stale) EditorGUILayout.HelpBox("El origen de este nivel o de un antecesor cambió. Revisar el trabajo artístico antes de regenerar.", MessageType.Warning);
-                    if (meshChanged) EditorGUILayout.HelpBox("El .vox o sus bindings cambiaron. Rebuild actualiza la malla sin regenerar el archivo fuente.", MessageType.Info);
-                    using (new EditorGUILayout.HorizontalScope())
-                    {
-                        if (GUILayout.Button("Open in MagicaVoxel")) Run(() => MagicaVoxelLauncher.OpenPath(VoxelLodPipeline.AssetPathToAbsolute(source)));
-                        if (GUILayout.Button("Select Source")) { Selection.activeObject = AssetDatabase.LoadMainAssetAtPath(source); EditorGUIUtility.PingObject(Selection.activeObject); }
-                        if (GUILayout.Button("Rebuild")) Run(() => VoxelProductionFamily.RebuildLevel(manifestPath, entry.lodIndex, Progress));
-                    }
-                    if (GUILayout.Button("Semantic Bindings")) Run(() => VoxelSemanticBindingWindow.OpenForSource(source));
-                    if (GUILayout.Button("Edit Surfaces")) Run(() => VoxelSurfacePainterWindow.OpenForSource(source, manifest.prefabAssetPath, entry.lodIndex));
-                    DrawSurfaceReport(source);
-                    if (entry.lodIndex > 0)
-                        using (new EditorGUILayout.HorizontalScope())
-                        {
-                            if (GUILayout.Button("Regenerate: Duplicate")) Regenerate(manifestPath, entry.lodIndex, VoxelLodGenerationMode.DuplicateParent);
-                            if (GUILayout.Button("Regenerate: Reduce")) Regenerate(manifestPath, entry.lodIndex, VoxelLodGenerationMode.ReduceParent);
-                        }
+                    string label = $"LOD {level} · {manifest.baseVoxelSize * entry.multiplier:0.#####} m";
+                    GUILayout.Label(new GUIContent(label, label + "\n" + source), EditorStyles.miniLabel, GUILayout.MinWidth(75));
+                    if (GUILayout.Button(EditContent, EditorStyles.miniButton, GUILayout.Width(38)))
+                        Run(() => VoxelSurfacePainterWindow.OpenForSource(source, manifest.prefabAssetPath, level));
+                    if (GUILayout.Button(VoxContent, EditorStyles.miniButton, GUILayout.Width(35)))
+                        Run(() => MagicaVoxelLauncher.OpenPath(VoxelLodPipeline.AssetPathToAbsolute(source)));
+                    if (GUILayout.Button(RebuildContent, EditorStyles.miniButton, GUILayout.Width(56)))
+                        Run(() => VoxelProductionFamily.RebuildLevel(manifestPath, level, Progress));
+                    Rect menuRect = GUILayoutUtility.GetRect(MoreContent, EditorStyles.miniButton, GUILayout.Width(22));
+                    if (GUI.Button(menuRect, MoreContent, EditorStyles.miniButton))
+                        CreateLevelMenu(manifestPath, level, source).DropDown(menuRect);
                 }
             }
+            // Pending-source warnings remain visible even when the compact panel is collapsed.
+            string status = FormatFamilyStatus(staleLevels, changedLevels);
+            if (status.Length > 0) EditorGUILayout.HelpBox(status, staleLevels.Count > 0 ? MessageType.Warning : MessageType.Info);
+            if (!expanded) return;
             var profile = VoxelProductionFamily.Profile(manifest);
             int next = manifest.lods.Length;
             if (next < profile.LodCount)
             {
-                EditorGUILayout.LabelField($"Create LOD {next} from LOD {next - 1}", EditorStyles.boldLabel);
-                using (new EditorGUILayout.HorizontalScope())
-                {
-                    if (GUILayout.Button("Duplicate Previous")) Run(() => VoxelProductionFamily.DeriveLevel(manifestPath, next, VoxelLodGenerationMode.DuplicateParent, progress: Progress));
-                    if (GUILayout.Button("Reduce Previous")) Run(() => VoxelProductionFamily.DeriveLevel(manifestPath, next, VoxelLodGenerationMode.ReduceParent, progress: Progress));
-                }
-                if (GUILayout.Button("Generate Remaining LODs by Reduction")) Run(() =>
-                {
-                    for (int i = next; i < profile.LodCount; i++)
-                        VoxelProductionFamily.DeriveLevel(manifestPath, i, VoxelLodGenerationMode.ReduceParent, progress: Progress);
-                });
+                var content = new GUIContent($"Create LOD {next} ▾", $"Crear niveles nuevos desde LOD {next - 1}. No sobrescribe niveles existentes.");
+                Rect rect = GUILayoutUtility.GetRect(content, EditorStyles.miniButton);
+                if (GUI.Button(rect, content, EditorStyles.miniButton)) CreateNextLevelMenu(manifestPath, next, profile.LodCount).DropDown(rect);
             }
-            using (new EditorGUILayout.HorizontalScope())
+        }
+
+        internal static string FormatFamilyStatus(IReadOnlyList<int> staleLevels, IReadOnlyList<int> changedLevels)
+        {
+            string stale = staleLevels.Count == 0 ? "" : $"Origen cambiado: LOD {string.Join(", ", staleLevels)}. Revisar retoques antes de regenerar.";
+            string changed = changedLevels.Count == 0 ? "" : $"Rebuild pendiente: LOD {string.Join(", ", changedLevels)}. El VOX o sus bindings cambiaron; reconstruir no regenera la fuente.";
+            return stale + (stale.Length > 0 && changed.Length > 0 ? "\n" : "") + changed;
+        }
+
+        internal static GenericMenu CreateLevelMenu(string manifestPath, int level, string source)
+        {
+            var menu = new GenericMenu();
+            menu.AddItem(new GUIContent("Select Source VOX"), false, () => Run(() =>
             {
-                if (GUILayout.Button("Rebuild All Meshes")) Run(() => VoxelProductionFamily.RebuildAll(manifestPath, Progress));
-                if (GUILayout.Button("Select Manifest")) Selection.activeObject = AssetDatabase.LoadMainAssetAtPath(manifestPath);
+                Selection.activeObject = AssetDatabase.LoadMainAssetAtPath(source);
+                EditorGUIUtility.PingObject(Selection.activeObject);
+            }));
+            menu.AddItem(new GUIContent("Semantic Bindings"), false, () => Run(() => VoxelSemanticBindingWindow.OpenForSource(source)));
+            var report = string.IsNullOrEmpty(source) ? null : AssetDatabase.LoadAssetAtPath<TextAsset>(System.IO.Path.ChangeExtension(source, ".surface-report.json"));
+            var reportLabel = new GUIContent("Surface Assignment Report", "Informe de la conversión original; no incluye retoques posteriores del VOX.");
+            if (report != null) menu.AddItem(reportLabel, false, () => Run(() => AssetDatabase.OpenAsset(report)));
+            else menu.AddDisabledItem(reportLabel);
+            if (level > 0)
+            {
+                menu.AddSeparator("");
+                menu.AddItem(new GUIContent("Regenerate/Duplicate Previous…"), false, () => Regenerate(manifestPath, level, VoxelLodGenerationMode.DuplicateParent));
+                menu.AddItem(new GUIContent("Regenerate/Reduce Previous…"), false, () => Regenerate(manifestPath, level, VoxelLodGenerationMode.ReduceParent));
             }
+            return menu;
+        }
+
+        internal static GenericMenu CreateFamilyMenu(string manifestPath, string prefabPath)
+        {
+            var menu = new GenericMenu();
+            var duplicate = new GUIContent("Duplicate Editable Family…", "Copia independiente de los recursos guardados. Comparte paletas, perfiles y materiales; no copia borradores ni overrides de escena.");
+            if (EditorApplication.isPlayingOrWillChangePlaymode) menu.AddDisabledItem(duplicate);
+            else menu.AddItem(duplicate, false, () => Duplicate(prefabPath));
+            menu.AddItem(new GUIContent("Rebuild All Meshes"), false, () => Run(() => VoxelProductionFamily.RebuildAll(manifestPath, Progress)));
+            menu.AddSeparator("");
+            menu.AddItem(new GUIContent("Select Manifest"), false, () => Run(() => Selection.activeObject = AssetDatabase.LoadMainAssetAtPath(manifestPath)));
+            return menu;
+        }
+
+        internal static GenericMenu CreateNextLevelMenu(string manifestPath, int next, int lodCount)
+        {
+            var menu = new GenericMenu();
+            menu.AddItem(new GUIContent("Duplicate Previous"), false, () => Run(() => VoxelProductionFamily.DeriveLevel(manifestPath, next, VoxelLodGenerationMode.DuplicateParent, progress: Progress)));
+            menu.AddItem(new GUIContent("Reduce Previous"), false, () => Run(() => VoxelProductionFamily.DeriveLevel(manifestPath, next, VoxelLodGenerationMode.ReduceParent, progress: Progress)));
+            menu.AddSeparator("");
+            menu.AddItem(new GUIContent("Generate Remaining LODs by Reduction"), false, () => Run(() =>
+            {
+                for (int i = next; i < lodCount; i++)
+                    VoxelProductionFamily.DeriveLevel(manifestPath, i, VoxelLodGenerationMode.ReduceParent, progress: Progress);
+            }));
+            return menu;
         }
 
         private static void Regenerate(string path, int level, VoxelLodGenerationMode mode)
