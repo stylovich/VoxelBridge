@@ -44,6 +44,12 @@
         },
         {
             "m_Id": "9cc34ef779434a5eba2a54afbef0c9da"
+        },
+        {
+            "m_Id": "606957708089b80652c530ef15c18d7f"
+        },
+        {
+            "m_Id": "b935585107fad0980ac6a0ec3ccd5082"
         }
     ],
     "m_Keywords": [],
@@ -155,6 +161,12 @@
         },
         {
             "m_Id": "8af62834d30146aa9050d69b71190249"
+        },
+        {
+            "m_Id": "59de6a8e6de197ba8eb8abf5fe6c6752"
+        },
+        {
+            "m_Id": "5b2dd6877d584f107e62967d2d77ca2c"
         }
     ],
     "m_GroupDatas": [],
@@ -536,6 +548,34 @@
                     "m_Id": "38c6cce252ea4f0894f6cdfd6f3b86d6"
                 },
                 "m_SlotId": 1
+            }
+        },
+        {
+            "m_OutputSlot": {
+                "m_Node": {
+                    "m_Id": "59de6a8e6de197ba8eb8abf5fe6c6752"
+                },
+                "m_SlotId": 0
+            },
+            "m_InputSlot": {
+                "m_Node": {
+                    "m_Id": "0ef3d79c357e47e39e7678611a3bb965"
+                },
+                "m_SlotId": 18
+            }
+        },
+        {
+            "m_OutputSlot": {
+                "m_Node": {
+                    "m_Id": "5b2dd6877d584f107e62967d2d77ca2c"
+                },
+                "m_SlotId": 0
+            },
+            "m_InputSlot": {
+                "m_Node": {
+                    "m_Id": "0ef3d79c357e47e39e7678611a3bb965"
+                },
+                "m_SlotId": 19
             }
         }
     ],
@@ -2101,6 +2141,12 @@
         },
         {
             "m_Id": "d57850aef2ff431d8f9d307595c9fc60"
+        },
+        {
+            "m_Id": "1e105f0e82efe6e1d2420b8f65706070"
+        },
+        {
+            "m_Id": "47ac5d33bec3831f744e74f473171d4c"
         }
     ],
     "synonyms": [
@@ -2986,11 +3032,13 @@
     "m_CSharpEnumString": "",
     "m_EnumNames": [
         "Fixed",
-        "Multiscale"
+        "Multiscale",
+        "Distance"
     ],
     "m_EnumValues": [
         0,
-        1
+        1,
+        2
     ]
 }
 
@@ -3704,6 +3752,12 @@
             "m_Id": "773d3755431542bba36c5bb263ebfb8d"
         },
         {
+            "m_Id": "606957708089b80652c530ef15c18d7f"
+        },
+        {
+            "m_Id": "b935585107fad0980ac6a0ec3ccd5082"
+        },
+        {
             "m_Id": "0a55d87dc6014da6965c8eeab3e7b88e"
         },
         {
@@ -3725,4 +3779,228 @@
             "m_Id": "21d0db0984f548d3b6e51b3d8d839684"
         }
     ]
+}
+
+{
+    "m_SGVersion": 1,
+    "m_Type": "UnityEditor.ShaderGraph.Internal.Vector1ShaderProperty",
+    "m_ObjectId": "606957708089b80652c530ef15c18d7f",
+    "m_Guid": {
+        "m_GuidSerialized": "dd69cd36-ff2f-22fa-bc84-42a99d85665b"
+    },
+    "promotedFromAssetID": "",
+    "promotedFromCategoryName": "",
+    "promotedOrdering": -1,
+    "m_Name": "Grid DistanceStart",
+    "m_DefaultRefNameVersion": 1,
+    "m_RefNameGeneratedByDisplayName": "Grid DistanceStart",
+    "m_DefaultReferenceName": "_GridDistanceStart",
+    "m_OverrideReferenceName": "_GridDistanceStart",
+    "m_GeneratePropertyBlock": true,
+    "m_UseCustomSlotLabel": false,
+    "m_CustomSlotLabel": "",
+    "m_DismissedVersion": 0,
+    "m_Precision": 0,
+    "overrideHLSLDeclaration": false,
+    "hlslDeclarationOverride": 0,
+    "m_Hidden": false,
+    "m_PerRendererData": false,
+    "m_customAttributes": [],
+    "m_Value": 12,
+    "m_FloatType": 0,
+    "m_LiteralFloatMode": false,
+    "m_RangeValues": {
+        "x": 0,
+        "y": 1
+    },
+    "m_SliderType": 0,
+    "m_SliderPower": 3,
+    "m_EnumType": 0,
+    "m_CSharpEnumString": "",
+    "m_EnumNames": [
+        "Default"
+    ],
+    "m_EnumValues": [
+        0
+    ]
+}
+
+{
+    "m_SGVersion": 0,
+    "m_Type": "UnityEditor.ShaderGraph.Vector1MaterialSlot",
+    "m_ObjectId": "1e105f0e82efe6e1d2420b8f65706070",
+    "m_Id": 18,
+    "m_DisplayName": "DistanceStart",
+    "m_SlotType": 0,
+    "m_Hidden": false,
+    "m_ShaderOutputName": "DistanceStart",
+    "m_StageCapability": 2,
+    "m_Value": 12,
+    "m_DefaultValue": 12,
+    "m_Labels": [],
+    "m_LiteralMode": false
+}
+
+{
+    "m_SGVersion": 0,
+    "m_Type": "UnityEditor.ShaderGraph.PropertyNode",
+    "m_ObjectId": "59de6a8e6de197ba8eb8abf5fe6c6752",
+    "m_Group": {
+        "m_Id": ""
+    },
+    "m_Name": "Property",
+    "m_DrawState": {
+        "m_Expanded": true,
+        "m_Position": {
+            "serializedVersion": "2",
+            "x": 80,
+            "y": 150,
+            "width": 151.99993896484375,
+            "height": 33.999969482421875
+        }
+    },
+    "m_Slots": [
+        {
+            "m_Id": "203576744945119b7abcbc5c7c16e783"
+        }
+    ],
+    "synonyms": [],
+    "m_Precision": 0,
+    "m_PreviewExpanded": true,
+    "m_DismissedVersion": 0,
+    "m_PreviewMode": 0,
+    "m_CustomColors": {
+        "m_SerializableColors": []
+    },
+    "m_Property": {
+        "m_Id": "606957708089b80652c530ef15c18d7f"
+    }
+}
+
+{
+    "m_SGVersion": 0,
+    "m_Type": "UnityEditor.ShaderGraph.Vector1MaterialSlot",
+    "m_ObjectId": "203576744945119b7abcbc5c7c16e783",
+    "m_Id": 0,
+    "m_DisplayName": "Grid FadeStart",
+    "m_SlotType": 1,
+    "m_Hidden": false,
+    "m_ShaderOutputName": "Out",
+    "m_StageCapability": 3,
+    "m_Value": 12,
+    "m_DefaultValue": 12,
+    "m_Labels": [],
+    "m_LiteralMode": false
+}
+
+{
+    "m_SGVersion": 1,
+    "m_Type": "UnityEditor.ShaderGraph.Internal.Vector1ShaderProperty",
+    "m_ObjectId": "b935585107fad0980ac6a0ec3ccd5082",
+    "m_Guid": {
+        "m_GuidSerialized": "c71b0a85-dcf4-ec73-baa0-03378aa9dba7"
+    },
+    "promotedFromAssetID": "",
+    "promotedFromCategoryName": "",
+    "promotedOrdering": -1,
+    "m_Name": "Grid DistanceStep",
+    "m_DefaultRefNameVersion": 1,
+    "m_RefNameGeneratedByDisplayName": "Grid DistanceStep",
+    "m_DefaultReferenceName": "_GridDistanceStep",
+    "m_OverrideReferenceName": "_GridDistanceStep",
+    "m_GeneratePropertyBlock": true,
+    "m_UseCustomSlotLabel": false,
+    "m_CustomSlotLabel": "",
+    "m_DismissedVersion": 0,
+    "m_Precision": 0,
+    "overrideHLSLDeclaration": false,
+    "hlslDeclarationOverride": 0,
+    "m_Hidden": false,
+    "m_PerRendererData": false,
+    "m_customAttributes": [],
+    "m_Value": 20,
+    "m_FloatType": 0,
+    "m_LiteralFloatMode": false,
+    "m_RangeValues": {
+        "x": 0,
+        "y": 1
+    },
+    "m_SliderType": 0,
+    "m_SliderPower": 3,
+    "m_EnumType": 0,
+    "m_CSharpEnumString": "",
+    "m_EnumNames": [
+        "Default"
+    ],
+    "m_EnumValues": [
+        0
+    ]
+}
+
+{
+    "m_SGVersion": 0,
+    "m_Type": "UnityEditor.ShaderGraph.Vector1MaterialSlot",
+    "m_ObjectId": "47ac5d33bec3831f744e74f473171d4c",
+    "m_Id": 19,
+    "m_DisplayName": "DistanceStep",
+    "m_SlotType": 0,
+    "m_Hidden": false,
+    "m_ShaderOutputName": "DistanceStep",
+    "m_StageCapability": 2,
+    "m_Value": 20,
+    "m_DefaultValue": 20,
+    "m_Labels": [],
+    "m_LiteralMode": false
+}
+
+{
+    "m_SGVersion": 0,
+    "m_Type": "UnityEditor.ShaderGraph.PropertyNode",
+    "m_ObjectId": "5b2dd6877d584f107e62967d2d77ca2c",
+    "m_Group": {
+        "m_Id": ""
+    },
+    "m_Name": "Property",
+    "m_DrawState": {
+        "m_Expanded": true,
+        "m_Position": {
+            "serializedVersion": "2",
+            "x": 80,
+            "y": 190,
+            "width": 151.99993896484375,
+            "height": 33.999969482421875
+        }
+    },
+    "m_Slots": [
+        {
+            "m_Id": "099a2597775a3843ce64d5c9aec66fb3"
+        }
+    ],
+    "synonyms": [],
+    "m_Precision": 0,
+    "m_PreviewExpanded": true,
+    "m_DismissedVersion": 0,
+    "m_PreviewMode": 0,
+    "m_CustomColors": {
+        "m_SerializableColors": []
+    },
+    "m_Property": {
+        "m_Id": "b935585107fad0980ac6a0ec3ccd5082"
+    }
+}
+
+{
+    "m_SGVersion": 0,
+    "m_Type": "UnityEditor.ShaderGraph.Vector1MaterialSlot",
+    "m_ObjectId": "099a2597775a3843ce64d5c9aec66fb3",
+    "m_Id": 0,
+    "m_DisplayName": "Grid FadeStart",
+    "m_SlotType": 1,
+    "m_Hidden": false,
+    "m_ShaderOutputName": "Out",
+    "m_StageCapability": 3,
+    "m_Value": 20,
+    "m_DefaultValue": 20,
+    "m_Labels": [],
+    "m_LiteralMode": false
 }

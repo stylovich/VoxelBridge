@@ -3,7 +3,9 @@ Shader "Hidden/Voxel Bridge/Grid Detail Probe"
     Properties { _TestDistance("Distance", Float) = 1 _TestEnabled("Enabled", Float) = 1
         _TestOffset("Offset", Float) = 0 _TestSpan("Span", Float) = 0.25
         _TestMultiscale("Multiscale", Float) = 0 _TestTargetPixels("Target", Float) = 12
-        _TestMaxScaleLevels("Max Levels", Float) = 4 }
+        _TestMaxScaleLevels("Max Levels", Float) = 4
+        _TestDistanceStart("Distance Start", Float) = 12 _TestDistanceStep("Distance Step", Float) = 20
+        _TestLevelOnly("Level Only", Float) = 0 }
     SubShader
     {
         Pass
@@ -22,9 +24,12 @@ Shader "Hidden/Voxel Bridge/Grid Detail Probe"
             float _TestDistance, _TestEnabled, _TestOffset, _TestSpan, _TestSpanY;
             float _TestMultiscale, _TestTargetPixels, _TestMaxScaleLevels;
             float _TestAnchor;
+            float _TestDistanceStart, _TestDistanceStep, _TestLevelOnly;
             float4 frag(v2f_img i) : SV_Target
             {
                 float3 n; float s;
+                if (_TestLevelOnly > .5)
+                    return VoxelGridDistanceLevel(_TestDistance, _TestDistanceStart, _TestDistanceStep, _TestMaxScaleLevels);
                 // A translated camera and surface make distance independent of grid phase.
                 float3 p = mul(_TestObjectToWorld, float4(i.uv * float2(_TestSpan, _TestSpanY) + _TestOffset, _TestDistance, 1)).xyz;
                 float3 normal = normalize(mul(float3(0,0,1), (float3x3)_TestWorldToObject));
@@ -32,7 +37,8 @@ Shader "Hidden/Voxel Bridge/Grid Detail Probe"
                 float3 bitangent = normalize(mul((float3x3)_TestObjectToWorld, float3(0,1,0)));
                 VoxelGridDetail_float(p, normal, tangent, bitangent,
                     _TestEnabled, .03125, .2, .2, .2, 2, 8, .6,
-                    _TestMultiscale, _TestTargetPixels, _TestMaxScaleLevels, _TestAnchor, n, s);
+                    _TestMultiscale, _TestTargetPixels, _TestMaxScaleLevels, _TestAnchor,
+                    _TestDistanceStart, _TestDistanceStep, n, s);
                 return float4(n * .5 + .5, s);
             }
             ENDHLSL

@@ -38,6 +38,10 @@ Comenzar con una rejilla opcional de intensidad ajustable, comparando normal, ru
 
 Los valores iniciales de producción son `CellSize = 0.0625`, `Anchor = Family Local`, `Mode = Multiscale`, `TargetPixels = 12` y `MaxScaleLevels = 4`. El tamaño visual es una propiedad del material, no se deduce del perfil de conversión. Bibliotecas con otra unidad deben configurar un tamaño compatible. Antes de activar el anclaje local, comprobar el contrato descrito más abajo, especialmente el marco común de los chunks y la ausencia de `Batching Static`.
 
+Para controlar el crecimiento por distancia, seleccionar `Grid Mode = Distance` en el shader de producción. `Grid DistanceStart` conserva la escala base hasta la distancia indicada; `Grid DistanceStep` determina los metros de cada transición al doble de tamaño. La distancia se calcula por punto de superficie a la cámara, no desde el pivote del objeto. Con valores `12` y `20`, la primera mezcla ocupa de 12 a 32 m, la segunda de 32 a 52 m y las siguientes el mismo intervalo, hasta `MaxScaleLevels`. Se mezclan rejillas binarias fijas, sin estirar sus celdas.
+
+Este modo separa la escala artística del filtrado: suelo y pared con iguales parámetros y distancia seleccionan el mismo nivel, independientemente de su orientación, resolución o campo de visión. Las derivadas conservan el filtrado de frecuencias no resolubles; a ángulos rasantes puede atenuarse la rejilla sin aumentar su tamaño. No garantiza visibilidad constante ni elimina todo parpadeo. `TargetPixels` y `FadeStart / FadeEnd` no intervienen en `Distance`. Los materiales existentes conservan su modo; no se migran automáticamente.
+
 La integración conserva LUT, ColorID, SurfaceID, emisión y ajustes de instancing. No afecta al vidrio, a `Keep Original`, a materiales RGB ni a las transiciones de geometría. Normales y rugosidad constituyen el alcance de esta etapa; no incluye bisel geométrico, desplazamiento, AO de juntas ni POM/SPOM.
 
 ### Prototipo de comparación
@@ -53,8 +57,9 @@ Para probarlo, duplicar un material semántico opaco, asignarle el shader `Voxel
 | Grid Enabled | `0`: referencia sin detalle; `1`: rejilla activa. |
 | Grid Anchor | `World`: origen y ejes mundiales. `Family Local`: origen y ejes compartidos por los renderers de la familia; sigue su posición y rotación. Predeterminado en producción: `Family Local`; en el prototipo: `World`. |
 | Grid CellSize | Tamaño físico fijo o mínimo en metros. Punto inicial de comparación: `0.0625`. |
-| Grid Mode | `Fixed`: tamaño constante con atenuación; `Multiscale`: crecimiento visual binario independiente de la geometría. Predeterminado en producción: `Multiscale`; en el prototipo: `Fixed`. |
-| Grid TargetPixels | Objetivo aproximado de tamaño en pantalla para multiescala, entre 4 y 64 píxeles. Aumentarlo produce bloques visuales mayores; punto inicial: `12`. |
+| Grid Mode | `Fixed`: tamaño constante con atenuación; `Multiscale`: crecimiento binario por tamaño proyectado; `Distance`: crecimiento binario por distancia, disponible en producción. Ninguno modifica el LOD geométrico. Predeterminado en producción: `Multiscale`; en el prototipo: `Fixed`. |
+| Grid DistanceStart / DistanceStep | Sólo `Distance`: inicio del crecimiento y recorrido por transición, en metros. Valores iniciales `12` y `20`; inicio limitado a cero como mínimo e intervalo a `0.01 m`. |
+| Grid TargetPixels | Sólo `Multiscale`: objetivo aproximado de tamaño en pantalla, entre 4 y 64 píxeles. Aumentarlo produce bloques visuales mayores; punto inicial: `12`. |
 | Grid MaxScaleLevels | Máximo exponente binario, limitado a 0–8. Con base `0.0625` y valor `4`, el máximo es `1 m`. |
 | Grid JointWidth | Anchura total de la junta como fracción de celda; valor inicial `0.12`. |
 | Grid NormalStrength | Intensidad del cambio de normal; `0` desactiva este componente. |

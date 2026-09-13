@@ -17,11 +17,17 @@ float3 VoxelGridPattern(float2 q, float2 footprint, float width)
 
 // Family-local requires all renderers to retain the shared family frame (no static batching).
 // UV0/UV3 remain semantic IDs. Geometric LOD is independent.
+float VoxelGridDistanceLevel(float cameraDistance, float startDistance, float transitionDistance, float maxLevels)
+{
+    return clamp((cameraDistance - max(startDistance, 0.0)) / max(transitionDistance, 0.01),
+        0.0, floor(clamp(maxLevels, 0.0, 8.0)));
+}
+
 void VoxelGridDetail_float(float3 Position, float3 Normal, float3 Tangent, float3 Bitangent,
     float Enabled, float CellSize, float JointWidth, float NormalStrength,
     float RoughnessStrength, float FadeStart, float FadeEnd, float BaseSmoothness,
     float Multiscale, float TargetPixels, float MaxScaleLevels,
-    float AnchorMode,
+    float AnchorMode, float DistanceStart, float DistanceStep,
     out float3 DetailNormalTS, out float DetailSmoothness)
 {
     DetailNormalTS = float3(0, 0, 1);
@@ -59,9 +65,13 @@ void VoxelGridDetail_float(float3 Position, float3 Normal, float3 Tangent, float
     if (Multiscale >= 0.5)
     {
         // Crossfade two fixed, nested grids instead of stretching the grid with the camera.
-        // Logarithmic selection responds to resolution/FOV/obliquity, not the mesh's LOD index.
+        // Distance selection ignores face angle; derivative filtering below still prevents aliasing.
         float maxLevel = floor(clamp(MaxScaleLevels, 0.0, 8.0));
-        float level = clamp(log2(max(max(footprint.x, footprint.y) * clamp(TargetPixels, 4.0, 64.0), 1.0)), 0.0, maxLevel);
+        float level;
+        if (Multiscale >= 1.5)
+            level = VoxelGridDistanceLevel(distance(Position, _WorldSpaceCameraPos), DistanceStart, DistanceStep, maxLevel);
+        else
+            level = clamp(log2(max(max(footprint.x, footprint.y) * clamp(TargetPixels, 4.0, 64.0), 1.0)), 0.0, maxLevel);
         float lower = floor(level);
         float upper = min(lower + 1.0, maxLevel);
         float lowerScale = exp2(lower), upperScale = exp2(upper);
@@ -83,5 +93,18 @@ void VoxelGridDetail_float(float3 Position, float3 Normal, float3 Tangent, float
         dot(detailN, normalize(Bitangent)), dot(detailN, n)));
     DetailSmoothness = saturate(BaseSmoothness - pattern.z * saturate(RoughnessStrength) * weight);
 #endif
+}
+
+// Retain the original signature for the standalone prototype and external graphs.
+void VoxelGridDetail_float(float3 Position, float3 Normal, float3 Tangent, float3 Bitangent,
+    float Enabled, float CellSize, float JointWidth, float NormalStrength,
+    float RoughnessStrength, float FadeStart, float FadeEnd, float BaseSmoothness,
+    float Multiscale, float TargetPixels, float MaxScaleLevels, float AnchorMode,
+    out float3 DetailNormalTS, out float DetailSmoothness)
+{
+    VoxelGridDetail_float(Position, Normal, Tangent, Bitangent, Enabled, CellSize, JointWidth,
+        NormalStrength, RoughnessStrength, FadeStart, FadeEnd, BaseSmoothness,
+        Multiscale, TargetPixels, MaxScaleLevels, AnchorMode, 12.0, 20.0,
+        DetailNormalTS, DetailSmoothness);
 }
 #endif

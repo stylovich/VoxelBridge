@@ -10,7 +10,7 @@ namespace LocalModels.VoxelBridge.Tests
     public sealed class VoxelProductionGridRenderTests
     {
         // Isolated HDRP preview: no Test2 reload or persistent material changes.
-        internal static Texture2D Render(string shaderPath, bool enabled, bool zeroStrength = false)
+        internal static Texture2D Render(string shaderPath, bool enabled, bool zeroStrength = false, float gridMode = 1)
         {
             var shader = AssetDatabase.LoadAssetAtPath<Shader>(shaderPath);
             Assert.That(shader, Is.Not.Null);
@@ -32,7 +32,7 @@ namespace LocalModels.VoxelBridge.Tests
                 {
                     material.SetFloat("_GridEnabled", enabled ? 1 : 0);
                     material.SetFloat("_GridCellSize", .0625f);
-                    material.SetFloat("_GridAnchor", 1); material.SetFloat("_GridMultiscale", 1);
+                    material.SetFloat("_GridAnchor", 1); material.SetFloat("_GridMultiscale", gridMode);
                     material.SetFloat("_GridNormalStrength", zeroStrength ? 0 : .16f);
                     material.SetFloat("_GridRoughnessStrength", zeroStrength ? 0 : .1f);
                 }
@@ -100,6 +100,23 @@ namespace LocalModels.VoxelBridge.Tests
             {
                 if (off) Object.DestroyImmediate(off); if (on) Object.DestroyImmediate(on);
                 if (zero) Object.DestroyImmediate(zero); if (prototype) Object.DestroyImmediate(prototype);
+            }
+        }
+
+        [Test]
+        public void Production_DistanceModeRendersFineGridInsideNearRange()
+        {
+            Texture2D expected = null, actual = null;
+            try
+            {
+                expected = Render(VoxelProductionExporter.ShaderPath, true, gridMode: 0);
+                actual = Render(VoxelProductionExporter.ShaderPath, true, gridMode: 2);
+                Assert.That(expected.GetPixels().Zip(actual.GetPixels(), (x, y) => Vector4.Distance(x, y)).Max(), Is.LessThan(.01f));
+            }
+            finally
+            {
+                if (expected) Object.DestroyImmediate(expected);
+                if (actual) Object.DestroyImmediate(actual);
             }
         }
     }

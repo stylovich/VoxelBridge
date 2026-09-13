@@ -14,7 +14,7 @@ El diagnóstico de entidades requiere Entities 1.4 y Entities Graphics 1.4, incl
 
 Las paletas, el transporte de `ColorID + SurfaceID` y las familias semánticas de producción se describen en [MATERIALS.md](MATERIALS.md). [ROADMAP.md](ROADMAP.md) distingue los sistemas disponibles de las fases pendientes de autoría, validación de producción, impostores semánticos y evaluación de HLOD y presupuestos.
 
-El shader opaco de producción ofrece una [rejilla superficial opcional](ART_DIRECTION_AND_DETAIL.md#rejilla-superficial-de-producción), fija o multiescala y con anclaje mundial o local de familia. El acabado avanzado y los anuncios separados de su estructura permanecen como fases posteriores.
+El shader opaco de producción ofrece una [rejilla superficial opcional](ART_DIRECTION_AND_DETAIL.md#rejilla-superficial-de-producción), fija o multiescala por tamaño proyectado o distancia, con anclaje mundial o local de familia. El acabado avanzado y los anuncios separados de su estructura permanecen como fases posteriores.
 
 ## Herramientas
 

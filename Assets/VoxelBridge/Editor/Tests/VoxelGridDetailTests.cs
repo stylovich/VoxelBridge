@@ -9,7 +9,8 @@ namespace LocalModels.VoxelBridge.Tests
     {
         private static Color[] Render(float enabled = 1, float distance = 1, float offset = 0, float span = .25f,
             float multiscale = 0, float targetPixels = 12, float maxLevels = 4,
-            float anchor = 0, Matrix4x4? objectToWorld = null, float? spanY = null)
+            float anchor = 0, Matrix4x4? objectToWorld = null, float? spanY = null,
+            float distanceStart = 12, float distanceStep = 20, bool levelOnly = false)
         {
             var shader = AssetDatabase.LoadAssetAtPath<Shader>("Assets/VoxelBridge/Editor/Tests/VoxelGridDetailProbe.shader");
             Assert.That(shader, Is.Not.Null);
@@ -28,6 +29,8 @@ namespace LocalModels.VoxelBridge.Tests
                 material.SetFloat("_TestMultiscale", multiscale); material.SetFloat("_TestTargetPixels", targetPixels);
                 material.SetFloat("_TestMaxScaleLevels", maxLevels);
                 material.SetFloat("_TestAnchor", anchor);
+                material.SetFloat("_TestDistanceStart", distanceStart); material.SetFloat("_TestDistanceStep", distanceStep);
+                material.SetFloat("_TestLevelOnly", levelOnly ? 1 : 0);
                 material.SetMatrix("_TestObjectToWorld", objectToWorld ?? Matrix4x4.identity);
                 material.SetMatrix("_TestWorldToObject", (objectToWorld ?? Matrix4x4.identity).inverse);
                 Graphics.Blit(Texture2D.whiteTexture, rt, material);
@@ -182,6 +185,69 @@ namespace LocalModels.VoxelBridge.Tests
             finally { Object.DestroyImmediate(root); }
         }
 
+        [TestCase(0f, 0f)]
+        [TestCase(12f, 0f)]
+        [TestCase(22f, .5f)]
+        [TestCase(32f, 1f)]
+        [TestCase(52f, 2f)]
+        [TestCase(92f, 4f)]
+        [TestCase(1000f, 4f)]
+        public void DistanceMode_UsesMetresAndClampsAtSizeCap(float distance, float expectedLevel)
+        {
+            foreach (var pixel in Render(distance: distance, levelOnly: true))
+                Assert.That(pixel.r, Is.EqualTo(expectedLevel).Within(.0001f));
+        }
+
+        [Test]
+        public void DistanceMode_ClampsDegenerateAuthoringValues()
+        {
+            foreach (var pixel in Render(distance: 1, distanceStart: -3, distanceStep: 0, maxLevels: 20, levelOnly: true))
+                Assert.That(pixel.r, Is.EqualTo(8));
+            foreach (var pixel in Render(distance: 100, maxLevels: -1, levelOnly: true))
+                Assert.That(pixel.r, Is.Zero);
+        }
+
+        [Test]
+        public void DistanceMode_NearRangeIgnoresPixelTargetAndDoesNotGrow()
+        {
+            var expected = Render(distance: 1, span: .125f);
+            var actual = Render(distance: 10, span: .125f, multiscale: 2, targetPixels: 64);
+            for (int i = 0; i < expected.Length; i++)
+                Assert.That(Vector4.Distance(expected[i], actual[i]), Is.LessThan(.001f));
+        }
+
+        [TestCase(0f)]
+        [TestCase(80f)]
+        [TestCase(90f)]
+        public void DistanceMode_UsesSameScaleOnRotatedSurfaces(float angle)
+        {
+            var expected = Render(distance: 32, multiscale: 2, anchor: 1);
+            var actual = Render(distance: 32, multiscale: 2, anchor: 1,
+                objectToWorld: Matrix4x4.Rotate(Quaternion.Euler(angle, 0, 0)));
+            for (int i = 0; i < expected.Length; i++)
+                Assert.That(Vector4.Distance(expected[i], actual[i]), Is.LessThan(.002f));
+        }
+
+        [Test]
+        public void DistanceMode_FiltersUnresolvedGridInsteadOfGrowingIt()
+        {
+            foreach (var pixel in Render(distance: 1, span: 2, multiscale: 2))
+                Assert.That(Vector4.Distance(pixel, new Color(.5f, .5f, 1, .6f)), Is.LessThan(.001f));
+            Assert.That(Render(distance: 1, span: 2, multiscale: 1).Any(p => p.a < .59f), Is.True);
+        }
+
+        [TestCase(12f)]
+        [TestCase(32f)]
+        [TestCase(52f)]
+        [TestCase(92f)]
+        public void DistanceMode_HasContinuousTransitions(float distance)
+        {
+            var a = Render(distance: distance - .0001f, multiscale: 2);
+            var b = Render(distance: distance + .0001f, multiscale: 2);
+            for (int i = 0; i < a.Length; i++)
+                Assert.That(Vector4.Distance(a[i], b[i]), Is.LessThan(.002f));
+        }
+
         [TestCase("VoxelGridPrototype", "Forward", false)]
         [TestCase("VoxelGridPrototype", "Forward", true)]
         [TestCase("VoxelGridPrototype", "GBuffer", false)]
@@ -217,6 +283,8 @@ namespace LocalModels.VoxelBridge.Tests
                 Assert.That(material.GetFloat("_GridMultiscale"), Is.EqualTo(1));
                 Assert.That(material.GetFloat("_GridTargetPixels"), Is.EqualTo(12));
                 Assert.That(material.GetFloat("_GridMaxScaleLevels"), Is.EqualTo(4));
+                Assert.That(material.GetFloat("_GridDistanceStart"), Is.EqualTo(12));
+                Assert.That(material.GetFloat("_GridDistanceStep"), Is.EqualTo(20));
                 Assert.That(material.HasProperty("_PaletteColor"), Is.True);
                 Assert.That(material.HasProperty("_PaletteSurface"), Is.True);
                 Assert.That(material.HasProperty("_EmissionIntensity"), Is.True);
