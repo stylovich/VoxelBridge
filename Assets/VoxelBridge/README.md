@@ -18,6 +18,8 @@ Las paletas, el transporte de `ColorID + SurfaceID` y las familias semánticas d
 
 El shader opaco de producción ofrece una [rejilla superficial opcional](ART_DIRECTION_AND_DETAIL.md#rejilla-superficial-de-producción), fija o multiescala por tamaño proyectado o distancia, con anclaje mundial o local de familia. Los perfiles de líneas y juntas biseladas modifican normales y rugosidad sin alterar geometría. Incluye un ensayo de POM procedural cercano y variación de altura por SurfaceID, desactivados por defecto, sin recorte de silueta ni escritura de profundidad. Los anuncios separados de su estructura permanecen como una fase posterior.
 
+La [variante experimental de profundidad](ART_DIRECTION_AND_DETAIL.md#escritura-de-profundidad-del-pom--variante-experimental) permite evaluar las juntas POM en el buffer de profundidad de cámara mediante un material separado. No sustituye automáticamente el shader de producción.
+
 ## Herramientas
 
 | Menú en `Tools > Voxel Bridge` | Función |

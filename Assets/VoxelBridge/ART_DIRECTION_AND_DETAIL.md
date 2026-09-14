@@ -74,6 +74,23 @@ El POM requiere cámara perspectiva. Se atenúa entre 2 y 8 m, a ángulos casi r
 
 La salida desplaza el muestreo del perfil de normales y rugosidad, no el buffer de profundidad. No modifica siluetas ni colisiones y no aporta la profundidad del relieve a las sombras o al AO de pantalla; tampoco desplaza el color de una cara hacia la identidad de otra. No certifica juntas entre regiones de atributos diferentes: el recorrido utiliza las propiedades de la cara rasterizada, no consulta los IDs de voxels vecinos. Evaluar primero paredes y suelos uniformes no emisivos; vidrio, offsets de profundidad y recorte SPOM permanecen fuera de este ensayo. El filtrado no garantiza ausencia de parpadeo. La evaluación temporal completa, el coste GPU y Entities Graphics en runtime permanecen pendientes.
 
+### Escritura de profundidad del POM — variante experimental
+
+`Voxel Bridge/Experimental/VoxelWorldOpaquePomDepth` comparte las LUT, propiedades y código POM de `VoxelWorldOpaque`, pero conecta la intersección al bloque `Depth Offset` de HDRP. La exportación continúa utilizando el shader original; seleccionar esta variante es una decisión explícita por material.
+
+1. Duplicar un material semántico opaco y asignarle la variante experimental, conservando las referencias de paleta.
+2. Mantener `Grid Enabled = On`, `Grid Profile = Beveled` y `Grid POM = On`.
+3. Activar `Surface Options > Depth Offset` y `Conservative`. Alternar únicamente `Depth Offset` para comparar. Una copia del material original puede conservar esa opción apagada aunque el shader experimental la tenga activada por defecto.
+4. Aplicar la copia a una superficie de prueba cercana. Reasignar el material original para retirar completamente la variante; no requiere reconvertir ni reconstruir los modelos.
+
+La escritura sólo hunde píxeles: no adelanta profundidad hacia la cámara. Reutiliza el punto de intersección del POM y transforma su hundimiento normal en distancia a lo largo del rayo de vista. Conserva el límite normal en metros de `POM MaxDepth`, la atenuación cercana y el límite lateral de `0.2` celdas. Cuando ese límite lateral interviene, reduce conjuntamente el recorrido y la profundidad para mantenerlos sobre el mismo rayo. El modo fijo respeta además su fade; los niveles visuales gruesos, las vistas ortográficas, las sombras y el horneado no reciben offset.
+
+Permite que una superficie situada detrás gane el test de profundidad en las juntas hundidas; las caras planas siguen ocultándola. Los consumidores de la profundidad de cámara pueden percibir ese relieve, pero la visibilidad del AO depende de su radio, sesgo, resolución y orden de ejecución. No incorpora AO propio, silueta SPOM, agujeros en la malla, colisiones ni sombras de las juntas. Las intersecciones entre atributos distintos, la estabilidad con TAA/movimiento, Entities Graphics en runtime y el coste GPU requieren evaluación adicional. Mantener profundidades milimétricas y probar primero regiones uniformes no emisivas.
+
+La variante utiliza un pase con escritura de profundidad cuando se activa `_DEPTHOFFSET_ON`; su coste no debe extrapolarse al shader original. `Conservative` permite al backend aprovechar las garantías de desplazamiento positivo. No certificar rendimiento sólo por compilar esa variante. Al modificar las conexiones de paleta o detalle del graph original, mantener sincronizado el graph experimental y ejecutar las pruebas de equivalencia con `Depth Offset` apagado.
+
+En el laboratorio de VoxelCity, mantener desactivado el GO de HTrace SSGI durante las pruebas interactivas por la inestabilidad observada con SSGI y AO. Conservar el estado del AO salvo que forme parte de la comparación. Si una prueba requiere ambos, iniciar el Editor con `-force-d3d12-debug` es una mitigación disponible, no una solución certificada; no utilizar esa ejecución como referencia de rendimiento.
+
 ### Prototipo de comparación
 
 `Shaders/VoxelGridPrototype.shadergraph` conserva las LUT de color y superficie del shader opaco y añade `Shaders/VoxelGridDetail.hlsl`. El patrón proyecta sobre el plano principal de la cara en el espacio elegido mediante `Grid Anchor`, sin reutilizar UV0 o UV3. Modifica normales y smoothness; no desplaza geometría, profundidad, color, emisión ni colisiones. No incluye POM/SPOM.

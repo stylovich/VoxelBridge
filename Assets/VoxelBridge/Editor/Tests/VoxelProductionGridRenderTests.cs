@@ -12,7 +12,8 @@ namespace LocalModels.VoxelBridge.Tests
         // Isolated HDRP preview: no Test2 reload or persistent material changes.
         internal static Texture2D Render(string shaderPath, bool enabled, bool zeroStrength = false, float gridMode = 1,
             float profile = 0, float depth = .025f, float bevelWidth = .06f, int geometry = 0, float orbit = 0,
-            float pom = 0, float pomMaxDepth = .003f, float variation = 0, int surfaceId = 0)
+            float pom = 0, float pomMaxDepth = .003f, float variation = 0, int surfaceId = 0,
+            bool depthWrite = false, bool backing = false)
         {
             var shader = AssetDatabase.LoadAssetAtPath<Shader>(shaderPath);
             Assert.That(shader, Is.Not.Null);
@@ -25,6 +26,8 @@ namespace LocalModels.VoxelBridge.Tests
             var previous = RenderTexture.active;
             RenderTexture rt = null;
             Texture2D result = null;
+            Material backingMaterial = null;
+            Texture2D backingColors = null;
             try
             {
                 colors.SetPixels(Enumerable.Repeat(new Color(.6f, .42f, .25f, 1), 256).ToArray()); colors.Apply();
@@ -57,6 +60,23 @@ namespace LocalModels.VoxelBridge.Tests
                     }
                 }
                 HDMaterial.ValidateMaterial(material);
+                if (material.HasProperty("_DepthOffsetEnable"))
+                {
+                    material.SetFloat("_DepthOffsetEnable", depthWrite ? 1 : 0);
+                    material.SetFloat("_ConservativeDepthOffsetEnable", 1);
+                    HDMaterial.ValidateMaterial(material);
+                }
+                if (backing)
+                {
+                    material.SetFloat("_GridJointWidth", .2f);
+                    backingColors = new Texture2D(256, 1, TextureFormat.RGBA32, false, true);
+                    backingColors.SetPixels(Enumerable.Repeat(new Color(.02f, .05f, .8f, 1), 256).ToArray()); backingColors.Apply();
+                    backingMaterial = new Material(material);
+                    backingMaterial.SetTexture("_PaletteColor", backingColors);
+                    backingMaterial.SetFloat("_GridEnabled", 0);
+                    backingMaterial.SetFloat("_DepthOffsetEnable", 0);
+                    HDMaterial.ValidateMaterial(backingMaterial);
+                }
                 preview.camera.fieldOfView = 35;
                 preview.camera.nearClipPlane = .1f; preview.camera.farClipPlane = 20;
                 preview.camera.clearFlags = CameraClearFlags.SolidColor;
@@ -91,6 +111,8 @@ namespace LocalModels.VoxelBridge.Tests
                         var matrix = geometry == 0 ? Matrix4x4.Rotate(Quaternion.Euler(10, 25, 0)) :
                             Matrix4x4.Scale(geometry == 1 ? new Vector3(1.5f, 1.5f, .125f) : new Vector3(1.5f, .0625f, 1.5f));
                         preview.DrawMesh(cube, matrix, material, 0);
+                        // A blue surface 1 mm behind the front face exposes actual depth-test changes.
+                        if (backing) preview.DrawMesh(cube, Matrix4x4.Translate(new Vector3(0, 0, .001f)) * matrix, backingMaterial, 0);
                         preview.Render(true, false);
                     }
                     finally { rendered = preview.EndPreview(); }
@@ -109,6 +131,8 @@ namespace LocalModels.VoxelBridge.Tests
                 preview.Cleanup();
                 Object.DestroyImmediate(material); Object.DestroyImmediate(colors); Object.DestroyImmediate(surfaces);
                 if (ownedMesh) Object.DestroyImmediate(ownedMesh);
+                if (backingMaterial) Object.DestroyImmediate(backingMaterial);
+                if (backingColors) Object.DestroyImmediate(backingColors);
             }
         }
 
@@ -203,6 +227,37 @@ namespace LocalModels.VoxelBridge.Tests
             {
                 if (baseline) Object.DestroyImmediate(baseline); if (unchanged) Object.DestroyImmediate(unchanged); if (varied) Object.DestroyImmediate(varied);
             }
+        }
+
+        internal const string DepthShaderPath = "Assets/VoxelBridge/Shaders/VoxelWorldOpaquePomDepth.shadergraph";
+
+        [Test]
+        public void DepthVariant_OffMatchesProduction()
+        {
+            Texture2D expected = null, actual = null;
+            try
+            {
+                expected = Render(VoxelProductionExporter.ShaderPath, true, gridMode: 0, profile: 1, pom: 1, geometry: 1);
+                actual = Render(DepthShaderPath, true, gridMode: 0, profile: 1, pom: 1, geometry: 1);
+                Assert.That(expected.GetPixels().Zip(actual.GetPixels(), (a,b)=>Vector4.Distance(a,b)).Max(), Is.LessThan(.01f));
+            }
+            finally { if (expected) Object.DestroyImmediate(expected); if (actual) Object.DestroyImmediate(actual); }
+        }
+
+        [Test]
+        public void DepthVariant_RevealsBackingOnlyThroughRecessedPixels()
+        {
+            Texture2D off = null, on = null;
+            try
+            {
+                off = Render(DepthShaderPath, true, gridMode: 0, profile: 1, pom: 1, depth: .08f, geometry: 1, backing: true);
+                on = Render(DepthShaderPath, true, gridMode: 0, profile: 1, pom: 1, depth: .08f, geometry: 1, backing: true, depthWrite: true);
+                var a = off.GetPixels(); var b = on.GetPixels();
+                Assert.That(a.Zip(b, (x,y)=>y.b > y.r * 1.25f && y.b > x.b + .03f).Count(x=>x), Is.GreaterThan(30),
+                    "The backing surface should pass the depth test in recessed joints, not through the flat face.");
+                Assert.That(b.Count(p=>p.r > p.b * 1.25f), Is.GreaterThan(10000), "Flat cell faces must continue occluding the backing.");
+            }
+            finally { if (off) Object.DestroyImmediate(off); if (on) Object.DestroyImmediate(on); }
         }
     }
 }

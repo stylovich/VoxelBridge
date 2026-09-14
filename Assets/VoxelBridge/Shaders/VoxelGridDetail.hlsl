@@ -120,8 +120,14 @@ float VoxelGridParallaxWeight(float cameraDistance, float ndotv, float level)
         * (1.0 - smoothstep(0.0, 1.0, level));
 }
 
+// HDRP's Depth Offset is a distance along the view ray, not along the face normal.
+float VoxelGridRayDepth(float hit, float normalDepth, float ndotv)
+{
+    return saturate(hit) * max(normalDepth, 0.0) / max(ndotv, 0.12);
+}
+
 // Family-local requires a shared renderer frame (no static batching). UV0/UV3 remain IDs.
-void VoxelGridDetail_float(float3 Position, float3 Normal, float3 Tangent, float3 Bitangent,
+void VoxelGridDetailDepth_float(float3 Position, float3 Normal, float3 Tangent, float3 Bitangent,
     float Enabled, float CellSize, float JointWidth, float NormalStrength,
     float RoughnessStrength, float FadeStart, float FadeEnd, float BaseSmoothness,
     float Multiscale, float TargetPixels, float MaxScaleLevels,
@@ -129,10 +135,11 @@ void VoxelGridDetail_float(float3 Position, float3 Normal, float3 Tangent, float
     float Profile, float BevelWidth, float JointDepth,
     float PomEnabled, float PomMaxDepth,
     float SurfaceHeightVariation,
-    out float3 DetailNormalTS, out float DetailSmoothness)
+    out float3 DetailNormalTS, out float DetailSmoothness, out float DepthOffset)
 {
     DetailNormalTS = float3(0, 0, 1);
     DetailSmoothness = BaseSmoothness;
+    DepthOffset = 0;
 #if !defined(SHADERGRAPH_PREVIEW) && !defined(SHADER_STAGE_RAY_TRACING)
     float3 n = normalize(Normal);
     float3 frameNormal = n;
@@ -173,6 +180,8 @@ void VoxelGridDetail_float(float3 Position, float3 Normal, float3 Tangent, float
         level = VoxelGridDistanceLevel(distance(Position, _WorldSpaceCameraPos), DistanceStart, DistanceStep, maxLevel);
     else if (Multiscale >= 0.5)
         level = clamp(log2(max(max(footprint.x, footprint.y) * clamp(TargetPixels, 4.0, 64.0), 1.0)), 0.0, maxLevel);
+    // Do not offset shadow maps from the player's view or bake camera-dependent relief.
+#if !defined(SHADERPASS) || ((SHADERPASS != SHADERPASS_SHADOWS) && (SHADERPASS != SHADERPASS_LIGHT_TRANSPORT))
     if (PomEnabled >= 0.5 && Profile >= 0.5 && JointDepth + variation > 0 && unity_OrthoParams.w < 0.5)
     {
         float3 view = normalize(_WorldSpaceCameraPos - Position);
@@ -180,9 +189,26 @@ void VoxelGridDetail_float(float3 Position, float3 Normal, float3 Tangent, float
         float fade = VoxelGridParallaxWeight(distance(Position, _WorldSpaceCameraPos), ndotv, level);
         float depth = min((clamp(JointDepth, 0.0, 0.25) + variation) * max(CellSize, 0.001), clamp(PomMaxDepth, 0.0, 0.01));
         if (fade > 0.0001 && depth > 0)
-            q = VoxelGridParallax(q, footprint, JointWidth, BevelWidth, depth * fade / max(CellSize, 0.001),
-                float3(dot(view, u), dot(view, v), ndotv), JointDepth, variation, planeCell, cellU, cellV).xy;
+        {
+            float normalDepth = depth * fade;
+            float3 gridView = float3(dot(view, u), dot(view, v), ndotv);
+#if defined(_DEPTHOFFSET_ON) && _DEPTHOFFSET_ON
+            float visibility = weight;
+            if (Multiscale < 0.5)
+                visibility *= 1.0 - smoothstep(max(0, FadeStart), max(FadeStart + 0.01, FadeEnd), distance(Position, _WorldSpaceCameraPos));
+            // Keep the displaced depth and UV hit on the same ray when its lateral cap is reached.
+            normalDepth = min(normalDepth * visibility,
+                0.2 * max(CellSize, 0.001) * max(ndotv, 0.12) / max(length(gridView.xy), 0.000001));
+#endif
+            float3 hit = VoxelGridParallax(q, footprint, JointWidth, BevelWidth, normalDepth / max(CellSize, 0.001),
+                gridView, JointDepth, variation, planeCell, cellU, cellV);
+            q = hit.xy;
+#if defined(_DEPTHOFFSET_ON) && _DEPTHOFFSET_ON
+            DepthOffset = VoxelGridRayDepth(hit.z, normalDepth, ndotv);
+#endif
+        }
     }
+#endif
     float3 pattern;
     if (Multiscale >= 0.5)
     {
@@ -212,6 +238,23 @@ void VoxelGridDetail_float(float3 Position, float3 Normal, float3 Tangent, float
         dot(detailN, normalize(Bitangent)), dot(detailN, n)));
     DetailSmoothness = saturate(BaseSmoothness - pattern.z * saturate(RoughnessStrength) * weight);
 #endif
+}
+
+// Production graphs keep the original interface and do not opt into depth writing.
+void VoxelGridDetail_float(float3 Position, float3 Normal, float3 Tangent, float3 Bitangent,
+    float Enabled, float CellSize, float JointWidth, float NormalStrength,
+    float RoughnessStrength, float FadeStart, float FadeEnd, float BaseSmoothness,
+    float Multiscale, float TargetPixels, float MaxScaleLevels,
+    float AnchorMode, float DistanceStart, float DistanceStep,
+    float Profile, float BevelWidth, float JointDepth, float PomEnabled, float PomMaxDepth,
+    float SurfaceHeightVariation, out float3 DetailNormalTS, out float DetailSmoothness)
+{
+    float unusedDepth;
+    VoxelGridDetailDepth_float(Position, Normal, Tangent, Bitangent, Enabled, CellSize, JointWidth,
+        NormalStrength, RoughnessStrength, FadeStart, FadeEnd, BaseSmoothness, Multiscale,
+        TargetPixels, MaxScaleLevels, AnchorMode, DistanceStart, DistanceStep, Profile,
+        BevelWidth, JointDepth, PomEnabled, PomMaxDepth, SurfaceHeightVariation,
+        DetailNormalTS, DetailSmoothness, unusedDepth);
 }
 
 // Existing POM graphs without surface variation retain a uniform height field.

@@ -13,7 +13,8 @@ namespace LocalModels.VoxelBridge.Tests
             float distanceStart = 12, float distanceStep = 20, bool levelOnly = false,
             float profile = 0, float bevelWidth = .06f, float jointDepth = .025f, bool patternOnly = false,
             float pom = 0, float pomMaxDepth = .003f, bool pomTrace = false, Vector3? view = null,
-            float variation = 0, Vector3? plane = null, Vector3? cellV = null)
+            float variation = 0, Vector3? plane = null, Vector3? cellV = null,
+            bool depthWrite = false, bool shadowPass = false, bool orthographic = false)
         {
             var shader = AssetDatabase.LoadAssetAtPath<Shader>("Assets/VoxelBridge/Editor/Tests/VoxelGridDetailProbe.shader");
             Assert.That(shader, Is.Not.Null);
@@ -27,7 +28,9 @@ namespace LocalModels.VoxelBridge.Tests
             try
             {
                 Shader.SetGlobalVector("_WorldSpaceCameraPos", Vector4.zero);
-                Shader.SetGlobalVector("unity_OrthoParams", Vector4.zero);
+                Shader.SetGlobalVector("unity_OrthoParams", orthographic ? new Vector4(0, 0, 0, 1) : Vector4.zero);
+                if (depthWrite) material.EnableKeyword("TEST_DEPTH_WRITE");
+                if (shadowPass) material.EnableKeyword("TEST_SHADOW_PASS");
                 material.SetFloat("_TestEnabled", enabled); material.SetFloat("_TestDistance", distance);
                 material.SetFloat("_TestOffset", offset); material.SetFloat("_TestSpan", span);
                 material.SetFloat("_TestSpanY", spanY ?? span);
@@ -268,6 +271,11 @@ namespace LocalModels.VoxelBridge.Tests
         [TestCase("VoxelWorldOpaque", "Forward", true)]
         [TestCase("VoxelWorldOpaque", "GBuffer", false)]
         [TestCase("VoxelWorldOpaque", "GBuffer", true)]
+        [TestCase("VoxelWorldOpaquePomDepth", "Forward", false)]
+        [TestCase("VoxelWorldOpaquePomDepth", "GBuffer", true)]
+        [TestCase("VoxelWorldOpaquePomDepth", "DepthOnly", true)]
+        [TestCase("VoxelWorldOpaquePomDepth", "MotionVectors", true)]
+        [TestCase("VoxelWorldOpaquePomDepth", "ShadowCaster", true)]
         public void GridShaders_CompileRasterVariants(string shaderName, string passName, bool dots)
         {
             var shader = AssetDatabase.LoadAssetAtPath<Shader>($"Assets/VoxelBridge/Shaders/{shaderName}.shadergraph");
@@ -276,6 +284,8 @@ namespace LocalModels.VoxelBridge.Tests
             var pass = Enumerable.Range(0, sub.PassCount).Select(sub.GetPass).First(p => p.Name == passName);
             var keywords = new[] { "PUNCTUAL_SHADOW_MEDIUM", "DIRECTIONAL_SHADOW_MEDIUM", "AREA_SHADOW_MEDIUM" };
             if (dots) keywords = keywords.Concat(new[] { "DOTS_INSTANCING_ON" }).ToArray();
+            if (shaderName == "VoxelWorldOpaquePomDepth")
+                keywords = keywords.Concat(new[] { "_DEPTHOFFSET_ON", "_CONSERVATIVE_DEPTH_OFFSET" }).ToArray();
             var result = pass.CompileVariant(UnityEditor.Rendering.ShaderType.Fragment, keywords,
                 UnityEditor.Rendering.ShaderCompilerPlatform.D3D, BuildTarget.StandaloneWindows64);
             Assert.That(result.Success, Is.True, string.Join("\n", result.Messages.Select(m => m.message)));
@@ -307,6 +317,62 @@ namespace LocalModels.VoxelBridge.Tests
                 Assert.That(material.HasProperty("_EmissionIntensity"), Is.True);
             }
             finally { Object.DestroyImmediate(material); }
+        }
+
+        [Test]
+        public void DepthWrite_RecessesFacesAndStaysWithinPhysicalCap()
+        {
+            // Flip the plane so its normal faces the test camera.
+            var rotation = Matrix4x4.Rotate(Quaternion.Euler(0, 180, 0));
+            var pixels = Render(depthWrite: true, pom: 1, profile: 1, jointDepth: .08f,
+                variation: .08f, objectToWorld: rotation, pomMaxDepth: .001f, span: .125f);
+            Assert.That(pixels.Max(p => p.r), Is.GreaterThan(.0001f));
+            foreach (var p in pixels)
+            {
+                Assert.That(float.IsNaN(p.r) || float.IsInfinity(p.r), Is.False);
+                Assert.That(p.r, Is.InRange(0f, .00102f));
+            }
+        }
+
+        [TestCase(0, 1, 1, false, false, 1)]
+        [TestCase(1, 0, 1, false, false, 1)]
+        [TestCase(1, 1, 0, false, false, 1)]
+        [TestCase(1, 1, 1, true, false, 1)]
+        [TestCase(1, 1, 1, false, true, 1)]
+        [TestCase(1, 1, 1, false, false, 9)]
+        public void DepthWrite_UnsupportedOrDisabledCasesAreZero(float enabled, float pom, float profile,
+            bool shadow, bool ortho, float distance)
+        {
+            var pixels = Render(enabled: enabled, pom: pom, profile: profile, depthWrite: true,
+                shadowPass: shadow, orthographic: ortho, distance: distance,
+                objectToWorld: Matrix4x4.Rotate(Quaternion.Euler(0, 180, 0)));
+            Assert.That(pixels.Max(p => Mathf.Abs(p.r)), Is.Zero);
+        }
+
+        [Test]
+        public void DepthWrite_ObliqueRayRespectsLateralAndNormalCaps()
+        {
+            const float distance = .03f, span = .125f, offset = .03125f;
+            var pixels = Render(depthWrite: true, pom: 1, profile: 1, jointDepth: .25f,
+                distance: distance, span: span, offset: offset, pomMaxDepth: .01f);
+            Assert.That(pixels.Count(p => p.r > .0001f), Is.GreaterThan(20));
+            for (int y = 0; y < 64; y++)
+            for (int x = 0; x < 64; x++)
+            {
+                var position = new Vector3((x + .5f) / 64 * span + offset, (y + .5f) / 64 * span + offset, distance);
+                float cosine = distance / position.magnitude;
+                float rayDepth = pixels[y * 64 + x].r;
+                Assert.That(rayDepth * cosine, Is.InRange(0f, .03125f * .25f + .00001f));
+                Assert.That(rayDepth * Mathf.Sqrt(1 - cosine * cosine), Is.LessThanOrEqualTo(.03125f * .2f + .00001f));
+            }
+        }
+
+        [Test]
+        public void DepthWrite_CoarseVisualLevelHasNoOffset()
+        {
+            var pixels = Render(depthWrite: true, pom: 1, profile: 1, distance: 4,
+                multiscale: 2, distanceStart: 0, distanceStep: 4);
+            Assert.That(pixels.Max(p => Mathf.Abs(p.r)), Is.Zero);
         }
 
         [Test]

@@ -21,6 +21,16 @@ Shader "Hidden/Voxel Bridge/Grid Detail Probe"
             #pragma vertex vert_img
             #pragma fragment frag
             #pragma target 4.5
+            #pragma multi_compile_local _ TEST_DEPTH_WRITE
+            #pragma multi_compile_local _ TEST_SHADOW_PASS
+            #if defined(TEST_DEPTH_WRITE)
+            #define _DEPTHOFFSET_ON 1
+            #endif
+            #if defined(TEST_SHADOW_PASS)
+            #define SHADERPASS 1
+            #define SHADERPASS_SHADOWS 1
+            #define SHADERPASS_LIGHT_TRANSPORT 2
+            #endif
             #include "UnityCG.cginc"
             float4x4 _TestObjectToWorld, _TestWorldToObject;
             float4x4 GetObjectToWorldMatrix() { return _TestObjectToWorld; }
@@ -38,7 +48,7 @@ Shader "Hidden/Voxel Bridge/Grid Detail Probe"
             float4 _TestPlane, _TestCellU, _TestCellV;
             float4 frag(v2f_img i) : SV_Target
             {
-                float3 n; float s;
+                float3 n; float s; float pixelDepth;
                 if (_TestPomTrace > .5)
                 {
                     float2 q = i.uv * float2(_TestSpan, _TestSpanY) + _TestOffset;
@@ -63,13 +73,20 @@ Shader "Hidden/Voxel Bridge/Grid Detail Probe"
                 // A translated camera and surface make distance independent of grid phase.
                 float3 p = mul(_TestObjectToWorld, float4(i.uv * float2(_TestSpan, _TestSpanY) + _TestOffset, _TestDistance, 1)).xyz;
                 float3 normal = normalize(mul(float3(0,0,1), (float3x3)_TestWorldToObject));
+#if defined(TEST_DEPTH_WRITE)
+                // The depth fixture faces the camera; legacy normal-output fixtures keep their frame.
+                normal = -normal;
+#endif
                 float3 tangent = normalize(mul((float3x3)_TestObjectToWorld, float3(1,0,0)));
                 float3 bitangent = normalize(mul((float3x3)_TestObjectToWorld, float3(0,1,0)));
-                VoxelGridDetail_float(p, normal, tangent, bitangent,
+                VoxelGridDetailDepth_float(p, normal, tangent, bitangent,
                     _TestEnabled, .03125, .2, .2, .2, 2, 8, .6,
                     _TestMultiscale, _TestTargetPixels, _TestMaxScaleLevels, _TestAnchor,
                     _TestDistanceStart, _TestDistanceStep, _TestProfile, _TestBevelWidth, _TestJointDepth,
-                    _TestPom, _TestPomMaxDepth, _TestVariation, n, s);
+                    _TestPom, _TestPomMaxDepth, _TestVariation, n, s, pixelDepth);
+#if defined(TEST_DEPTH_WRITE)
+                return float4(pixelDepth, n.xy, s);
+#endif
                 return float4(n * .5 + .5, s);
             }
             ENDHLSL
