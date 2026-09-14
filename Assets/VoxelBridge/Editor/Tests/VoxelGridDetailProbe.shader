@@ -36,6 +36,8 @@ Shader "Hidden/Voxel Bridge/Grid Detail Probe"
             float4x4 GetObjectToWorldMatrix() { return _TestObjectToWorld; }
             float3 TransformWorldToObject(float3 p) { return mul(_TestWorldToObject, float4(p, 1)).xyz; }
             float3 GetAbsolutePositionWS(float3 p) { return p; }
+            float4 _TestView;
+            float3 GetWorldSpaceNormalizeViewDir(float3 p) { return normalize(_TestView.xyz); }
             #include "../../Shaders/VoxelGridDetail.hlsl"
             float _TestDistance, _TestEnabled, _TestOffset, _TestSpan, _TestSpanY;
             float _TestMultiscale, _TestTargetPixels, _TestMaxScaleLevels;
@@ -43,7 +45,6 @@ Shader "Hidden/Voxel Bridge/Grid Detail Probe"
             float _TestDistanceStart, _TestDistanceStep, _TestLevelOnly;
             float _TestProfile, _TestBevelWidth, _TestJointDepth, _TestPatternOnly;
             float _TestPom, _TestPomMaxDepth, _TestPomTrace;
-            float4 _TestView;
             float _TestVariation;
             float4 _TestPlane, _TestCellU, _TestCellV;
             float4 frag(v2f_img i) : SV_Target

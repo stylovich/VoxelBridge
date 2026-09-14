@@ -14,7 +14,7 @@ namespace LocalModels.VoxelBridge.Tests
             float profile = 0, float bevelWidth = .06f, float jointDepth = .025f, bool patternOnly = false,
             float pom = 0, float pomMaxDepth = .003f, bool pomTrace = false, Vector3? view = null,
             float variation = 0, Vector3? plane = null, Vector3? cellV = null,
-            bool depthWrite = false, bool shadowPass = false, bool orthographic = false)
+            bool depthWrite = false, bool shadowPass = false, bool orthographic = false, Vector3? cameraPosition = null)
         {
             var shader = AssetDatabase.LoadAssetAtPath<Shader>("Assets/VoxelBridge/Editor/Tests/VoxelGridDetailProbe.shader");
             Assert.That(shader, Is.Not.Null);
@@ -27,7 +27,7 @@ namespace LocalModels.VoxelBridge.Tests
             Texture2D readable = null;
             try
             {
-                Shader.SetGlobalVector("_WorldSpaceCameraPos", Vector4.zero);
+                Shader.SetGlobalVector("_WorldSpaceCameraPos", cameraPosition ?? Vector3.zero);
                 Shader.SetGlobalVector("unity_OrthoParams", orthographic ? new Vector4(0, 0, 0, 1) : Vector4.zero);
                 if (depthWrite) material.EnableKeyword("TEST_DEPTH_WRITE");
                 if (shadowPass) material.EnableKeyword("TEST_SHADOW_PASS");
@@ -337,7 +337,9 @@ namespace LocalModels.VoxelBridge.Tests
         [TestCase(0, 1, 1, false, false, 1)]
         [TestCase(1, 0, 1, false, false, 1)]
         [TestCase(1, 1, 0, false, false, 1)]
-        [TestCase(1, 1, 1, true, false, 1)]
+        [TestCase(0, 1, 1, true, false, 1)]
+        [TestCase(1, 0, 1, true, false, 1)]
+        [TestCase(1, 1, 0, true, false, 1)]
         [TestCase(1, 1, 1, false, true, 1)]
         [TestCase(1, 1, 1, false, false, 9)]
         public void DepthWrite_UnsupportedOrDisabledCasesAreZero(float enabled, float pom, float profile,
@@ -365,6 +367,21 @@ namespace LocalModels.VoxelBridge.Tests
                 Assert.That(rayDepth * cosine, Is.InRange(0f, .03125f * .25f + .00001f));
                 Assert.That(rayDepth * Mathf.Sqrt(1 - cosine * cosine), Is.LessThanOrEqualTo(.03125f * .2f + .00001f));
             }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void ShadowDepth_UsesLightRayEvenForOrthographicOrDistantCamera(bool ortho)
+        {
+            var near = Render(depthWrite: true, shadowPass: true, pom: 1, profile: 1, variation: .08f,
+                view: new Vector3(.3f, 0, -1), orthographic: ortho, pomMaxDepth: .001f);
+            var far = Render(depthWrite: true, shadowPass: true, pom: 1, profile: 1, variation: .08f,
+                view: new Vector3(.3f, 0, -1), orthographic: ortho, pomMaxDepth: .001f, cameraPosition: new Vector3(0, 0, -8));
+            Assert.That(near.Max(p => p.r), Is.GreaterThan(.0001f));
+            Assert.That(near.Zip(far, (a,b)=>Mathf.Abs(a.r-b.r)).Max(), Is.LessThan(.000001f));
+            foreach (var p in near) Assert.That(p.r, Is.InRange(0, .00105f));
+            var back = Render(depthWrite: true, shadowPass: true, pom: 1, profile: 1, view: Vector3.forward);
+            Assert.That(back.Max(p => p.r), Is.Zero);
         }
 
         [Test]

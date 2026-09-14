@@ -13,6 +13,7 @@
     "Unity.Mathematics.Extensions",
     "Unity.Collections",
     "Unity.RenderPipelines.HighDefinition.Runtime",
+    "Unity.RenderPipelines.Core.Runtime",
     "VoxelBridge.SceneTools",
     "Unity.InputSystem"
   ],

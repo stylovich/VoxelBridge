@@ -141,6 +141,7 @@ void VoxelGridDetailDepth_float(float3 Position, float3 Normal, float3 Tangent, 
     DetailSmoothness = BaseSmoothness;
     DepthOffset = 0;
 #if !defined(SHADERGRAPH_PREVIEW) && !defined(SHADER_STAGE_RAY_TRACING)
+    float3 positionRWS = Position;
     float3 n = normalize(Normal);
     float3 frameNormal = n;
     float3 framePosition = GetAbsolutePositionWS(Position);
@@ -180,8 +181,27 @@ void VoxelGridDetailDepth_float(float3 Position, float3 Normal, float3 Tangent, 
         level = VoxelGridDistanceLevel(distance(Position, _WorldSpaceCameraPos), DistanceStart, DistanceStep, maxLevel);
     else if (Multiscale >= 0.5)
         level = clamp(log2(max(max(footprint.x, footprint.y) * clamp(TargetPixels, 4.0, 64.0), 1.0)), 0.0, maxLevel);
-    // Do not offset shadow maps from the player's view or bake camera-dependent relief.
-#if !defined(SHADERPASS) || ((SHADERPASS != SHADERPASS_SHADOWS) && (SHADERPASS != SHADERPASS_LIGHT_TRANSPORT))
+    // Shadow maps need the recessed surface too: a flat caster shadows its own POM receiver.
+    // Use the light's view (also for directional/orthographic shadows), never the player's ray.
+#if defined(SHADERPASS) && (SHADERPASS == SHADERPASS_SHADOWS)
+    #if defined(_DEPTHOFFSET_ON) && _DEPTHOFFSET_ON
+    if (PomEnabled >= 0.5 && Profile >= 0.5 && JointDepth + variation > 0)
+    {
+        float3 lightView = GetWorldSpaceNormalizeViewDir(positionRWS);
+        float ndotl = dot(n, lightView);
+        float3 gridLight = float3(dot(lightView, u), dot(lightView, v), ndotl);
+        float normalDepth = min((clamp(JointDepth, 0.0, 0.25) + variation) * max(CellSize, 0.001),
+            clamp(PomMaxDepth, 0.0, 0.01)) * weight;
+        normalDepth = min(normalDepth,
+            0.2 * max(CellSize, 0.001) * max(ndotl, 0.12) / max(length(gridLight.xy), 0.000001));
+        // Camera-distance/derivative fades only flatten the receiver toward the original face.
+        // Keeping the physical caster unfaded prevents shadow resolution from flattening it in front of that receiver.
+        float3 hit = VoxelGridParallax(q, float2(0.0001, 0.0001), JointWidth, BevelWidth,
+            normalDepth / max(CellSize, 0.001), gridLight, JointDepth, variation, planeCell, cellU, cellV);
+        DepthOffset = VoxelGridRayDepth(hit.z, normalDepth, ndotl);
+    }
+    #endif
+#elif !defined(SHADERPASS) || (SHADERPASS != SHADERPASS_LIGHT_TRANSPORT)
     if (PomEnabled >= 0.5 && Profile >= 0.5 && JointDepth + variation > 0 && unity_OrthoParams.w < 0.5)
     {
         float3 view = normalize(_WorldSpaceCameraPos - Position);
