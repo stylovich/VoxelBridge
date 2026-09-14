@@ -1,0 +1,6 @@
+{
+  "name": "VoxelBridge.SceneTools",
+  "rootNamespace": "LocalModels.VoxelBridge.SceneTools",
+  "references": ["Unity.InputSystem"],
+  "autoReferenced": true
+}

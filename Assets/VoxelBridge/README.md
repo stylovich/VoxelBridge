@@ -12,6 +12,8 @@ La generación y la edición son procesos de autoría. Los prefabs contienen mes
 
 El diagnóstico de entidades requiere Entities 1.4 y Entities Graphics 1.4, incluidos en la configuración DOTS del proyecto.
 
+La [inspección en primera persona](SceneTools/README.md) permite recorrer escenas con una cámara a escala humana mediante `CharacterController` y el Input System. Es independiente del controlador de gameplay definitivo.
+
 Las paletas, el transporte de `ColorID + SurfaceID` y las familias semánticas de producción se describen en [MATERIALS.md](MATERIALS.md). [ROADMAP.md](ROADMAP.md) distingue los sistemas disponibles de las fases pendientes de autoría, validación de producción, impostores semánticos y evaluación de HLOD y presupuestos.
 
 El shader opaco de producción ofrece una [rejilla superficial opcional](ART_DIRECTION_AND_DETAIL.md#rejilla-superficial-de-producción), fija o multiescala por tamaño proyectado o distancia, con anclaje mundial o local de familia. Los perfiles de líneas y juntas biseladas modifican normales y rugosidad sin alterar geometría. Incluye un ensayo de POM procedural cercano y variación de altura por SurfaceID, desactivados por defecto, sin recorte de silueta ni escritura de profundidad. Los anuncios separados de su estructura permanecen como una fase posterior.

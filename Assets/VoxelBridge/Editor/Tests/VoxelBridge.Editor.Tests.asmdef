@@ -12,7 +12,9 @@
     "Unity.Mathematics",
     "Unity.Mathematics.Extensions",
     "Unity.Collections",
-    "Unity.RenderPipelines.HighDefinition.Runtime"
+    "Unity.RenderPipelines.HighDefinition.Runtime",
+    "VoxelBridge.SceneTools",
+    "Unity.InputSystem"
   ],
   "includePlatforms": [
     "Editor"
