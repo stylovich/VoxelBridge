@@ -23,6 +23,7 @@ namespace LocalModels.VoxelBridge.Tests
             var surfaces = new Texture2D(2, variation > 0 ? 2 : 1, TextureFormat.RGBA32, false, true) { filterMode = FilterMode.Point };
             Mesh ownedMesh = null;
             var preview = new PreviewRenderUtility();
+            var blockOffset = geometry == 4 ? new Vector3(31, -7, 43) : Vector3.zero;
             var previous = RenderTexture.active;
             RenderTexture rt = null;
             Texture2D result = null;
@@ -85,8 +86,9 @@ namespace LocalModels.VoxelBridge.Tests
                 preview.camera.transform.SetPositionAndRotation(new Vector3(0, 0, -2.5f), Quaternion.identity);
                 if (geometry > 0)
                 {
-                    var position = Quaternion.Euler(0, orbit, 0) * new Vector3(0, geometry == 2 ? 1 : .3f, -2.5f);
-                    preview.camera.transform.SetPositionAndRotation(position, Quaternion.LookRotation(-position));
+                    var position = geometry >= 3 ? Quaternion.Euler(15, orbit, 0) * new Vector3(0, 0, -1.3f) :
+                        Quaternion.Euler(0, orbit, 0) * new Vector3(0, geometry == 2 ? 1 : .3f, -2.5f);
+                    preview.camera.transform.SetPositionAndRotation(position + blockOffset, Quaternion.LookRotation(-position));
                 }
                 preview.ambientColor = new Color(.25f, .25f, .25f);
                 for (int i = 0; i < preview.lights.Length; i++)
@@ -108,7 +110,8 @@ namespace LocalModels.VoxelBridge.Tests
                     preview.BeginPreview(new Rect(0, 0, 256, 256), GUIStyle.none);
                     try
                     {
-                        var matrix = geometry == 0 ? Matrix4x4.Rotate(Quaternion.Euler(10, 25, 0)) :
+                        var matrix = geometry >= 3 ? Matrix4x4.TRS(blockOffset, Quaternion.identity, Vector3.one * .5f) :
+                            geometry == 0 ? Matrix4x4.Rotate(Quaternion.Euler(10, 25, 0)) :
                             Matrix4x4.Scale(geometry == 1 ? new Vector3(1.5f, 1.5f, .125f) : new Vector3(1.5f, .0625f, 1.5f));
                         preview.DrawMesh(cube, matrix, material, 0);
                         // A blue surface 1 mm behind the front face exposes actual depth-test changes.

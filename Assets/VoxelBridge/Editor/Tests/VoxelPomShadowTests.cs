@@ -12,7 +12,7 @@ namespace LocalModels.VoxelBridge.Tests
         // Isolated rendering; no persistent scene, material, pipeline or light changes.
         internal static Texture2D Render(bool depthWrite, bool castSelf, int resolution = 2048,
             bool blocker = false, bool directional = false, float orbit = 0,
-            float variation = .04f, float lightAngle = 20)
+            float variation = .04f, float lightAngle = 20, bool blockSpom = false)
         {
             var preview = new PreviewRenderUtility();
             Material material = null;
@@ -23,7 +23,7 @@ namespace LocalModels.VoxelBridge.Tests
             var previous = RenderTexture.active;
             try
             {
-                var shader = AssetDatabase.LoadAssetAtPath<Shader>(VoxelProductionGridRenderTests.DepthShaderPath);
+                var shader = AssetDatabase.LoadAssetAtPath<Shader>(blockSpom ? VoxelBlockSpomTests.ShaderPath : VoxelProductionGridRenderTests.DepthShaderPath);
                 Assert.That(shader && !ShaderUtil.ShaderHasError(shader), Is.True);
                 material = new Material(shader);
                 colors = new Texture2D(256, 1, TextureFormat.RGBA32, false, true);
@@ -49,7 +49,7 @@ namespace LocalModels.VoxelBridge.Tests
                 var renderer = wall.AddComponent<MeshRenderer>(); renderer.sharedMaterial = material;
                 renderer.lightProbeUsage = LightProbeUsage.Off; renderer.reflectionProbeUsage = ReflectionProbeUsage.Off;
                 renderer.shadowCastingMode = castSelf ? ShadowCastingMode.On : ShadowCastingMode.Off;
-                wall.transform.localScale = new Vector3(1.5f, 1.5f, .05f); preview.AddSingleGO(wall);
+                wall.transform.localScale = blockSpom ? Vector3.one * .5f : new Vector3(1.5f, 1.5f, .05f); preview.AddSingleGO(wall);
                 if (blocker)
                 {
                     var other = new GameObject("External shadow caster");
@@ -63,7 +63,7 @@ namespace LocalModels.VoxelBridge.Tests
                 // Ordinary material previews explicitly disable shadows in HDRP.
                 camera.cameraType = CameraType.Game; camera.fieldOfView = 50;
                 camera.nearClipPlane = .1f; camera.farClipPlane = 10;
-                var position = Quaternion.Euler(0, orbit, 0) * new Vector3(0, 0, -1.8f);
+                var position = Quaternion.Euler(0, orbit, 0) * new Vector3(0, 0, blockSpom ? -1 : -1.8f);
                 camera.transform.SetPositionAndRotation(position, Quaternion.LookRotation(-position));
                 var data = camera.gameObject.AddComponent<HDAdditionalCameraData>();
                 data.clearColorMode = HDAdditionalCameraData.ClearColorMode.Color; data.backgroundColorHDR = Color.black;
@@ -79,7 +79,7 @@ namespace LocalModels.VoxelBridge.Tests
                 var shadows = profile.Add<HDShadowSettings>();
                 shadows.maxShadowDistance.Override(4); shadows.cascadeShadowSplitCount.Override(1);
                 data.volumeLayerMask = 1 << 31; data.customRenderingSettings = true;
-                foreach (var field in new[]{FrameSettingsField.Postprocess,
+                foreach (var field in new[]{FrameSettingsField.Postprocess,FrameSettingsField.RayTracing,
                     FrameSettingsField.AtmosphericScattering,FrameSettingsField.CustomPass,FrameSettingsField.ContactShadows,
                     FrameSettingsField.AdaptiveProbeVolume,FrameSettingsField.ReflectionProbe,FrameSettingsField.SSR,FrameSettingsField.SSAO})
                 { data.renderingPathCustomFrameSettingsOverrideMask.mask[(uint)field] = true; data.renderingPathCustomFrameSettings.SetEnabled(field, false); }

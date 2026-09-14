@@ -93,6 +93,24 @@ La variante utiliza un pase con escritura de profundidad cuando se activa `_DEPT
 
 En el laboratorio de VoxelCity, mantener desactivado el GO de HTrace SSGI durante las pruebas interactivas por la inestabilidad observada con SSGI y AO. Conservar el estado del AO salvo que forme parte de la comparación. Si una prueba requiere ambos, iniciar el Editor con `-force-d3d12-debug` es una mitigación disponible, no una solución certificada; no utilizar esa ejecución como referencia de rendimiento.
 
+### SPOM de bloque cerrado — laboratorio aislado
+
+`Voxel Bridge/Experimental/VoxelWorldBlockSpom` permite estudiar siluetas y laterales sobre un **cubo unitario cerrado**, no sobre mallas convertidas arbitrarias. El soporte conserva los triángulos del cubo: el shader recorre celdas e intersecta volúmenes biselados, escribe la profundidad del primer impacto y recorta los rayos que no encuentran superficie. Un núcleo sólido cierra el fondo de las juntas. Cámara y sombras utilizan el mismo volumen; no requiere DXR ni depende de CSPOM.
+
+Ejecutar `Tools > Voxel Bridge > Experiments > Create SPOM Block Lab`. Genera y localiza un prefab nuevo bajo `Prototypes/BlockSpomLab`, con una referencia POM a la izquierda y el volumen SPOM a la derecha. Incluye una paleta `BlockSurfaces` y materiales propios; no modifica la paleta global, los modelos convertidos ni la escena abierta. No entra automáticamente en Prefab Mode: la estabilidad del render interactivo requiere una comprobación independiente. Las ejecuciones posteriores utilizan otra carpeta para conservar las pruebas existentes.
+
+Configurar `Cell Height Variation` en la entrada `Default` de `BlockSurfaces` y regenerar su LUT. Ambos bloques comparten esa paleta. La base es `0.0625 m`; cada bloque mide `0.5 m` y contiene ocho celdas por eje. Mantener `Grid Enabled`, `Grid POM`, `Beveled`, `Family Local`, modo `Fixed`, `Depth Offset` y `Conservative` activos. Los biseles del volumen son planos y cerrados, no el perfil suave del POM; sus normales proceden de las caras intersectadas, por lo que `NormalStrength` no altera su orientación.
+
+Límites del ensayo:
+
+- Utilizar únicamente el cubo unitario de límites locales `[-0.5, 0.5]`. La escala define las dimensiones físicas; cada semieje debe medir un número entero de celdas entre uno y ocho. No usar cizallamiento ni batching estático. El shader no puede identificar si una malla arbitraria cumple ese contrato.
+- Color y SurfaceID uniformes. La altura mantiene el hash estable por celda; las juntas y los biseles definen un volumen de comparación, no una reproducción exacta del perfil de altura POM.
+- Sin crecimiento multiescala ni fades de distancia en el volumen. Los modos no compatibles mantienen el comportamiento POM de referencia. No utilizarlo como material general de la ciudad.
+- Las colisiones, la geometría exportada y el horneado no cambian. Cámara y luces deben permanecer fuera del soporte. El muestreo temporal, el rendimiento y Entities Graphics en ejecución requieren evaluación adicional; compilar DOTS Instancing no certifica esa integración.
+- El recorrido tiene un máximo de 64 celdas para un bloque de hasta 16 celdas por eje. Cada impacto utiliza planos analíticos para cerrar laterales y esquinas. Este coste adicional de fragmento y sombras no implica una optimización.
+
+La integración en edificios y chunks requiere información explícita de ocupación, límites y atributos vecinos, además de un soporte que cubra el volumen. Sustituir únicamente el shader no proporciona esos datos.
+
 ### Prototipo de comparación
 
 `Shaders/VoxelGridPrototype.shadergraph` conserva las LUT de color y superficie del shader opaco y añade `Shaders/VoxelGridDetail.hlsl`. El patrón proyecta sobre el plano principal de la cara en el espacio elegido mediante `Grid Anchor`, sin reutilizar UV0 o UV3. Modifica normales y smoothness; no desplaza geometría, profundidad, color, emisión ni colisiones. No incluye POM/SPOM.
