@@ -1,6 +1,6 @@
-# This repository tracks VoxelBridge, VoxelCity design, and the archived DynamicGI prototype.
-# The Polygon environment, scenes, imported packages, generated data, and Unity
-# caches belong to the local laboratory and are deliberately excluded.
+# This repository tracks the reusable VoxelBridge Unity editor tool.
+# Scenes, imported packages, generated data, design references, and Unity caches
+# belong to the local laboratory and are deliberately excluded.
 *
 
 # Repository metadata and documentation.
@@ -8,38 +8,18 @@
 !/.gitattributes
 !/README.md
 
-# World design sources and references; other local documentation stays excluded.
-!/Docs/
-/Docs/*
-!/Docs/WorldDesign/
-/Docs/WorldDesign/*
-!/Docs/WorldDesign/VoxelCity/
-!/Docs/WorldDesign/VoxelCity/**
-
 # Portable Unity package content, including every required .meta file.
 !/Assets/
 /Assets/*
 !/Assets/VoxelBridge.meta
 !/Assets/VoxelBridge/
 !/Assets/VoxelBridge/**
-!/Assets/Editor.meta
-!/Assets/Editor/
-!/Assets/Editor/RemoveHierarchyColliders.cs
-!/Assets/Editor/RemoveHierarchyColliders.cs.meta
-!/Assets/Editor/HierarchyLodPreviewWindow.cs
-!/Assets/Editor/HierarchyLodPreviewWindow.cs.meta
 
 # Local visual experiments; keep the reusable prototype shader and tests above.
 /Assets/VoxelBridge/Prototypes/
 /Assets/VoxelBridge/Prototypes.meta
 
-# Record the editor version used to validate the module without carrying the
-# rest of the project-specific settings into another project.
-!/ProjectSettings/
-/ProjectSettings/*
-!/ProjectSettings/ProjectVersion.txt
-
-# Archived prototype, outside Unity imports.
-!/Archives/
-/Archives/*
-!/Archives/DynamicGI.zip
+# World-design notes and archived prototypes remain local and out of this tool repository.
+/Docs/
+/Archives/
+/ProjectSettings/

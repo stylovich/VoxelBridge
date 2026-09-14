@@ -2,7 +2,7 @@
 
 ## Estado y objetivo
 
-Enfoque de diseño para validar el acabado visual sobre una manzana piloto antes de ampliar las optimizaciones. El shader opaco de producción dispone de rejilla superficial opcional con anclaje mundial o de familia; el acabado avanzado, la gestión específica de anuncios y las mediciones de rendimiento permanecen pendientes. No requiere sustituir el flujo de autoría actual. La dirección del mundo y sus prioridades se describen en la [hoja de ruta de VoxelCity](../../Docs/WorldDesign/VoxelCity/ROADMAP.md).
+Guía técnica para validar el acabado superficial de las familias voxel antes de ampliar las optimizaciones. El shader opaco de producción dispone de rejilla superficial opcional con anclaje mundial o de familia; el acabado avanzado, la gestión específica de anuncios y las mediciones de rendimiento permanecen pendientes.
 
 Priorizar modelos con zonas amplias de ColorID y SurfaceID uniformes, reservando la geometría voxel para volumen, silueta, huecos y relieves intencionales. El detalle puramente superficial puede proceder del shader o de una imagen separada, en lugar de fragmentar las caras del modelo mediante pintura por voxel.
 
@@ -28,7 +28,7 @@ Esta distribución es una decisión de autoría, no una conversión automática 
 - Considerar una semilla por instancia sólo si aporta variedad útil y puede transportarse sin romper el uso de materiales compartidos ni la compatibilidad con Entities Graphics.
 - Mantener ColorID y SurfaceID como identidad de autoría. Definir los límites cromáticos de la variación visual; el ruido no debe crear nuevos IDs ni reinterpretar las superficies.
 
-Para VoxelCity, comparar la base geométrica candidata de `0.0625 m` con las familias existentes de `0.03125 m`; no imponerla a otras bibliotecas ni reinterpretar sus metadatos. Cambiar el tamaño de la rejilla visual no requiere reconversión ni modifica la geometría.
+Comparar la base geométrica candidata de `0.0625 m` con las familias existentes de `0.03125 m`; no reinterpretar metadatos de otras bibliotecas. Cambiar el tamaño de la rejilla visual no requiere reconversión ni modifica la geometría.
 
 Comenzar con una rejilla opcional de intensidad ajustable, comparando normal, rugosidad y AO con una referencia sin detalle. Evaluar el microbisel y la variación superficial después de comprobar continuidad y estabilidad temporal. Comparar ruido calculado con una textura pequeña compartida cuando se incorpore desgaste. Evitar un sistema general de capas sin una necesidad demostrada.
 
@@ -91,7 +91,7 @@ Permite que una superficie situada detrás gane el test de profundidad en las ju
 
 La variante utiliza un pase con escritura de profundidad cuando se activa `_DEPTHOFFSET_ON`; su coste no debe extrapolarse al shader original. `Conservative` permite al backend aprovechar las garantías de desplazamiento positivo. No certificar rendimiento sólo por compilar esa variante. Al modificar las conexiones de paleta o detalle del graph original, mantener sincronizado el graph experimental y ejecutar las pruebas de equivalencia con `Depth Offset` apagado.
 
-En el laboratorio de VoxelCity, mantener desactivado el GO de HTrace SSGI durante las pruebas interactivas por la inestabilidad observada con SSGI y AO. Conservar el estado del AO salvo que forme parte de la comparación. Si una prueba requiere ambos, iniciar el Editor con `-force-d3d12-debug` es una mitigación disponible, no una solución certificada; no utilizar esa ejecución como referencia de rendimiento.
+En las pruebas interactivas, mantener desactivados los efectos de terceros que provoquen inestabilidad gráfica. No utilizar una ejecución con `-force-d3d12-debug` como referencia de rendimiento.
 
 ### SPOM de bloque cerrado — laboratorio aislado
 
@@ -154,14 +154,6 @@ La validación completa de subescenas, Entities Graphics, movimiento y presupues
 La regla de diseño propuesta requiere origen de colocación común, escala normalizada a uno y orientaciones compatibles con los ejes de la rejilla —rotaciones en múltiplos de 90°—, incluyendo las transformaciones heredadas. Comprobar la fase de los vértices, no sólo la posición del pivote.
 
 El snapping a `0.0625 m` no garantiza por sí solo coincidencia entre rejillas locales de `0.25 m` o mayores. Utilizar `World` cuando sea necesaria una fase visual común entre módulos, o acordar una fase de colocación compatible con la escala más gruesa. La validación automática de estas reglas pertenece a una etapa posterior; el prototipo no mueve ni corrige objetos de escena.
-
-## Experimento de escala geométrica
-
-El script independiente `Assets/Editor/HierarchyLodPreviewWindow.cs` abre `Tools > LocalModels > Preview LOD de jerarquía`. Asignar un GO padre de escena y utilizar un tamaño físico objetivo, por ejemplo `0.0625 m` o `0.125 m`, o elegir un índice LOD manual. La elección física lee el manifiesto de cada familia y multiplica su tamaño de celda por la escala mundial uniforme del LODGroup; omite grupos sin nivel coincidente, sin metadatos o con escala no uniforme. Los grupos desactivados permanecen intactos.
-
-La previsualización fija un nivel existente a cualquier distancia mediante `ForceLOD`. `Volver a LOD automático`, cerrar la ventana, recompilar o entrar en Play restaura la selección automática. No modifica LODs, renderers, prefabs ni archivos de la familia. No combinar con otro control de `ForceLOD`; la restauración vuelve a automático, no a una selección forzada por otra herramienta.
-
-Este ensayo permite valorar una geometría más gruesa sin reconversión; no valida transiciones ni equivale necesariamente a generar una familia nueva. La rejilla del shader es independiente. Con base `0.03125 m`, LOD1 mide `0.0625 m` en el asset y `0.125 m` en una instancia escalada ×2; a escala ×1 ese tamaño corresponde a LOD2. La base geométrica candidata de `0.0625 m` y el modo visual multiescala requieren comparación artística; el prototipo conserva el modo fijo como referencia.
 
 ## Anuncios separados de su estructura
 

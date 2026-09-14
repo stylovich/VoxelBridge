@@ -26,7 +26,7 @@ Entrar en Play y hacer clic izquierdo dentro de la vista Game para capturar el r
 
 WASD, Shift y Espacio corresponden a los bindings del asset del proyecto. El clic de captura, Esc y R son atajos propios del componente. Perder el foco o desactivar el componente libera la captura; otro clic permite continuar. La gravedad permanece activa sin captura. Una caída de más de 30 metros bajo el punto inicial devuelve automáticamente al inicio.
 
-`Test2` contiene el rig en `_Setup/FirstPerson_Inspection`, con la cámara HDRP existente. Utiliza `BaseCollider` como suelo. Los edificios sin collider son atravesables; el relieve del shader tampoco genera colisiones. No se añaden colliders a los modelos convertidos ni se modifican sus prefabs.
+El rig de inspección puede añadirse a cualquier escena anfitriona con una cámara HDRP y un collider de suelo. Los objetos sin collider son atravesables; el relieve del shader tampoco genera colisiones. No se añaden colliders a los modelos convertidos ni se modifican sus prefabs.
 
 ## Pruebas
 

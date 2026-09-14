@@ -10,25 +10,13 @@ Voxel Bridge debe producir familias voxel físicamente coherentes y editables, i
 2. Validar artísticamente `Surface Painter`, la edición de ColorID/SurfaceID, sus herramientas de selección, cuentagotas, vistas de diagnóstico, aislamiento y comparación temporal de acabados sobre modelos representativos.
 3. Validar artísticamente el preview temporal del siguiente LOD con el reductor real; continuar la validación de la preasignación PBR y del intercambio con MagicaVoxel.
 4. Completar las validaciones funcionales pendientes de materiales especiales, iluminación y carga/descarga de subescenas sobre assets representativos.
-5. Preparar con VoxelCity una manzana piloto de geometría uniforme, detalle superficial separado y señalización en textura. Retomar las mediciones de rendimiento por LOD, sombras, transparencias, culling y streaming sobre esa distribución representativa.
+5. Preparar una distribución representativa de geometría uniforme, detalle superficial separado y señalización en textura. Retomar las mediciones de rendimiento por LOD, sombras, transparencias y culling sobre esa distribución.
 6. Evaluar LODs de malla adicionales y HLOD de malla antes de recurrir a impostores selectivos. Adaptar el horneado de impostores a las paletas semánticas antes de incluirlos en la comparación; no imponer un atlas por edificio.
 7. Implementar el análisis de visibilidad y presupuesto por zonas, apoyado en las mediciones anteriores.
    Durante las pruebas de rendimiento, recalibrar la retirada de proyección de sombras por tamaño de objeto y nivel LOD con la unidad voxel base y la cantidad de niveles vigentes. Comparar coste y pérdida visual en props pequeños antes de modificar los umbrales o el primer nivel sin sombras; no deducir esa política únicamente del índice LOD.
 8. Crear y hornear únicamente los impostores aprobados por el plan de representación cuando la distribución del mapa y los materiales sean estables.
 
 La consolidación artística de las paletas puede continuar durante la validación funcional de DOTS. Las paletas y los materiales deben estabilizarse antes de producir atlas definitivos: un cambio de shader, paleta o material compartido puede requerir regenerarlos.
-
-### Coordinación con VoxelCity
-
-Voxel Bridge mantiene la responsabilidad sobre conversión, paletas, autoría, familias y representaciones de producción. La [hoja de ruta de VoxelCity](../../Docs/WorldDesign/VoxelCity/ROADMAP.md) organiza escala urbana, composición, generación procedural, sockets, semillas y propiedad de las capas editables.
-
-- Unidad objetivo del perfil urbano: `0.03125 m`, con múltiplos binarios y origen coherente. Preparar el perfil y regenerar explícitamente los modelos del laboratorio antes de trasladarlos al proyecto del juego; no reinterpretar fuentes existentes ni imponer la escala a otras bibliotecas.
-- Rejilla visual: opción del shader opaco de producción, desactivada por defecto, con modos fijo y multiescala binaria por tamaño proyectado o distancia. El modo por distancia separa el crecimiento artístico del filtrado por oblicuidad y permite configurar rango cercano e intervalo de transición. Validar lectura artística, estabilidad temporal y coherencia con los LODs antes de ampliar el acabado; la validación automática de colocación estática permanece pendiente.
-- Primera referencia compartida: una manzana sencilla, seguida del prototipo de detalle del shader y Vek en textura; la generación procedural y la prueba 3×3 parten de esa referencia.
-- Importancia de detalles: evaluación con el preview y retoques de LOD existentes, sin añadir un atributo ni una herramienta específica de prioridad. La conservación automática de siluetas subvoxel no forma parte de esa garantía.
-- Transiciones geométricas: curva opcional de retención de detalle para pequeños y medianos, con retorno gradual a la curva de edificios grandes. Calibrar los porcentajes con assets representativos; el ajuste de umbrales no sustituye el control de la reducción ni implementa cross-fade.
-- Normalización y autoría: incorporar reflejos a la geometría manteniendo la apariencia y escala unitaria de salida; rechazar escalas degeneradas y cizallamiento. La ventana distingue ajustes compartidos de conversión y opciones específicas mediante pestañas de trabajo.
-- Iteración y diagnóstico: reaplicación del perfil de transiciones sin reconstruir geometría e informes de tiempo por etapa para conversión individual y batch. Retomar la optimización de importación y escritura en la próxima conversión necesaria, con mediciones comparables antes y después; el paralelismo y la reutilización de preparación entre LODs requieren evaluación posterior.
 
 ### Estado por bloque
 

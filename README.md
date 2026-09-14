@@ -1,11 +1,24 @@
 # Voxel Bridge para Unity
 
-Este repositorio contiene las herramientas de Editor Voxel Bridge, la documentación
-de diseño de VoxelCity y el prototipo Dynamic GI archivado. El entorno local de
-pruebas Polygon, las escenas, los paquetes importados, `Library`, los exports voxel y los datos de iluminación
-generados quedan excluidos del control de versiones.
+Herramientas de Editor para convertir mallas de Unity a familias voxel con escala
+física, materiales semánticos y niveles de detalle. El repositorio contiene sólo
+el código reutilizable, sus shaders, pruebas y documentación técnica. Las escenas,
+modelos importados, paquetes comerciales, exports voxel y datos generados se
+mantienen fuera del control de versiones.
 
-## Voxel Bridge
+## Requisitos
+
+- Unity `6000.3` o compatible.
+- HDRP `17.3` y Shader Graph `17.3`.
+- Input System `1.20`.
+- Entities y Entities Graphics `1.4` para los diagnósticos DOTS opcionales.
+- MagicaVoxel y Voxel Importer para el flujo de conversión.
+- Amplify Impostors para la generación opcional de impostores.
+
+Los paquetes comerciales y las herramientas externas se instalan por separado y
+no se redistribuyen en este repositorio.
+
+## Instalación
 
 Copiar `Assets/VoxelBridge` y `Assets/VoxelBridge.meta` para reutilizar el flujo de
 conversión de mallas a MagicaVoxel. Los parches opcionales de integración se
@@ -13,22 +26,16 @@ distribuyen como transformaciones de código; los paquetes comerciales se instal
 por separado. Consultar [la guía de Voxel Bridge](Assets/VoxelBridge/README.md) para
 uso y mantenimiento.
 
-## Diseño del mundo VoxelCity
+La configuración de paquetes del proyecto anfitrión debe incluir las versiones
+compatibles indicadas arriba. El repositorio no contiene `Packages/manifest.json`
+porque Voxel Bridge se instala dentro de un proyecto Unity existente.
 
-La [guía visual](Docs/WorldDesign/VoxelCity/lenguaje_visual_ciudad_voxel.md) define
-escala, lenguaje arquitectónico y señalización. Su [hoja de ruta](Docs/WorldDesign/VoxelCity/ROADMAP.md)
-organiza la manzana piloto, generación procedural y representación a distancia.
-Las referencias visuales y el kit Vek son fuentes de diseño, no assets de runtime
-ni sistemas implementados. No son necesarios para reutilizar Voxel Bridge.
+## Validación
 
-## Prototipo Dynamic GI archivado
+Con el Editor cerrado, ejecutar las pruebas EditMode desde la raíz del proyecto:
 
-[Archives/DynamicGI.zip](Archives/DynamicGI.zip) contiene el módulo completo,
-incluidos scripts, shaders, documentación y archivos `.meta`. El ZIP conserva las
-rutas `Assets/DynamicGI` y `Assets/DynamicGI.meta` y permanece fuera de los assets
-importados por Unity.
+```powershell
+unity test . --mode EditMode --output Logs/voxel-bridge-tests.xml --timeout 600
+```
 
-Para recuperar el prototipo, extraer el ZIP en la raíz de un proyecto Unity.
-La implementación utiliza Unity 6000.3.21f1 con HDRP 17.3.0. Consultar el archivo
-`Assets/DynamicGI/README.md` incluido para instalación, arquitectura, validación y
-limitaciones.
+Algunas pruebas de integración requieren los paquetes comerciales instalados.
