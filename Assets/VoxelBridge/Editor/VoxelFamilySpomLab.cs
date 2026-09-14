@@ -36,21 +36,21 @@ namespace LocalModels.VoxelBridge
                 if (opaque[surface]) pixels[i] = new Color32((byte)VoxelSemanticEncoding.ColorId(grid.SemanticIds[i]), (byte)surface, 0, 255);
             }
             for (int z = 0; z < grid.Size.z; z++)
-            for (int y = 0; y < grid.Size.y; y++)
-            for (int x = 0; x < grid.Size.x; x++)
-            {
-                int i = grid.Index(x, y, z);
-                if (pixels[i].a == 0) continue;
-                byte mask = 0;
-                if (x == 0 || pixels[i - 1].a == 0) mask |= 1;
-                if (x == grid.Size.x - 1 || pixels[i + 1].a == 0) mask |= 2;
-                if (y == 0 || pixels[i - grid.Size.x].a == 0) mask |= 4;
-                if (y == grid.Size.y - 1 || pixels[i + grid.Size.x].a == 0) mask |= 8;
-                int plane = grid.Size.x * grid.Size.y;
-                if (z == 0 || pixels[i - plane].a == 0) mask |= 16;
-                if (z == grid.Size.z - 1 || pixels[i + plane].a == 0) mask |= 32;
-                pixels[i].b = mask;
-            }
+                for (int y = 0; y < grid.Size.y; y++)
+                    for (int x = 0; x < grid.Size.x; x++)
+                    {
+                        int i = grid.Index(x, y, z);
+                        if (pixels[i].a == 0) continue;
+                        byte mask = 0;
+                        if (x == 0 || pixels[i - 1].a == 0) mask |= 1;
+                        if (x == grid.Size.x - 1 || pixels[i + 1].a == 0) mask |= 2;
+                        if (y == 0 || pixels[i - grid.Size.x].a == 0) mask |= 4;
+                        if (y == grid.Size.y - 1 || pixels[i + grid.Size.x].a == 0) mask |= 8;
+                        int plane = grid.Size.x * grid.Size.y;
+                        if (z == 0 || pixels[i - plane].a == 0) mask |= 16;
+                        if (z == grid.Size.z - 1 || pixels[i + plane].a == 0) mask |= 32;
+                        pixels[i].b = mask;
+                    }
             return pixels;
         }
     }
@@ -66,6 +66,8 @@ namespace LocalModels.VoxelBridge
             var group = selected ? selected.GetComponentInParent<LODGroup>() : null;
             if (!group || EditorApplication.isPlaying || PrefabStageUtility.GetCurrentPrefabStage() != null)
                 throw new InvalidOperationException("Select a production family or one of its chunks in the scene, outside Play and Prefab Mode.");
+            if (!EditorUtility.IsPersistent(group) && !group.gameObject.activeInHierarchy)
+                throw new InvalidOperationException("Restore the active original before creating another comparison copy.");
             ValidateFrame(group.transform.localToWorldMatrix);
             var renderer = selected.GetComponent<Renderer>();
             Material style = renderer && renderer.sharedMaterials.Length > 0 ? renderer.sharedMaterials[0] : null;
@@ -130,7 +132,7 @@ namespace LocalModels.VoxelBridge
                 var volume = new Texture3D(grid.Size.x, grid.Size.y, grid.Size.z,
                     UnityEngine.Experimental.Rendering.GraphicsFormat.R8G8B8A8_UNorm,
                     UnityEngine.Experimental.Rendering.TextureCreationFlags.None)
-                    { name = "FamilyOccupancy", filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
+                { name = "FamilyOccupancy", filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
                 volume.SetPixels32(pixels); volume.Apply(false, false);
                 AssetDatabase.CreateAsset(volume, folder + "/FamilyOccupancy.asset");
                 var material = new Material(shader) { name = "FamilySPOM" };
@@ -165,6 +167,8 @@ namespace LocalModels.VoxelBridge
                     chunk.AddComponent<MeshRenderer>().sharedMaterials = mesh.subMeshCount > 1 ? new[] { material, glass } : new[] { material };
                 }
                 VoxelRetainedGeometry.Attach(root.transform, metadata.retainedGeometryGuid);
+                foreach (var renderer in root.GetComponentsInChildren<Renderer>(true))
+                    renderer.rayTracingMode = UnityEngine.Experimental.Rendering.RayTracingMode.Off;
                 string path = folder + "/" + root.name + ".prefab";
                 if (!PrefabUtility.SaveAsPrefabAsset(root, path)) throw new IOException("Could not save the family SPOM copy.");
                 return path;

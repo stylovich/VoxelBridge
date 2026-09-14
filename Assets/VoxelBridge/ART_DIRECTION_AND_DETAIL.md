@@ -109,7 +109,23 @@ Límites del ensayo:
 - Las colisiones, la geometría exportada y el horneado no cambian. Cámara y luces deben permanecer fuera del soporte. El muestreo temporal, el rendimiento y Entities Graphics en ejecución requieren evaluación adicional; compilar DOTS Instancing no certifica esa integración.
 - El recorrido tiene un máximo de 64 celdas para un bloque de hasta 16 celdas por eje. Cada impacto utiliza planos analíticos para cerrar laterales y esquinas. Este coste adicional de fragmento y sombras no implica una optimización.
 
-La integración en edificios y chunks requiere información explícita de ocupación, límites y atributos vecinos, además de un soporte que cubra el volumen. Sustituir únicamente el shader no proporciona esos datos.
+La integración en edificios y chunks requiere información explícita de ocupación, límites y atributos vecinos, además de un soporte que cubra el volumen. El ensayo por familia descrito a continuación aporta esos datos para LOD0; sustituir únicamente el shader no los proporciona.
+
+### SPOM por familia LOD0 — copia de escena
+
+`Voxel Bridge/Experimental/VoxelWorldFamilySpom` utiliza el VOX semántico de una familia para construir un volumen compartido por todos sus chunks. Cada texel RGBA8 contiene ColorID, SurfaceID, seis indicadores de cara expuesta y ocupación opaca. Un límite de chunk no se considera una superficie exterior. El shader conserva los huecos de la geometría y consulta los atributos del voxel intersectado, no sólo los del triángulo que inició el rayo.
+
+Seleccionar una familia de producción activa, o uno de sus chunks, y ejecutar `Tools > Voxel Bridge > Experiments > Create Family SPOM Copy`. El comando genera assets independientes bajo `Prototypes/`, instancia una copia en la misma posición y desactiva la original. La escena no se guarda. La creación se agrupa en Undo; deshacerla restaura la instancia original, pero conserva los assets experimentales generados. Restaurar la original antes de preparar otra comparación sobre la misma instancia.
+
+El proceso lee LOD0 y reconstruye sus mallas de soporte con el mesher existente, sin voxelizar otra vez el modelo. No escribe en los VOX, prefabs ni paletas originales. El vidrio conserva su shader y la geometría retenida permanece separada. `FamilyColors` y `FamilySurfaces` son copias editables: regenerar sus LUT tras cambiar colores, BRDF o `Cell Height Variation`. Cambiar ocupación, IDs o clases de render requiere generar otra copia completa.
+
+Requisitos y límites:
+
+- Familia semántica vinculada a su VOX LOD0; escala mundial uno, sin reflexión ni cizallamiento. Cada material SPOM pertenece a su volumen: no compartirlo entre familias diferentes ni asignarlo directamente a otros modelos.
+- Máximo de 256 celdas por eje y ocho millones de celdas en la caja de datos. La ocupación utiliza cuatro bytes por celda, sin mipmaps; la memoria residente total y el coste GPU requieren medición.
+- Relieve fijo a la unidad voxel original, sin multiescala visual ni desvanecimiento. `Grid Enabled` o `Grid POM` permiten desactivar el ensayo; `Depth Offset` y `Conservative` deben permanecer activos para el trazado. La copia contiene sólo LOD0, sin selección automática de LOD.
+- Núcleos conectados en caras ocupadas y cubitos biselados en caras expuestas. Cámara y sombras consultan el mismo volumen; el recorrido está acotado por las dimensiones, con un máximo de 772 celdas. Las juntas entre SurfaceIDs distintos pueden tener profundidades diferentes.
+- Ensayo rasterizado: los renderers de la copia no participan en ray tracing. No añade colliders, no valida horneado y no certifica estabilidad temporal ni Entities Graphics en ejecución. Mantenerlo en una pieza piloto antes de extenderlo a la ciudad.
 
 ### Prototipo de comparación
 
