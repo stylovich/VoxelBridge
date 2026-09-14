@@ -7,6 +7,10 @@
 !/.gitignore
 !/.gitattributes
 !/README.md
+!/LICENSE
+!/CONTRIBUTING.md
+!/.github/
+!/.github/**
 
 # Portable Unity package content, including every required .meta file.
 !/Assets/
