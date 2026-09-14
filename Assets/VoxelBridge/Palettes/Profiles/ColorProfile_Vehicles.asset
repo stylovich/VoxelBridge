@@ -21,6 +21,6 @@ MonoBehaviour:
     lastId: 159
   - firstId: 192
     lastId: 223
-  additionalColorIds:
+  additionalColorIds: 
   warningDistance: 8
   maximumAutomaticDistance: 20

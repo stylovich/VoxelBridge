@@ -18,6 +18,6 @@ MonoBehaviour:
   allowedRanges:
   - firstId: 0
     lastId: 223
-  additionalColorIds:
+  additionalColorIds: 
   warningDistance: 8
   maximumAutomaticDistance: 20

@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: ColorProfile_Architecture
   m_EditorClassIdentifier: VoxelBridge.Editor::LocalModels.VoxelBridge.VoxelColorMappingProfile
   colorPalette: {fileID: 11400000, guid: 73df9e12f63f7c047aa4fa5b13dce18b, type: 2}
-  description: "Biblioteca no emisiva amplia con una selecci\xF3n reducida de acentos
+  description: "Biblioteca crom\xE1tica amplia con una selecci\xF3n reducida de acentos
     intensos. Recomendado para edificios, interiores y estructuras de fondo."
   allowedRanges:
   - firstId: 0

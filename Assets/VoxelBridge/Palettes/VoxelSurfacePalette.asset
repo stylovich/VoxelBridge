@@ -21,6 +21,7 @@ MonoBehaviour:
     emission: 0
     occlusionMultiplier: 1
     opacity: 0
+    cellHeightVariation: 0.25
   - id: 1
     displayName: Concrete
     renderClass: 0
@@ -29,6 +30,7 @@ MonoBehaviour:
     emission: 0
     occlusionMultiplier: 0.9
     opacity: 0
+    cellHeightVariation: 0.06
   - id: 2
     displayName: Fabric
     renderClass: 0
@@ -37,6 +39,7 @@ MonoBehaviour:
     emission: 0
     occlusionMultiplier: 0.95
     opacity: 0
+    cellHeightVariation: 0
   - id: 3
     displayName: Plastic Matte
     renderClass: 0
@@ -45,6 +48,7 @@ MonoBehaviour:
     emission: 0
     occlusionMultiplier: 1
     opacity: 0
+    cellHeightVariation: 0
   - id: 4
     displayName: Plastic Glossy
     renderClass: 0
@@ -53,6 +57,7 @@ MonoBehaviour:
     emission: 0
     occlusionMultiplier: 1
     opacity: 0
+    cellHeightVariation: 0
   - id: 5
     displayName: Painted Metal
     renderClass: 0
@@ -61,6 +66,7 @@ MonoBehaviour:
     emission: 0
     occlusionMultiplier: 1
     opacity: 0
+    cellHeightVariation: 0
   - id: 6
     displayName: Steel
     renderClass: 0
@@ -69,6 +75,7 @@ MonoBehaviour:
     emission: 0
     occlusionMultiplier: 1
     opacity: 0
+    cellHeightVariation: 0
   - id: 7
     displayName: Aluminum
     renderClass: 0
@@ -77,6 +84,7 @@ MonoBehaviour:
     emission: 0
     occlusionMultiplier: 1
     opacity: 0
+    cellHeightVariation: 0
   - id: 8
     displayName: Rubber
     renderClass: 0
@@ -85,6 +93,7 @@ MonoBehaviour:
     emission: 0
     occlusionMultiplier: 0.98
     opacity: 0
+    cellHeightVariation: 0
   - id: 9
     displayName: Wood
     renderClass: 0
@@ -93,6 +102,7 @@ MonoBehaviour:
     emission: 0
     occlusionMultiplier: 0.95
     opacity: 0
+    cellHeightVariation: 0
   - id: 10
     displayName: Ceramic
     renderClass: 0
@@ -101,6 +111,7 @@ MonoBehaviour:
     emission: 0
     occlusionMultiplier: 1
     opacity: 0
+    cellHeightVariation: 0
   - id: 11
     displayName: Screen
     renderClass: 0
@@ -109,6 +120,7 @@ MonoBehaviour:
     emission: 0.2
     occlusionMultiplier: 1
     opacity: 0
+    cellHeightVariation: 0
   - id: 12
     displayName: LED
     renderClass: 0
@@ -117,6 +129,7 @@ MonoBehaviour:
     emission: 0.6
     occlusionMultiplier: 1
     opacity: 0
+    cellHeightVariation: 0
   - id: 13
     displayName: Neon
     renderClass: 0
@@ -125,6 +138,7 @@ MonoBehaviour:
     emission: 1
     occlusionMultiplier: 1
     opacity: 0
+    cellHeightVariation: 0
   - id: 14
     displayName: Rough Metal
     renderClass: 0
@@ -133,6 +147,7 @@ MonoBehaviour:
     emission: 0
     occlusionMultiplier: 0.95
     opacity: 0
+    cellHeightVariation: 0
   - id: 15
     displayName: Polished Metal
     renderClass: 0
@@ -141,6 +156,7 @@ MonoBehaviour:
     emission: 0
     occlusionMultiplier: 1
     opacity: 0
+    cellHeightVariation: 0
   - id: 16
     displayName: Asphalt Dry
     renderClass: 0
@@ -149,6 +165,7 @@ MonoBehaviour:
     emission: 0
     occlusionMultiplier: 1
     opacity: 0
+    cellHeightVariation: 0
   - id: 17
     displayName: Brick
     renderClass: 0
@@ -157,6 +174,7 @@ MonoBehaviour:
     emission: 0
     occlusionMultiplier: 1
     opacity: 0
+    cellHeightVariation: 0
   - id: 18
     displayName: Plaster
     renderClass: 0
@@ -165,6 +183,7 @@ MonoBehaviour:
     emission: 0
     occlusionMultiplier: 1
     opacity: 0
+    cellHeightVariation: 0
   - id: 19
     displayName: Stone Rough
     renderClass: 0
@@ -173,6 +192,7 @@ MonoBehaviour:
     emission: 0
     occlusionMultiplier: 1
     opacity: 0
+    cellHeightVariation: 0
   - id: 20
     displayName: Stone Honed
     renderClass: 0
@@ -181,6 +201,7 @@ MonoBehaviour:
     emission: 0
     occlusionMultiplier: 1
     opacity: 0
+    cellHeightVariation: 0
   - id: 21
     displayName: Stone Polished
     renderClass: 0
@@ -189,6 +210,7 @@ MonoBehaviour:
     emission: 0
     occlusionMultiplier: 1
     opacity: 0
+    cellHeightVariation: 0
   - id: 22
     displayName: Concrete Sealed
     renderClass: 0
@@ -197,6 +219,7 @@ MonoBehaviour:
     emission: 0
     occlusionMultiplier: 1
     opacity: 0
+    cellHeightVariation: 0
   - id: 23
     displayName: Terracotta
     renderClass: 0
@@ -205,6 +228,7 @@ MonoBehaviour:
     emission: 0
     occlusionMultiplier: 1
     opacity: 0
+    cellHeightVariation: 0
   - id: 24
     displayName: Tile Satin
     renderClass: 0
@@ -213,6 +237,7 @@ MonoBehaviour:
     emission: 0
     occlusionMultiplier: 1
     opacity: 0
+    cellHeightVariation: 0
   - id: 25
     displayName: Wood Raw
     renderClass: 0
@@ -221,6 +246,7 @@ MonoBehaviour:
     emission: 0
     occlusionMultiplier: 1
     opacity: 0
+    cellHeightVariation: 0
   - id: 26
     displayName: Wood Oiled
     renderClass: 0
@@ -229,6 +255,7 @@ MonoBehaviour:
     emission: 0
     occlusionMultiplier: 1
     opacity: 0
+    cellHeightVariation: 0
   - id: 27
     displayName: Wood Varnished
     renderClass: 0
@@ -237,6 +264,7 @@ MonoBehaviour:
     emission: 0
     occlusionMultiplier: 1
     opacity: 0
+    cellHeightVariation: 0
   - id: 28
     displayName: Leather Matte
     renderClass: 0
@@ -245,6 +273,7 @@ MonoBehaviour:
     emission: 0
     occlusionMultiplier: 1
     opacity: 0
+    cellHeightVariation: 0
   - id: 29
     displayName: Leather Polished
     renderClass: 0
@@ -253,6 +282,7 @@ MonoBehaviour:
     emission: 0
     occlusionMultiplier: 1
     opacity: 0
+    cellHeightVariation: 0
   - id: 30
     displayName: Vinyl
     renderClass: 0
@@ -261,6 +291,7 @@ MonoBehaviour:
     emission: 0
     occlusionMultiplier: 1
     opacity: 0
+    cellHeightVariation: 0
   - id: 31
     displayName: Rubber Smooth
     renderClass: 0
@@ -269,6 +300,7 @@ MonoBehaviour:
     emission: 0
     occlusionMultiplier: 1
     opacity: 0
+    cellHeightVariation: 0
   - id: 32
     displayName: Plastic Satin
     renderClass: 0
@@ -277,6 +309,7 @@ MonoBehaviour:
     emission: 0
     occlusionMultiplier: 1
     opacity: 0
+    cellHeightVariation: 0
   - id: 33
     displayName: Paint Matte
     renderClass: 0
@@ -285,6 +318,7 @@ MonoBehaviour:
     emission: 0
     occlusionMultiplier: 1
     opacity: 0
+    cellHeightVariation: 0
   - id: 34
     displayName: Paint Satin
     renderClass: 0
@@ -293,6 +327,7 @@ MonoBehaviour:
     emission: 0
     occlusionMultiplier: 1
     opacity: 0
+    cellHeightVariation: 0
   - id: 35
     displayName: Paint Gloss
     renderClass: 0
@@ -301,6 +336,7 @@ MonoBehaviour:
     emission: 0
     occlusionMultiplier: 1
     opacity: 0
+    cellHeightVariation: 0
   - id: 36
     displayName: Metal Cast
     renderClass: 0
@@ -309,6 +345,7 @@ MonoBehaviour:
     emission: 0
     occlusionMultiplier: 1
     opacity: 0
+    cellHeightVariation: 0
   - id: 37
     displayName: Metal Satin
     renderClass: 0
@@ -317,6 +354,7 @@ MonoBehaviour:
     emission: 0
     occlusionMultiplier: 1
     opacity: 0
+    cellHeightVariation: 0
   - id: 38
     displayName: Metal Machined
     renderClass: 0
@@ -325,6 +363,7 @@ MonoBehaviour:
     emission: 0
     occlusionMultiplier: 1
     opacity: 0
+    cellHeightVariation: 0
   - id: 39
     displayName: Metal Mirror
     renderClass: 0
@@ -333,6 +372,7 @@ MonoBehaviour:
     emission: 0
     occlusionMultiplier: 1
     opacity: 0
+    cellHeightVariation: 0
   - id: 40
     displayName: Rust
     renderClass: 0
@@ -341,6 +381,7 @@ MonoBehaviour:
     emission: 0
     occlusionMultiplier: 1
     opacity: 0
+    cellHeightVariation: 0
   - id: 41
     displayName: Emissive Indicator
     renderClass: 0
@@ -349,6 +390,7 @@ MonoBehaviour:
     emission: 0.35
     occlusionMultiplier: 1
     opacity: 0
+    cellHeightVariation: 0
   - id: 42
     displayName: Emissive Panel
     renderClass: 0
@@ -357,6 +399,7 @@ MonoBehaviour:
     emission: 0.75
     occlusionMultiplier: 1
     opacity: 0
+    cellHeightVariation: 0
   - id: 43
     displayName: Emissive Tube
     renderClass: 0
@@ -365,6 +408,7 @@ MonoBehaviour:
     emission: 1
     occlusionMultiplier: 1
     opacity: 0
+    cellHeightVariation: 0
   - id: 44
     displayName: Glass
     renderClass: 2
@@ -373,6 +417,7 @@ MonoBehaviour:
     emission: 0
     occlusionMultiplier: 1
     opacity: 0.25
+    cellHeightVariation: 0
   retiredIds: 
   generatedLut: {fileID: 2800000, guid: af14a4934a593ec4bb81002b0900af49, type: 2}
-  generatedContentHash: 50cf67cb56d30d656d4efa4190721f98
+  generatedContentHash: e4c8d75c2e3a25d481f72ac759306b51

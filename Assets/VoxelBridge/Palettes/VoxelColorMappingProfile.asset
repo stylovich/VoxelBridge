@@ -10,16 +10,14 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: c8ff6a148cf72254d9345e2fad36c664, type: 3}
-  m_Name: ColorProfile_MutedNeon
+  m_Name: VoxelColorMappingProfile
   m_EditorClassIdentifier: VoxelBridge.Editor::LocalModels.VoxelBridge.VoxelColorMappingProfile
   colorPalette: {fileID: 11400000, guid: 73df9e12f63f7c047aa4fa5b13dce18b, type: 2}
-  description: "Base neutra, org\xE1nica y pastel con la banda completa de acentos
-    intensos. Recomendado para escenas apagadas con pantallas, LEDs, carteles o ne\xF3n."
+  description: Conjunto de colores globales permitidos durante el mapeo de archivos
+    .vox.
   allowedRanges:
   - firstId: 0
-    lastId: 31
-  - firstId: 128
-    lastId: 223
+    lastId: 255
   additionalColorIds: 
   warningDistance: 8
   maximumAutomaticDistance: 20
