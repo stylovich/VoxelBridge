@@ -73,16 +73,12 @@ float VoxelGridDistanceLevel(float cameraDistance, float startDistance, float tr
         0.0, floor(clamp(maxLevels, 0.0, 8.0)));
 }
 
-// Intersect a bounded ray with the same filtered procedural bevel height field.
+// Intersect a supplied ray with the same filtered procedural bevel height field.
 // xy: hit coordinates, z: normalized hit depth. No textures, clipping or depth-buffer writes.
-float3 VoxelGridParallax(float2 q, float2 footprint, float jointWidth, float bevelWidth,
-    float depthInCells, float3 viewInGrid, float jointDepth, float variation,
+float3 VoxelGridTraceHeight(float2 q, float2 footprint, float jointWidth, float bevelWidth,
+    float2 ray, float jointDepth, float variation,
     float3 planeCell, float3 cellU, float3 cellV)
 {
-    if (depthInCells <= 0.000001 || viewInGrid.z <= 0.12) return float3(q, 0);
-    float2 ray = -viewInGrid.xy / max(viewInGrid.z, 0.12) * depthInCells;
-    float rayLength = length(ray);
-    ray *= min(1.0, 0.2 / max(rayLength, 0.000001));
     // Using the existing height output keeps the POM shape identical to the normals.
     float total = max(min(0.25, max(jointDepth, 0.0) + max(variation, 0.0)), 0.000001);
     if (-VoxelGridVariedBevel(q, footprint, jointWidth, bevelWidth, jointDepth, variation, planeCell, cellU, cellV).w / total <= 0.000001)
@@ -105,6 +101,17 @@ float3 VoxelGridParallax(float2 q, float2 footprint, float jointWidth, float bev
     }
     float hit = (lo + hi) * 0.5;
     return float3(q + ray * hit, hit);
+}
+
+float3 VoxelGridParallax(float2 q, float2 footprint, float jointWidth, float bevelWidth,
+    float depthInCells, float3 viewInGrid, float jointDepth, float variation,
+    float3 planeCell, float3 cellU, float3 cellV)
+{
+    if (depthInCells <= 0.000001 || viewInGrid.z <= 0.12) return float3(q, 0);
+    float2 ray = -viewInGrid.xy / max(viewInGrid.z, 0.12) * depthInCells;
+    ray *= min(1.0, 0.2 / max(length(ray), 0.000001));
+    return VoxelGridTraceHeight(q, footprint, jointWidth, bevelWidth, ray,
+        jointDepth, variation, planeCell, cellU, cellV);
 }
 
 float3 VoxelGridParallax(float2 q, float2 footprint, float jointWidth, float bevelWidth,
@@ -192,13 +199,17 @@ void VoxelGridDetailDepth_float(float3 Position, float3 Normal, float3 Tangent, 
         float3 gridLight = float3(dot(lightView, u), dot(lightView, v), ndotl);
         float normalDepth = min((clamp(JointDepth, 0.0, 0.25) + variation) * max(CellSize, 0.001),
             clamp(PomMaxDepth, 0.0, 0.01)) * weight;
-        normalDepth = min(normalDepth,
-            0.2 * max(CellSize, 0.001) * max(ndotl, 0.12) / max(length(gridLight.xy), 0.000001));
         // Camera-distance/derivative fades only flatten the receiver toward the original face.
         // Keeping the physical caster unfaded prevents shadow resolution from flattening it in front of that receiver.
-        float3 hit = VoxelGridParallax(q, float2(0.0001, 0.0001), JointWidth, BevelWidth,
-            normalDepth / max(CellSize, 0.001), gridLight, JointDepth, variation, planeCell, cellU, cellV);
-        DepthOffset = VoxelGridRayDepth(hit.z, normalDepth, ndotl);
+        if (ndotl > 0.12 && normalDepth > 0.000001)
+        {
+            // The camera's 0.2-cell lateral cap must not flatten a caster illuminated obliquely.
+            // Trace the full light ray: <= 0.25 cell normal depth and ndotl > 0.12 bound it to < 2.1 cells.
+            float2 lightRay = -gridLight.xy / ndotl * (normalDepth / max(CellSize, 0.001));
+            float3 hit = VoxelGridTraceHeight(q, float2(0.0001, 0.0001), JointWidth, BevelWidth,
+                lightRay, JointDepth, variation, planeCell, cellU, cellV);
+            DepthOffset = VoxelGridRayDepth(hit.z, normalDepth, ndotl);
+        }
     }
     #endif
 #elif !defined(SHADERPASS) || (SHADERPASS != SHADERPASS_LIGHT_TRANSPORT)

@@ -384,6 +384,35 @@ namespace LocalModels.VoxelBridge.Tests
             Assert.That(back.Max(p => p.r), Is.Zero);
         }
 
+        [TestCase(60)]
+        [TestCase(65)]
+        public void ShadowDepth_MaxVariationDoesNotFlattenUnderObliqueLight(float angle)
+        {
+            var normal = Render(depthWrite: true, shadowPass: true, pom: 1, profile: 1,
+                variation: .25f, pomMaxDepth: .01f, view: Vector3.back);
+            float cosine = Mathf.Cos(angle * Mathf.Deg2Rad);
+            var oblique = Render(depthWrite: true, shadowPass: true, pom: 1, profile: 1,
+                variation: .25f, pomMaxDepth: .01f, view: new Vector3(Mathf.Sin(angle * Mathf.Deg2Rad), 0, -cosine));
+            int compared = 0;
+            for (int y = 0; y < 64; y++)
+            for (int x = 0; x < 64; x++)
+            {
+                // The fixture spans eight cells. At these interior samples, a shallow top remains
+                // on the same flat face throughout the light ray; its normal depth must be unchanged.
+                if ((x % 8 != 3 && x % 8 != 4) || (y % 8 != 3 && y % 8 != 4)) continue;
+                int i = y * 64 + x;
+                if (normal[i].r <= .0002f || normal[i].r >= .0025f) continue;
+                Assert.That(oblique[i].r * cosine, Is.EqualTo(normal[i].r).Within(.00003f));
+                compared++;
+            }
+            Assert.That(compared, Is.GreaterThan(20));
+            foreach (var pixel in oblique)
+            {
+                Assert.That(float.IsFinite(pixel.r), Is.True);
+                Assert.That(pixel.r * cosine, Is.InRange(0, .03125f * .25f + .00001f));
+            }
+        }
+
         [Test]
         public void DepthWrite_CoarseVisualLevelHasNoOffset()
         {

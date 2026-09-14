@@ -11,7 +11,8 @@ namespace LocalModels.VoxelBridge.Tests
     {
         // Isolated rendering; no persistent scene, material, pipeline or light changes.
         internal static Texture2D Render(bool depthWrite, bool castSelf, int resolution = 2048,
-            bool blocker = false, bool directional = false, float orbit = 0)
+            bool blocker = false, bool directional = false, float orbit = 0,
+            float variation = .04f, float lightAngle = 20)
         {
             var preview = new PreviewRenderUtility();
             Material material = null;
@@ -29,7 +30,7 @@ namespace LocalModels.VoxelBridge.Tests
                 colors.SetPixels(Enumerable.Repeat(new Color(.4f, .4f, .4f, 1), 256).ToArray()); colors.Apply();
                 surfaces = new Texture2D(256, 2, TextureFormat.RGBA32, false, true) { filterMode = FilterMode.Point };
                 surfaces.SetPixels(Enumerable.Repeat(new Color(0, .3f, 0, 1), 256)
-                    .Concat(Enumerable.Repeat(new Color(.04f / .25f, 0, 0, 0), 256)).ToArray()); surfaces.Apply();
+                    .Concat(Enumerable.Repeat(new Color(variation / .25f, 0, 0, 0), 256)).ToArray()); surfaces.Apply();
                 material.SetTexture("_PaletteColor", colors); material.SetTexture("_PaletteSurface", surfaces);
                 material.SetFloat("_EmissionIntensity", 0);
                 preview.ambientColor = Color.black;
@@ -95,7 +96,7 @@ namespace LocalModels.VoxelBridge.Tests
                     light.type = directional ? LightType.Directional : LightType.Spot; light.spotAngle = 90; light.range = 10;
                     light.lightUnit = directional ? LightUnit.Lux : LightUnit.Candela; light.intensity = directional ? 2 : 5;
                     light.color = Color.white; light.useColorTemperature = false; light.shadows = LightShadows.Soft;
-                    light.transform.position = new Vector3(-.5f, .2f, -1.4f);
+                    light.transform.position = new Vector3(-1.4f * Mathf.Tan(lightAngle * Mathf.Deg2Rad), .2f, -1.4f);
                     light.transform.rotation = Quaternion.LookRotation(-light.transform.position);
                     hd.normalBias = .75f; hd.slopeBias = .5f; hd.SetShadowResolution(resolution);
                     hd.SetShadowResolutionOverride(true);
@@ -159,6 +160,39 @@ namespace LocalModels.VoxelBridge.Tests
                 actual = Render(true, true, 4096, blocker: true, directional: directional);
                 Assert.That(reference.GetPixels().Zip(actual.GetPixels(), (x, y) => x.r - y.r > .1f).Count(d => d),
                     Is.GreaterThan(1000), "Fixing self-shadow acne must not disable shadow reception or casting.");
+            }
+            finally { if (reference) Object.DestroyImmediate(reference); if (actual) Object.DestroyImmediate(actual); }
+        }
+
+        [TestCase(2048, 55)]
+        [TestCase(4096, 55)]
+        [TestCase(2048, 65)]
+        [TestCase(4096, 65)]
+        public void DepthRelief_MaxVariationKeepsFlatInteriorsFreeOfAcne(int resolution, float angle)
+        {
+            Texture2D reference = null, actual = null;
+            try
+            {
+                reference = Render(true, false, resolution, directional: true, variation: .25f, lightAngle: angle);
+                actual = Render(true, true, resolution, directional: true, variation: .25f, lightAngle: angle);
+                int compared = 0;
+                float error = 0;
+                for (int y = 0; y < 256; y++)
+                for (int x = 0; x < 256; x++)
+                {
+                    // Intersect the fixed fixture camera's ray with the wall's front plane.
+                    // Compare only cell centres: deeper relief can legitimately shadow neighbouring bevels.
+                    float extent = 1.775f * Mathf.Tan(25 * Mathf.Deg2Rad);
+                    float cellX = Mathf.Repeat(((x + .5f) / 256 * 2 - 1) * extent / .0625f, 1);
+                    float cellY = Mathf.Repeat(((y + .5f) / 256 * 2 - 1) * extent / .0625f, 1);
+                    if (cellX < .45f || cellX > .55f || cellY < .45f || cellY > .55f) continue;
+                    float expected = reference.GetPixel(x, y).r;
+                    if (expected <= .1f || expected >= .95f) continue;
+                    error += Mathf.Abs(expected - actual.GetPixel(x, y).r);
+                    compared++;
+                }
+                Assert.That(compared, Is.GreaterThan(250), "Require lit, unsaturated cell interiors.");
+                Assert.That(error / compared, Is.LessThan(.001f), "The shadow's lateral cap must not flatten recessed cell tops.");
             }
             finally { if (reference) Object.DestroyImmediate(reference); if (actual) Object.DestroyImmediate(actual); }
         }
